@@ -17,7 +17,7 @@ A CLI for [Extend](https://extend.ai).
 
 Optional:
 
-    export EXTEND_BASE_URL=https://api.extend.ai   # override base URL
+    export EXTEND_REGION=us                        # us | us2 | eu (default: us)
     export EXTEND_WORKSPACE_ID=ws_xxx              # for org-scoped keys
 
 ## Examples

@@ -40,7 +40,7 @@ Authenticate by setting EXTEND_API_KEY in your environment:
 Environment variables:
   EXTEND_API_KEY         API key (required)
   EXTEND_BASE_URL        Override base URL (e.g. https://api.extend.ai)
-  EXTEND_REGION          Region: us|us2 (ignored if EXTEND_BASE_URL is set)
+  EXTEND_REGION          Region: us|us2|eu (ignored if EXTEND_BASE_URL is set)
   EXTEND_WORKSPACE_ID    Workspace ID for org-scoped API keys
   EXTEND_API_VERSION     Pin the API version sent with each request
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
@@ -60,7 +60,7 @@ The --workspace and --region flags override their respective env vars.`,
 	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (default: command-specific)")
 	root.PersistentFlags().StringVar(&app.JQ, "jq", "", "Filter output with a jq expression")
 	root.PersistentFlags().StringVar(&app.Workspace, "workspace", "", "Workspace ID for org-scoped API keys (or EXTEND_WORKSPACE_ID)")
-	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2 (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
+	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 
 	app.NewClient = func() (*client.Client, error) {
 		key := os.Getenv("EXTEND_API_KEY")

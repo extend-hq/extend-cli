@@ -38,6 +38,7 @@ func New(apiKey string) *Client {
 var Regions = map[string]string{
 	"us":  "https://api.extend.ai",
 	"us2": "https://api.us2.extend.app",
+	"eu":  "https://api.eu1.extend.ai",
 }
 
 func RegionBaseURL(region string) (string, bool) {
@@ -46,7 +47,7 @@ func RegionBaseURL(region string) (string, bool) {
 }
 
 func KnownRegions() []string {
-	return []string{"us", "us2"}
+	return []string{"us", "us2", "eu"}
 }
 
 type APIError struct {
