@@ -80,18 +80,8 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 				}
 				opts.PageToken = next
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				var raw any = pages
-				if len(pages) == 1 {
-					raw = pages[0]
-				}
-				return renderWithDefault(app, raw, output.FormatJSON)
-			}
-			if len(rows) == 0 {
-				fmt.Fprintf(app.IO.Out, "No %s.\n", a.pluralNoun)
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"id", "name", "created"}, rows)
+			return renderList(app, pages, []string{"id", "name", "created"}, rows,
+				fmt.Sprintf("No %s.", a.pluralNoun))
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
@@ -138,18 +128,11 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				return renderWithDefault(app, items, output.FormatJSON)
-			}
 			rows := make([][]string, 0, len(items))
 			for _, v := range items {
 				rows = append(rows, a.verRowFn(v))
 			}
-			if len(rows) == 0 {
-				fmt.Fprintln(app.IO.Out, "No versions.")
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"version", "id", "created"}, rows)
+			return renderList(app, []any{items}, []string{"version", "id", "created"}, rows, "No versions.")
 		},
 	})
 	cmd.AddCommand(&cobra.Command{

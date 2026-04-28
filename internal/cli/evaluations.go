@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -52,18 +51,7 @@ func newEvaluationsListCommand(app *App) *cobra.Command {
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				var raw any = pages
-				if len(pages) == 1 {
-					raw = pages[0]
-				}
-				return renderWithDefault(app, raw, output.FormatJSON)
-			}
-			if len(rows) == 0 {
-				fmt.Fprintln(app.IO.Out, "No evaluation sets.")
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"id", "name", "created"}, rows)
+			return renderList(app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
@@ -168,18 +156,7 @@ func newEvaluationItemsListCommand(app *App) *cobra.Command {
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				var raw any = pages
-				if len(pages) == 1 {
-					raw = pages[0]
-				}
-				return renderWithDefault(app, raw, output.FormatJSON)
-			}
-			if len(rows) == 0 {
-				fmt.Fprintln(app.IO.Out, "No items.")
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"id", "file"}, rows)
+			return renderList(app, pages, []string{"id", "file"}, rows, "No items.")
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")

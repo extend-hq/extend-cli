@@ -91,3 +91,55 @@ func TestFilesDownload_ToStdout(t *testing.T) {
 		t.Errorf("stdout = %q, want abc", got)
 	}
 }
+
+// TestFilesList_TableFormatRendersTable is a regression test for the bug
+// where `extend files list -o table` returned an error from output.Render
+// instead of producing a table. Before the fix the code path would
+// short-circuit into renderWithDefault → output.Render(FormatTable) which
+// errors with "table format requires RenderTable, not Render".
+func TestFilesList_TableFormatRendersTable(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"data": []map[string]any{
+				{"id": "file_a", "name": "doc.pdf", "type": "PDF", "createdAt": "2025-01-01T00:00:00Z"},
+				{"id": "file_b", "name": "img.png", "type": "PNG", "createdAt": "2025-01-02T00:00:00Z"},
+			},
+		})
+	})
+	ta := newTestApp(t, srv)
+	ta.app.Format = "table"
+	if err := runFilesList(context.Background(), ta.app, 20, false, "desc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	out := ta.out.String()
+	for _, want := range []string{"ID", "NAME", "TYPE", "CREATED", "file_a", "file_b", "doc.pdf", "img.png"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestFilesList_MarkdownFormatRendersTable is a regression test for the bug
+// where `extend files list -o markdown` returned "unsupported format"
+// because the renderWithDefault path delegated to output.Render which only
+// knows json/yaml/raw/id.
+func TestFilesList_MarkdownFormatRendersTable(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"data": []map[string]any{
+				{"id": "file_a", "name": "doc.pdf", "type": "PDF", "createdAt": "2025-01-01T00:00:00Z"},
+			},
+		})
+	})
+	ta := newTestApp(t, srv)
+	ta.app.Format = "markdown"
+	if err := runFilesList(context.Background(), ta.app, 20, false, "desc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	out := ta.out.String()
+	for _, want := range []string{"| ID | NAME | TYPE | CREATED |", "| --- | --- | --- | --- |", "| file_a |"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("markdown output missing %q:\n%s", want, out)
+		}
+	}
+}

@@ -338,15 +338,12 @@ func runRunsList(ctx context.Context, app *App, runType, status, batchID string,
 		SortDir: sortDir,
 	}
 
-	rows, raw, err := collectListRows(ctx, cli, kind, opts, all)
+	rows, pages, err := collectListRows(ctx, cli, kind, opts, all)
 	if err != nil {
 		return err
 	}
 
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
-		return renderWithDefault(app, raw, output.FormatJSON)
-	}
-	return output.RenderTable(app.IO.Out, []string{"id", "status", "processor", "created"}, rows)
+	return renderList(app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
 }
 
 func parseRunKind(s string) (client.RunKind, error) {
@@ -367,7 +364,7 @@ func parseRunKind(s string) (client.RunKind, error) {
 	return "", fmt.Errorf("unknown run type %q (want extract|parse|classify|split|workflow|edit)", s)
 }
 
-func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKind, opts client.ListRunsOptions, all bool) ([][]string, any, error) {
+func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKind, opts client.ListRunsOptions, all bool) ([][]string, []any, error) {
 	var rows [][]string
 	var rawPages []any
 	for {
@@ -436,9 +433,6 @@ func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKin
 			break
 		}
 		opts.PageToken = pageToken
-	}
-	if len(rawPages) == 1 {
-		return rows, rawPages[0], nil
 	}
 	return rows, rawPages, nil
 }

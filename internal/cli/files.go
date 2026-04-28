@@ -104,18 +104,7 @@ func runFilesList(ctx context.Context, app *App, limit int, all bool, sortDir st
 		opts.PageToken = page.NextPageToken
 	}
 
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
-		var raw any = pages
-		if len(pages) == 1 {
-			raw = pages[0]
-		}
-		return renderWithDefault(app, raw, output.FormatJSON)
-	}
-	if len(rows) == 0 {
-		fmt.Fprintln(app.IO.Out, "No files.")
-		return nil
-	}
-	return output.RenderTable(app.IO.Out, []string{"id", "name", "type", "created"}, rows)
+	return renderList(app, pages, []string{"id", "name", "type", "created"}, rows, "No files.")
 }
 
 func truncate(s string, max int) string {

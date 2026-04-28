@@ -162,3 +162,29 @@ func TestRenderTableRejectedByRender(t *testing.T) {
 		t.Error("Render(FormatTable, ...) must error; callers should use RenderTable")
 	}
 }
+
+func TestRenderMarkdownTable(t *testing.T) {
+	var buf bytes.Buffer
+	err := RenderMarkdownTable(&buf, []string{"id", "status"}, [][]string{
+		{"run_abc", "PROCESSED"},
+		{"run_xyz", "FAILED"},
+	})
+	if err != nil {
+		t.Fatalf("RenderMarkdownTable: %v", err)
+	}
+	got := buf.String()
+	want := "| ID | STATUS |\n| --- | --- |\n| run_abc | PROCESSED |\n| run_xyz | FAILED |\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestRenderMarkdownTable_EmptyHeadersIsNoOp(t *testing.T) {
+	var buf bytes.Buffer
+	if err := RenderMarkdownTable(&buf, nil, nil); err != nil {
+		t.Fatalf("RenderMarkdownTable: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected empty output for nil headers, got %q", buf.String())
+	}
+}

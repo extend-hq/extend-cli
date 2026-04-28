@@ -231,3 +231,33 @@ func RenderTable(w io.Writer, headers []string, rows [][]string) error {
 	}
 	return tw.Flush()
 }
+
+// RenderMarkdownTable writes a GitHub-flavored pipe table: a header row,
+// a `--- | ---` separator, then one row per record. Headers are uppercased
+// to match RenderTable's tabwriter output. Cells are written verbatim;
+// callers should pre-escape any literal `|` characters.
+func RenderMarkdownTable(w io.Writer, headers []string, rows [][]string) error {
+	if len(headers) == 0 {
+		return nil
+	}
+	upper := make([]string, len(headers))
+	for i, h := range headers {
+		upper[i] = strings.ToUpper(h)
+	}
+	if _, err := fmt.Fprintf(w, "| %s |\n", strings.Join(upper, " | ")); err != nil {
+		return err
+	}
+	sep := make([]string, len(headers))
+	for i := range sep {
+		sep[i] = "---"
+	}
+	if _, err := fmt.Fprintf(w, "| %s |\n", strings.Join(sep, " | ")); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if _, err := fmt.Fprintf(w, "| %s |\n", strings.Join(row, " | ")); err != nil {
+			return err
+		}
+	}
+	return nil
+}

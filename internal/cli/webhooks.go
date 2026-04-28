@@ -68,18 +68,7 @@ func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				var raw any = pages
-				if len(pages) == 1 {
-					raw = pages[0]
-				}
-				return renderWithDefault(app, raw, output.FormatJSON)
-			}
-			if len(rows) == 0 {
-				fmt.Fprintln(app.IO.Out, "No webhook endpoints.")
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"id", "name", "url", "created"}, rows)
+			return renderList(app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
@@ -352,18 +341,7 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			if app.Format != "" || !app.IO.IsStdoutTTY() {
-				var raw any = pages
-				if len(pages) == 1 {
-					raw = pages[0]
-				}
-				return renderWithDefault(app, raw, output.FormatJSON)
-			}
-			if len(rows) == 0 {
-				fmt.Fprintln(app.IO.Out, "No webhook subscriptions.")
-				return nil
-			}
-			return output.RenderTable(app.IO.Out, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows)
+			return renderList(app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
