@@ -301,7 +301,7 @@ func (c *Client) CancelWorkflowRun(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListWorkflowRuns(ctx context.Context, opts ListRunsOptions) (*ListResponse[*WorkflowRun], error) {
-	return listRuns[*WorkflowRun](ctx, c, "/workflow_runs", opts)
+	return listRuns[*WorkflowRun](ctx, c, KindWorkflow, "/workflow_runs", opts)
 }
 
 func (c *Client) UpdateWorkflowRun(ctx context.Context, id string, body json.RawMessage) (*WorkflowRun, error) {

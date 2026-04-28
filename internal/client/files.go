@@ -7,8 +7,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -208,11 +210,27 @@ func jsonDecode(r io.Reader, v any) error {
 	return decodeJSON(body, v)
 }
 
+// ListFilesOptions is the wire shape for GET /files. The server's
+// ListFilesParamsSchema accepts only nameContains/sortDir/paging — the
+// schema's `sortBy` field is hardcoded to "createdAt" so the CLI doesn't
+// expose it. (See the v2026-02-09 server schema, not the public OpenAPI
+// doc, which is incomplete.)
 type ListFilesOptions struct {
-	Limit     int
-	PageToken string
-	SortBy    string
-	SortDir   string
+	NameContains string
+	SortDir      string
+	Limit        int
+	PageToken    string
+}
+
+func (o ListFilesOptions) query() string {
+	v := url.Values{}
+	setIf(v, "nameContains", o.NameContains)
+	setIf(v, "sortDir", o.SortDir)
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	return encodeQuery(v)
 }
 
 // GetFileOptions controls which structured contents the server should
@@ -257,14 +275,8 @@ func fileGetQuery(opts GetFileOptions) string {
 }
 
 func (c *Client) ListFiles(ctx context.Context, opts ListFilesOptions) (*ListResponse[*File], error) {
-	q := ListRunsOptions{
-		Limit:     opts.Limit,
-		PageToken: opts.PageToken,
-		SortBy:    opts.SortBy,
-		SortDir:   opts.SortDir,
-	}.query()
 	var out ListResponse[*File]
-	if err := c.getJSON(ctx, "/files"+q, &out); err != nil {
+	if err := c.getJSON(ctx, "/files"+opts.query(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

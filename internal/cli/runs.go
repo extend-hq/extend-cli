@@ -292,53 +292,99 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 
 func newRunsListCommand(app *App) *cobra.Command {
 	var (
-		runType string
-		status  string
-		batchID string
-		limit   int
-		all     bool
-		sortDir string
+		runType     string
+		status      string
+		using       string
+		batchID     string
+		source      string
+		sourceID    string
+		fileName    string
+		limit       int
+		all         bool
+		sortBy      string
+		sortDir     string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List runs of a given processor type",
+		Long: `List runs for a given processor type. Most filter flags map directly to
+documented query parameters on the run-list endpoints; the wire shape varies
+slightly by type (e.g. parse runs ignore --using, --sort-by, and --sort;
+workflow runs ignore --source and --source-id).`,
 		Example: `  extend runs list --type extract
-  extend runs list --type classify --status PROCESSED --limit 10
+  extend runs list --type extract --using ex_abc --status PROCESSED
+  extend runs list --type workflow --using workflow_abc --file-name invoice
+  extend runs list --type extract --source WORKFLOW_RUN --source-id workflow_run_x
   extend runs list --type extract --batch bpr_xK9mLPq --all
-  extend runs list --type extract --all -o json | jq '.data[].id'`,
+  extend runs list --type extract --sort-by updatedAt --sort asc`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsList(cmd.Context(), app, runType, status, batchID, limit, all, sortDir)
+			return runRunsList(cmd.Context(), app, runsListParams{
+				runType:  runType,
+				status:   status,
+				using:    using,
+				batchID:  batchID,
+				source:   source,
+				sourceID: sourceID,
+				fileName: fileName,
+				limit:    limit,
+				all:      all,
+				sortBy:   sortBy,
+				sortDir:  sortDir,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (required)")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED")
+	cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
 	cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_... or bpar_...)")
+	cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
+	cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
+	cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to return per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every run matching filters")
-	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (by createdAt)")
+	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
 	_ = cmd.MarkFlagRequired("type")
 	return cmd
 }
 
-func runRunsList(ctx context.Context, app *App, runType, status, batchID string, limit int, all bool, sortDir string) error {
+type runsListParams struct {
+	runType  string
+	status   string
+	using    string
+	batchID  string
+	source   string
+	sourceID string
+	fileName string
+	limit    int
+	all      bool
+	sortBy   string
+	sortDir  string
+}
+
+func runRunsList(ctx context.Context, app *App, p runsListParams) error {
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
 	}
-	kind, err := parseRunKind(runType)
+	kind, err := parseRunKind(p.runType)
 	if err != nil {
 		return err
 	}
 
 	opts := client.ListRunsOptions{
-		Status:  status,
-		BatchID: batchID,
-		Limit:   limit,
-		SortBy:  "createdAt",
-		SortDir: sortDir,
+		Status:           p.status,
+		ProcessorID:      p.using,
+		BatchID:          p.batchID,
+		Source:           p.source,
+		SourceID:         p.sourceID,
+		FileNameContains: p.fileName,
+		Limit:            p.limit,
+		SortBy:           p.sortBy,
+		SortDir:          p.sortDir,
 	}
 
-	rows, pages, err := collectListRows(ctx, cli, kind, opts, all)
+	rows, pages, err := collectListRows(ctx, cli, kind, opts, p.all)
 	if err != nil {
 		return err
 	}

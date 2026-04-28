@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -66,7 +67,28 @@ type UpdateWebhookEndpointInput struct {
 	AdvancedOptions *WebhookAdvancedOptions `json:"advancedOptions,omitempty"`
 }
 
-func (c *Client) ListWebhookEndpoints(ctx context.Context, opts ListProcessorsOptions) (*ListResponse[*WebhookEndpoint], error) {
+// ListWebhookEndpointsOptions is the wire shape for GET /webhook_endpoints.
+// The endpoint accepts a `status` filter (enabled|disabled) but no sortBy —
+// only sortDir.
+type ListWebhookEndpointsOptions struct {
+	Status    string
+	SortDir   string
+	Limit     int
+	PageToken string
+}
+
+func (o ListWebhookEndpointsOptions) query() string {
+	v := url.Values{}
+	setIf(v, "status", o.Status)
+	setIf(v, "sortDir", o.SortDir)
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	return encodeQuery(v)
+}
+
+func (c *Client) ListWebhookEndpoints(ctx context.Context, opts ListWebhookEndpointsOptions) (*ListResponse[*WebhookEndpoint], error) {
 	var out ListResponse[*WebhookEndpoint]
 	if err := c.getJSON(ctx, "/webhook_endpoints"+opts.query(), &out); err != nil {
 		return nil, err
@@ -136,7 +158,30 @@ type UpdateWebhookSubscriptionInput struct {
 	EnabledEvents []string `json:"enabledEvents"`
 }
 
-func (c *Client) ListWebhookSubscriptions(ctx context.Context, opts ListProcessorsOptions) (*ListResponse[*WebhookSubscription], error) {
+// ListWebhookSubscriptionsOptions is the wire shape for GET
+// /webhook_subscriptions. Filters by either webhookEndpointId or resourceId
+// (or both); no sortBy, only sortDir per server schema.
+type ListWebhookSubscriptionsOptions struct {
+	WebhookEndpointID string
+	ResourceID        string
+	SortDir           string
+	Limit             int
+	PageToken         string
+}
+
+func (o ListWebhookSubscriptionsOptions) query() string {
+	v := url.Values{}
+	setIf(v, "webhookEndpointId", o.WebhookEndpointID)
+	setIf(v, "resourceId", o.ResourceID)
+	setIf(v, "sortDir", o.SortDir)
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	return encodeQuery(v)
+}
+
+func (c *Client) ListWebhookSubscriptions(ctx context.Context, opts ListWebhookSubscriptionsOptions) (*ListResponse[*WebhookSubscription], error) {
 	var out ListResponse[*WebhookSubscription]
 	if err := c.getJSON(ctx, "/webhook_subscriptions"+opts.query(), &out); err != nil {
 		return nil, err

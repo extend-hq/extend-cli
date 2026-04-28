@@ -24,17 +24,30 @@ func newEvaluationsCommand(app *App) *cobra.Command {
 }
 
 func newEvaluationsListCommand(app *App) *cobra.Command {
-	var limit int
-	var all bool
+	var (
+		entity  string
+		sortBy  string
+		sortDir string
+		limit   int
+		all     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List evaluation sets",
+		Example: `  extend evaluations list
+  extend evaluations list --entity ex_abc --sort-by updatedAt
+  extend evaluations list --all -o id`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{Limit: limit, SortBy: "createdAt", SortDir: "desc"}
+			opts := client.ListEvaluationSetsOptions{
+				EntityID: entity,
+				SortBy:   sortBy,
+				SortDir:  sortDir,
+				Limit:    limit,
+			}
 			var rows [][]string
 			var pages []any
 			for {
@@ -54,6 +67,9 @@ func newEvaluationsListCommand(app *App) *cobra.Command {
 			return renderList(app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
 		},
 	}
+	cmd.Flags().StringVar(&entity, "entity", "", "Filter by extractor/classifier/splitter ID (ex_/cl_/spl_)")
+	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
 	return cmd
@@ -124,8 +140,12 @@ func newEvaluationItemsCommand(app *App) *cobra.Command {
 }
 
 func newEvaluationItemsListCommand(app *App) *cobra.Command {
-	var limit int
-	var all bool
+	var (
+		sortBy  string
+		sortDir string
+		limit   int
+		all     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list <evaluation-set-id>",
 		Short: "List items in an evaluation set",
@@ -135,7 +155,11 @@ func newEvaluationItemsListCommand(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{Limit: limit, SortBy: "createdAt", SortDir: "desc"}
+			opts := client.ListProcessorsOptions{
+				Limit:   limit,
+				SortBy:  sortBy,
+				SortDir: sortDir,
+			}
 			var rows [][]string
 			var pages []any
 			for {
@@ -159,6 +183,8 @@ func newEvaluationItemsListCommand(app *App) *cobra.Command {
 			return renderList(app, pages, []string{"id", "file"}, rows, "No items.")
 		},
 	}
+	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
 	return cmd

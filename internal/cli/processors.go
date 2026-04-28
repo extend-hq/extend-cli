@@ -20,7 +20,7 @@ type processorAccessor[T any, V any] struct {
 	rowFields   func(T) []string
 	listFn      func(context.Context, *client.Client, client.ListProcessorsOptions) ([]T, string, error)
 	getFn       func(context.Context, *client.Client, string) (T, error)
-	listVerFn   func(context.Context, *client.Client, string) ([]V, error)
+	listVerFn   func(context.Context, *client.Client, string, client.ListProcessorVersionsOptions) ([]V, string, error)
 	getVerFn    func(context.Context, *client.Client, string, string) (V, error)
 	verRowFn    func(V) []string
 	createFn    func(context.Context, *client.Client, json.RawMessage) (T, error)
@@ -47,9 +47,10 @@ func (a processorAccessor[T, V]) cmd(app *App) *cobra.Command {
 
 func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 	var (
+		sortBy  string
+		sortDir string
 		limit   int
 		all     bool
-		sortDir string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -61,7 +62,7 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 			}
 			opts := client.ListProcessorsOptions{
 				Limit:   limit,
-				SortBy:  "createdAt",
+				SortBy:  sortBy,
 				SortDir: sortDir,
 			}
 			var rows [][]string
@@ -84,9 +85,10 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 				fmt.Sprintf("No %s.", a.pluralNoun))
 		},
 	}
+	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every result")
-	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	return cmd
 }
 
@@ -115,7 +117,12 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 		Use:   "versions",
 		Short: fmt.Sprintf("List or inspect versions of %s %s", articleFor(a.noun), a.noun),
 	}
-	cmd.AddCommand(&cobra.Command{
+	var (
+		verSortDir string
+		verLimit   int
+		verAll     bool
+	)
+	listCmd := &cobra.Command{
 		Use:   fmt.Sprintf("list <%s-id>", a.noun),
 		Short: fmt.Sprintf("List versions of %s %s", articleFor(a.noun), a.noun),
 		Args:  cobra.ExactArgs(1),
@@ -124,17 +131,35 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items, err := a.listVerFn(cmd.Context(), cli, args[0])
-			if err != nil {
-				return err
+			opts := client.ListProcessorVersionsOptions{
+				SortDir: verSortDir,
+				Limit:   verLimit,
 			}
-			rows := make([][]string, 0, len(items))
-			for _, v := range items {
+			var allItems []V
+			var pages []any
+			for {
+				items, next, err := a.listVerFn(cmd.Context(), cli, args[0], opts)
+				if err != nil {
+					return err
+				}
+				pages = append(pages, items)
+				allItems = append(allItems, items...)
+				if !verAll || next == "" {
+					break
+				}
+				opts.PageToken = next
+			}
+			rows := make([][]string, 0, len(allItems))
+			for _, v := range allItems {
 				rows = append(rows, a.verRowFn(v))
 			}
-			return renderList(app, []any{items}, []string{"version", "id", "created"}, rows, "No versions.")
+			return renderList(app, pages, []string{"version", "id", "created"}, rows, "No versions.")
 		},
-	})
+	}
+	listCmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
+	listCmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
+	listCmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate to fetch every version")
+	cmd.AddCommand(listCmd)
 	cmd.AddCommand(&cobra.Command{
 		Use:   fmt.Sprintf("get <%s-id> <version>", a.noun),
 		Short: fmt.Sprintf("Show one %s version", a.noun),
@@ -355,12 +380,12 @@ func extractorAccessor() processorAccessor[*client.Extractor, *client.ProcessorV
 		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Extractor, error) {
 			return c.GetExtractor(ctx, id)
 		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string) ([]*client.ProcessorVersion, error) {
-			r, err := c.ListExtractorVersions(ctx, id)
+		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) ([]*client.ProcessorVersion, string, error) {
+			r, err := c.ListExtractorVersions(ctx, id, opts)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
-			return r.Data, nil
+			return r.Data, r.NextPageToken, nil
 		},
 		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
 			return c.GetExtractorVersion(ctx, id, ver)
@@ -393,12 +418,12 @@ func classifierAccessor() processorAccessor[*client.Classifier, *client.Processo
 		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Classifier, error) {
 			return c.GetClassifier(ctx, id)
 		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string) ([]*client.ProcessorVersion, error) {
-			r, err := c.ListClassifierVersions(ctx, id)
+		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) ([]*client.ProcessorVersion, string, error) {
+			r, err := c.ListClassifierVersions(ctx, id, opts)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
-			return r.Data, nil
+			return r.Data, r.NextPageToken, nil
 		},
 		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
 			return c.GetClassifierVersion(ctx, id, ver)
@@ -431,12 +456,12 @@ func splitterAccessor() processorAccessor[*client.Splitter, *client.ProcessorVer
 		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Splitter, error) {
 			return c.GetSplitter(ctx, id)
 		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string) ([]*client.ProcessorVersion, error) {
-			r, err := c.ListSplitterVersions(ctx, id)
+		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) ([]*client.ProcessorVersion, string, error) {
+			r, err := c.ListSplitterVersions(ctx, id, opts)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
-			return r.Data, nil
+			return r.Data, r.NextPageToken, nil
 		},
 		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
 			return c.GetSplitterVersion(ctx, id, ver)
@@ -469,12 +494,12 @@ func workflowAccessor() processorAccessor[*client.Workflow, *client.ProcessorVer
 		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Workflow, error) {
 			return c.GetWorkflow(ctx, id)
 		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string) ([]*client.ProcessorVersion, error) {
-			r, err := c.ListWorkflowVersions(ctx, id)
+		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) ([]*client.ProcessorVersion, string, error) {
+			r, err := c.ListWorkflowVersions(ctx, id, opts)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
-			return r.Data, nil
+			return r.Data, r.NextPageToken, nil
 		},
 		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
 			return c.GetWorkflowVersion(ctx, id, ver)

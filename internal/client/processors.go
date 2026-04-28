@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // Extractor / Classifier / Splitter / Workflow are GET-by-id and list response
@@ -83,12 +85,34 @@ type ListProcessorsOptions struct {
 }
 
 func (o ListProcessorsOptions) query() string {
-	return ListRunsOptions{
-		Limit:     o.Limit,
-		PageToken: o.PageToken,
-		SortBy:    o.SortBy,
-		SortDir:   o.SortDir,
-	}.query()
+	v := url.Values{}
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	setIf(v, "sortBy", o.SortBy)
+	setIf(v, "sortDir", o.SortDir)
+	return encodeQuery(v)
+}
+
+// ListProcessorVersionsOptions is the wire shape for the four
+// /{processor}/{id}/versions endpoints. They share a single
+// ListProcessorVersionsParamsSchema on the server: paging + sortDir only;
+// no sortBy.
+type ListProcessorVersionsOptions struct {
+	SortDir   string
+	Limit     int
+	PageToken string
+}
+
+func (o ListProcessorVersionsOptions) query() string {
+	v := url.Values{}
+	setIf(v, "sortDir", o.SortDir)
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	return encodeQuery(v)
 }
 
 func (c *Client) ListExtractors(ctx context.Context, opts ListProcessorsOptions) (*ListResponse[*Extractor], error) {
@@ -107,9 +131,9 @@ func (c *Client) GetExtractor(ctx context.Context, id string) (*Extractor, error
 	return &p, nil
 }
 
-func (c *Client) ListExtractorVersions(ctx context.Context, id string) (*ListResponse[*ProcessorVersion], error) {
+func (c *Client) ListExtractorVersions(ctx context.Context, id string, opts ListProcessorVersionsOptions) (*ListResponse[*ProcessorVersion], error) {
 	var out ListResponse[*ProcessorVersion]
-	if err := c.getJSON(ctx, "/extractors/"+id+"/versions", &out); err != nil {
+	if err := c.getJSON(ctx, "/extractors/"+id+"/versions"+opts.query(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -139,9 +163,9 @@ func (c *Client) GetClassifier(ctx context.Context, id string) (*Classifier, err
 	return &p, nil
 }
 
-func (c *Client) ListClassifierVersions(ctx context.Context, id string) (*ListResponse[*ProcessorVersion], error) {
+func (c *Client) ListClassifierVersions(ctx context.Context, id string, opts ListProcessorVersionsOptions) (*ListResponse[*ProcessorVersion], error) {
 	var out ListResponse[*ProcessorVersion]
-	if err := c.getJSON(ctx, "/classifiers/"+id+"/versions", &out); err != nil {
+	if err := c.getJSON(ctx, "/classifiers/"+id+"/versions"+opts.query(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -171,9 +195,9 @@ func (c *Client) GetSplitter(ctx context.Context, id string) (*Splitter, error) 
 	return &p, nil
 }
 
-func (c *Client) ListSplitterVersions(ctx context.Context, id string) (*ListResponse[*ProcessorVersion], error) {
+func (c *Client) ListSplitterVersions(ctx context.Context, id string, opts ListProcessorVersionsOptions) (*ListResponse[*ProcessorVersion], error) {
 	var out ListResponse[*ProcessorVersion]
-	if err := c.getJSON(ctx, "/splitters/"+id+"/versions", &out); err != nil {
+	if err := c.getJSON(ctx, "/splitters/"+id+"/versions"+opts.query(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -203,9 +227,9 @@ func (c *Client) GetWorkflow(ctx context.Context, id string) (*Workflow, error) 
 	return &p, nil
 }
 
-func (c *Client) ListWorkflowVersions(ctx context.Context, id string) (*ListResponse[*ProcessorVersion], error) {
+func (c *Client) ListWorkflowVersions(ctx context.Context, id string, opts ListProcessorVersionsOptions) (*ListResponse[*ProcessorVersion], error) {
 	var out ListResponse[*ProcessorVersion]
-	if err := c.getJSON(ctx, "/workflows/"+id+"/versions", &out); err != nil {
+	if err := c.getJSON(ctx, "/workflows/"+id+"/versions"+opts.query(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -52,35 +52,37 @@ func newFilesUploadCommand(app *App) *cobra.Command {
 
 func newFilesListCommand(app *App) *cobra.Command {
 	var (
-		limit   int
-		all     bool
-		sortDir string
+		nameContains string
+		limit        int
+		all          bool
+		sortDir      string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List uploaded files",
 		Example: `  extend files list
-  extend files list --limit 50 --all
-  extend files list -o json --jq '.data[].id'`,
+  extend files list --name-contains invoice --limit 50
+  extend files list --all -o json --jq '.data[].id'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd.Context(), app, limit, all, sortDir)
+			return runFilesList(cmd.Context(), app, nameContains, limit, all, sortDir)
 		},
 	}
+	cmd.Flags().StringVar(&nameContains, "name-contains", "", "Filter to files whose name contains this substring")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum files to return per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every file")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (by createdAt)")
 	return cmd
 }
 
-func runFilesList(ctx context.Context, app *App, limit int, all bool, sortDir string) error {
+func runFilesList(ctx context.Context, app *App, nameContains string, limit int, all bool, sortDir string) error {
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
 	}
 	opts := client.ListFilesOptions{
-		Limit:   limit,
-		SortBy:  "createdAt",
-		SortDir: sortDir,
+		NameContains: nameContains,
+		SortDir:      sortDir,
+		Limit:        limit,
 	}
 	var rows [][]string
 	var pages []any

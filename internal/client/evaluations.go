@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // EvaluationEntity is the embedded processor reference inside an
@@ -78,7 +80,31 @@ type EvaluationRun struct {
 	UpdatedAt     string                `json:"updatedAt,omitempty"`
 }
 
-func (c *Client) ListEvaluationSets(ctx context.Context, opts ListProcessorsOptions) (*ListResponse[*EvaluationSet], error) {
+// ListEvaluationSetsOptions is the wire shape for GET /evaluation_sets,
+// which adds an `entityId` filter on top of the paging+sort common to every
+// other list endpoint. EntityID accepts an extractor/classifier/splitter ID
+// (the server resolves the type from the prefix).
+type ListEvaluationSetsOptions struct {
+	EntityID  string
+	SortBy    string
+	SortDir   string
+	Limit     int
+	PageToken string
+}
+
+func (o ListEvaluationSetsOptions) query() string {
+	v := url.Values{}
+	setIf(v, "entityId", o.EntityID)
+	setIf(v, "sortBy", o.SortBy)
+	setIf(v, "sortDir", o.SortDir)
+	setIf(v, "nextPageToken", o.PageToken)
+	if o.Limit > 0 {
+		v.Set("maxPageSize", strconv.Itoa(o.Limit))
+	}
+	return encodeQuery(v)
+}
+
+func (c *Client) ListEvaluationSets(ctx context.Context, opts ListEvaluationSetsOptions) (*ListResponse[*EvaluationSet], error) {
 	var out ListResponse[*EvaluationSet]
 	if err := c.getJSON(ctx, "/evaluation_sets"+opts.query(), &out); err != nil {
 		return nil, err

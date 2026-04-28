@@ -103,7 +103,12 @@ func TestRunsList_AllAutoPaginates(t *testing.T) {
 		}
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, "extract", "", "", 5, true, "desc"); err != nil {
+	if err := runRunsList(context.Background(), ta.app, runsListParams{
+		runType: "extract",
+		limit:   5,
+		all:     true,
+		sortDir: "desc",
+	}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if page != 2 {
@@ -140,7 +145,13 @@ func TestRunsList_TypeRoutesToCorrectEndpoint(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, "extract", "PROCESSED", "bpr_xyz", 5, false, "desc"); err != nil {
+	if err := runRunsList(context.Background(), ta.app, runsListParams{
+		runType: "extract",
+		status:  "PROCESSED",
+		batchID: "bpr_xyz",
+		limit:   5,
+		sortDir: "desc",
+	}); err != nil {
 		t.Fatalf("runRunsList: %v", err)
 	}
 	req := srv.lastRequest()
@@ -150,6 +161,72 @@ func TestRunsList_TypeRoutesToCorrectEndpoint(t *testing.T) {
 	q := req.Query
 	if !strings.Contains(q, "status=PROCESSED") || !strings.Contains(q, "batchId=bpr_xyz") || !strings.Contains(q, "maxPageSize=5") {
 		t.Errorf("query missing filters: %s", q)
+	}
+}
+
+// TestRunsList_AllFiltersOnExtract asserts every new filter flag flows
+// through to the wire as the right query param. Belt-and-braces against the
+// path-aware ListRunsOptions.query() — extractor uses extractorId, includes
+// source/sourceId, fileNameContains, sortBy/sortDir.
+func TestRunsList_AllFiltersOnExtract(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
+	})
+	ta := newTestApp(t, srv)
+	if err := runRunsList(context.Background(), ta.app, runsListParams{
+		runType:  "extract",
+		using:    "ex_abc",
+		source:   "WORKFLOW_RUN",
+		sourceID: "workflow_run_x",
+		fileName: "invoice",
+		sortBy:   "updatedAt",
+		sortDir:  "asc",
+		limit:    20,
+	}); err != nil {
+		t.Fatalf("runRunsList: %v", err)
+	}
+	q := srv.lastRequest().Query
+	for _, expected := range []string{
+		"extractorId=ex_abc",
+		"source=WORKFLOW_RUN",
+		"sourceId=workflow_run_x",
+		"fileNameContains=invoice",
+		"sortBy=updatedAt",
+		"sortDir=asc",
+		"maxPageSize=20",
+	} {
+		if !strings.Contains(q, expected) {
+			t.Errorf("query missing %q (full: %s)", expected, q)
+		}
+	}
+}
+
+// TestRunsList_ParseUsesLimitAndDropsSort exercises the parse-runs quirks:
+// the wire param is `limit` (not `maxPageSize`), and the server doesn't
+// accept sortBy/sortDir/processorId. Regression against the previously-silent
+// bug where --limit was ignored on parse runs.
+func TestRunsList_ParseUsesLimitAndDropsSort(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
+	})
+	ta := newTestApp(t, srv)
+	if err := runRunsList(context.Background(), ta.app, runsListParams{
+		runType: "parse",
+		using:   "ex_abc", // ignored — parse has no processor
+		sortBy:  "createdAt",
+		sortDir: "asc",
+		limit:   3,
+	}); err != nil {
+		t.Fatalf("runRunsList: %v", err)
+	}
+	q := srv.lastRequest().Query
+	if !strings.Contains(q, "limit=3") {
+		t.Errorf("parse runs must use ?limit= (got %s)", q)
+	}
+	for _, leaked := range []string{"maxPageSize", "sortBy", "sortDir", "extractorId"} {
+		if strings.Contains(q, leaked+"=") {
+			t.Errorf("parse runs leaked unsupported param %q in query: %s", leaked, q)
+		}
 	}
 }
 

@@ -158,7 +158,12 @@ func TestRunsList_BatchFilterReachesQuery(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, "extract", "", "bpr_xyz", 5, false, "desc"); err != nil {
+	if err := runRunsList(context.Background(), ta.app, runsListParams{
+		runType: "extract",
+		batchID: "bpr_xyz",
+		limit:   5,
+		sortDir: "desc",
+	}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if !strings.Contains(srv.lastRequest().Query, "batchId=bpr_xyz") {

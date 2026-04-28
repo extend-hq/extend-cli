@@ -41,17 +41,28 @@ func newWebhookEndpointsCommand(app *App) *cobra.Command {
 }
 
 func newWebhookEndpointsListCommand(app *App) *cobra.Command {
-	var limit int
-	var all bool
+	var (
+		status  string
+		sortDir string
+		limit   int
+		all     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List webhook endpoints",
+		Example: `  extend webhooks endpoints list
+  extend webhooks endpoints list --status enabled
+  extend webhooks endpoints list --all -o id`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{Limit: limit, SortBy: "createdAt", SortDir: "desc"}
+			opts := client.ListWebhookEndpointsOptions{
+				Status:  status,
+				SortDir: sortDir,
+				Limit:   limit,
+			}
 			var rows [][]string
 			var pages []any
 			for {
@@ -71,6 +82,8 @@ func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 			return renderList(app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
 		},
 	}
+	cmd.Flags().StringVar(&status, "status", "", "Filter by status: enabled|disabled")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
 	return cmd
@@ -314,17 +327,30 @@ func newWebhookSubscriptionsCommand(app *App) *cobra.Command {
 }
 
 func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
-	var limit int
-	var all bool
+	var (
+		endpointID string
+		resourceID string
+		sortDir    string
+		limit      int
+		all        bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List webhook subscriptions",
+		Example: `  extend webhooks subscriptions list
+  extend webhooks subscriptions list --endpoint we_abc
+  extend webhooks subscriptions list --resource ex_abc --all`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{Limit: limit, SortBy: "createdAt", SortDir: "desc"}
+			opts := client.ListWebhookSubscriptionsOptions{
+				WebhookEndpointID: endpointID,
+				ResourceID:        resourceID,
+				SortDir:           sortDir,
+				Limit:             limit,
+			}
 			var rows [][]string
 			var pages []any
 			for {
@@ -344,6 +370,9 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 			return renderList(app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
 		},
 	}
+	cmd.Flags().StringVar(&endpointID, "endpoint", "", "Filter by webhook endpoint ID (we_...)")
+	cmd.Flags().StringVar(&resourceID, "resource", "", "Filter by resource ID (extractor/classifier/splitter/workflow)")
+	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
 	return cmd
