@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# mise local override (may contain secrets)
+mise.local.toml
+
 # Editor/IDE
 # .idea/
 # .vscode/
