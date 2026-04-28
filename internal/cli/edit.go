@@ -154,6 +154,9 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		if err := downloadEditOutput(ctx, app, cli, fileID, p.outputFile); err != nil {
 			return err
 		}
+		if p.outputFile == "-" {
+			return nil
+		}
 	}
 
 	return renderEditResult(app, final)
@@ -190,7 +193,7 @@ func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileI
 }
 
 func renderEditResult(app *App, run *client.EditRun) error {
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)

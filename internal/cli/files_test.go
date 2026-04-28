@@ -41,8 +41,8 @@ func TestFilesDelete_WithYesFlag(t *testing.T) {
 	if err := runFilesDelete(context.Background(), ta.app, "file_abc", true); err != nil {
 		t.Fatalf("runFilesDelete: %v", err)
 	}
-	if !strings.Contains(ta.out.String(), "Deleted") {
-		t.Errorf("expected 'Deleted' in stdout, got: %s", ta.out.String())
+	if !strings.Contains(ta.errOut.String(), "Deleted") {
+		t.Errorf("expected 'Deleted' in stderr, got: %s", ta.errOut.String())
 	}
 }
 

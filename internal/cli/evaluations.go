@@ -245,7 +245,7 @@ func newEvaluationItemsUpdateCommand(app *App) *cobra.Command {
 	var fromFile string
 	cmd := &cobra.Command{
 		Use:   "update <evaluation-set-id> <item-id>",
-		Short: "Update an evaluation item (PATCH)",
+		Short: "Update an evaluation item",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, nil)

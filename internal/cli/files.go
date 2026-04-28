@@ -190,7 +190,7 @@ func runFilesDelete(ctx context.Context, app *App, id string, yes bool) error {
 	if err := cli.DeleteFile(ctx, id); err != nil {
 		return err
 	}
-	fmt.Fprintf(app.IO.Out, "%s Deleted %s\n", paletteFor(app.IO).Green("✓"), id)
+	fmt.Fprintf(app.IO.ErrOut, "%s Deleted %s\n", paletteFor(app.IO).Green("✓"), id)
 	return nil
 }
 
@@ -198,14 +198,14 @@ func newFilesDownloadCommand(app *App) *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
 		Use:   "download <file-id>",
-		Short: "Download a file to local disk (or stdout with -o -)",
+		Short: "Download a file to local disk (or stdout with -O -)",
 		Args:  cobra.ExactArgs(1),
 		Long: `Download a previously uploaded file via its presigned URL.
 
 By default, writes to a file in the current directory using the file's name.
-Pass --output <path> to choose a path, or --output - to stream to stdout.`,
-		Example: `  extend files download file_xK9 --output invoice.pdf
-  extend files download file_xK9 --output - | wc -c`,
+Pass --output-file <path> to choose a path, or --output-file - to stream to stdout.`,
+		Example: `  extend files download file_xK9 --output-file invoice.pdf
+  extend files download file_xK9 -O - | wc -c`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFilesDownload(cmd.Context(), app, args[0], outPath)
 		},

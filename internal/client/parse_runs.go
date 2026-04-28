@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 )
 
 type ParseRun struct {
@@ -137,7 +138,6 @@ type ChunkingStrategyOptions struct {
 type CreateParseRunInput struct {
 	File     FileRef        `json:"file"`
 	Config   *ParseConfig   `json:"config,omitempty"`
-	Priority *int           `json:"priority,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -149,9 +149,23 @@ func (c *Client) CreateParseRun(ctx context.Context, in CreateParseRunInput) (*P
 	return &run, nil
 }
 
+type GetParseRunOptions struct {
+	ResponseType string
+}
+
+func (o GetParseRunOptions) query() string {
+	v := url.Values{}
+	setIf(v, "responseType", o.ResponseType)
+	return encodeQuery(v)
+}
+
 func (c *Client) GetParseRun(ctx context.Context, id string) (*ParseRun, error) {
+	return c.GetParseRunWithOptions(ctx, id, GetParseRunOptions{})
+}
+
+func (c *Client) GetParseRunWithOptions(ctx context.Context, id string, opts GetParseRunOptions) (*ParseRun, error) {
 	var run ParseRun
-	if err := c.getJSON(ctx, "/parse_runs/"+id, &run); err != nil {
+	if err := c.getJSON(ctx, "/parse_runs/"+id+opts.query(), &run); err != nil {
 		return nil, err
 	}
 	return &run, nil

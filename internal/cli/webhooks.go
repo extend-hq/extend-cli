@@ -540,7 +540,7 @@ The body is read from --body-file or stdin. The signing secret can come from
 				fmt.Fprintf(app.IO.ErrOut, "%s %v\n", pal.Red("✗"), err)
 				return fmt.Errorf("signature invalid")
 			}
-			fmt.Fprintln(app.IO.Out, pal.Green("✓")+" signature valid")
+			fmt.Fprintln(app.IO.ErrOut, pal.Green("✓")+" signature valid")
 			return nil
 		},
 	}
@@ -578,7 +578,7 @@ func deleteWithConfirm(ctx context.Context, app *App, label, id string, yes bool
 	if err := fn(ctx, id); err != nil {
 		return err
 	}
-	fmt.Fprintf(app.IO.Out, "%s Deleted %s %s\n", paletteFor(app.IO).Green("✓"), label, id)
+	fmt.Fprintf(app.IO.ErrOut, "%s Deleted %s %s\n", paletteFor(app.IO).Green("✓"), label, id)
 	return nil
 }
 

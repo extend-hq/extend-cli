@@ -24,7 +24,6 @@ func newParseCommand(app *App) *cobra.Command {
 		advancedOptionsPath string
 		password            string
 		async               bool
-		priority            int
 		timeout             time.Duration
 		meta                metaFlags
 	)
@@ -71,7 +70,6 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 				advancedOptionsPath: advancedOptionsPath,
 				password:            password,
 				async:               async,
-				priority:            priority,
 				timeout:             timeout,
 				metadata:            md,
 			})
@@ -80,14 +78,13 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 
 	cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
 	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
-	cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy (e.g. section, page, none)")
+	cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 	cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
 	cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
 	cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "Path to JSON blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
 	cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Path to JSON advancedOptions (returnOcr, pageRanges, etc.)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 	meta.attach(cmd)
 
@@ -106,7 +103,6 @@ type parseParams struct {
 	advancedOptionsPath string
 	password            string
 	async               bool
-	priority            int
 	timeout             time.Duration
 	metadata            map[string]any
 }
@@ -131,9 +127,6 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		File:     ref,
 		Config:   cfg,
 		Metadata: p.metadata,
-	}
-	if p.priority > 0 {
-		in.Priority = &p.priority
 	}
 	run, err := cli.CreateParseRun(ctx, in)
 	if err != nil {
@@ -180,8 +173,21 @@ func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
 	if p.engine != "" {
 		cfg.Engine = p.engine
 	}
-	if p.chunkStrategy != "" || p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
-		cs := &client.ChunkingStrategy{Type: p.chunkStrategy}
+	chunkStrategy := p.chunkStrategy
+	if chunkStrategy == "none" {
+		if p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
+			return nil, fmt.Errorf("--chunk-min-chars/--chunk-max-chars cannot be used with --chunk-strategy none")
+		}
+		chunkStrategy = ""
+	}
+	if err := validateParseChunkStrategy(chunkStrategy); err != nil {
+		return nil, err
+	}
+	if chunkStrategy == "section" && p.target == "spatial" {
+		return nil, fmt.Errorf("--chunk-strategy section is not supported with --target spatial")
+	}
+	if chunkStrategy != "" || p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
+		cs := &client.ChunkingStrategy{Type: chunkStrategy}
 		if p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
 			opts := &client.ChunkingStrategyOptions{}
 			if p.chunkMinChars > 0 {
@@ -216,7 +222,22 @@ func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
 	return cfg, nil
 }
 
+func validateParseChunkStrategy(strategy string) error {
+	switch strategy {
+	case "", "page", "document", "section":
+		return nil
+	default:
+		return fmt.Errorf("unknown --chunk-strategy %q (want page|document|section|none)", strategy)
+	}
+}
+
 func renderParseResult(app *App, run *client.ParseRun, target string) error {
+	if app.JQ != "" {
+		if app.Format == string(output.FormatMarkdown) || app.Format == "md" {
+			return fmt.Errorf("--jq cannot be combined with -o markdown")
+		}
+		return renderWithDefault(app, run, output.FormatJSON)
+	}
 	if app.Format != "" && app.Format != string(output.FormatMarkdown) {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}

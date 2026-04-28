@@ -43,6 +43,9 @@ func renderList(app *App, pages []any, headers []string, rows [][]string, emptyM
 	}
 
 	if app.Format == "" {
+		if app.JQ != "" {
+			return renderWithDefault(app, raw, output.FormatJSON)
+		}
 		if app.IO.IsStdoutTTY() {
 			return renderTableOrEmpty(app, headers, rows, emptyMsg)
 		}
@@ -63,6 +66,9 @@ func renderList(app *App, pages []any, headers []string, rows [][]string, emptyM
 		}
 		return output.RenderMarkdownTable(app.IO.Out, headers, rows)
 	case output.FormatID:
+		if app.JQ != "" {
+			return renderWithDefault(app, raw, output.FormatJSON)
+		}
 		// `-o id` on a list emits one ID per row so the result composes with
 		// xargs / shell pipes. We use the rows + headers we already built for
 		// the table: locate the "id" column case-insensitively (some lists,

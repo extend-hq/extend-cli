@@ -350,6 +350,14 @@ func (c *Client) CreateWorkflow(ctx context.Context, body json.RawMessage) (*Wor
 	return &p, nil
 }
 
+func (c *Client) UpdateWorkflow(ctx context.Context, id string, body json.RawMessage) (*Workflow, error) {
+	var p Workflow
+	if err := c.updateRaw(ctx, "/workflows/"+id, body, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func (c *Client) CreateWorkflowVersion(ctx context.Context, id string, body json.RawMessage) (*ProcessorVersion, error) {
 	var v ProcessorVersion
 	if err := c.postRaw(ctx, "/workflows/"+id+"/versions", body, &v); err != nil {

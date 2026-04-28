@@ -186,7 +186,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 }
 
 func renderWorkflowResult(app *App, run *client.WorkflowRun) error {
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	return renderWorkflowTTY(app, run)

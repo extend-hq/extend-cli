@@ -35,7 +35,7 @@ func TestRunsGet_DispatchesByPrefix(t *testing.T) {
 			ta := newTestApp(t, srv)
 			ta.app.Format = "json"
 
-			if err := runRunsGet(context.Background(), ta.app, tc.runID); err != nil {
+			if err := runRunsGet(context.Background(), ta.app, tc.runID, ""); err != nil {
 				t.Fatalf("runRunsGet: %v", err)
 			}
 			if got := srv.lastRequest().Path; got != tc.wantPath {
@@ -50,9 +50,35 @@ func TestRunsGet_UnknownPrefixErrors(t *testing.T) {
 		t.Fatal("server should not be called for unknown prefix")
 	})
 	ta := newTestApp(t, srv)
-	err := runRunsGet(context.Background(), ta.app, "nope_xxx")
+	err := runRunsGet(context.Background(), ta.app, "nope_xxx", "")
 	if err == nil || !strings.Contains(err.Error(), "cannot determine run type") {
 		t.Errorf("expected 'cannot determine run type' error, got %v", err)
+	}
+}
+
+func TestRunsGet_ParseResponseTypeQuery(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "pr_abc", "status": "PROCESSED"})
+	})
+	ta := newTestApp(t, srv)
+	ta.app.Format = "json"
+	if err := runRunsGet(context.Background(), ta.app, "pr_abc", "url"); err != nil {
+		t.Fatalf("runRunsGet: %v", err)
+	}
+	req := srv.lastRequest()
+	if req.Path != "/parse_runs/pr_abc" || req.Query != "responseType=url" {
+		t.Errorf("request = %s?%s, want /parse_runs/pr_abc?responseType=url", req.Path, req.Query)
+	}
+}
+
+func TestRunsGet_ResponseTypeRejectedForNonParse(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called")
+	})
+	ta := newTestApp(t, srv)
+	err := runRunsGet(context.Background(), ta.app, "exr_abc", "url")
+	if err == nil || !strings.Contains(err.Error(), "only supported for parse runs") {
+		t.Fatalf("expected parse-only response-type error, got %v", err)
 	}
 }
 

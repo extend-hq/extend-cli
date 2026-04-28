@@ -20,7 +20,7 @@ func newRunsCommand(app *App) *cobra.Command {
 		Use:   "runs",
 		Short: "Inspect and follow runs across all processor types",
 		Long: `Operations on runs identified by their opaque ID. The run type is
-auto-detected from the ID prefix (exr_, pr_, clr_, splr_).`,
+auto-detected from the ID prefix (exr_, pr_, clr_, splr_, workflow_run_, edr_).`,
 	}
 	cmd.AddCommand(newRunsGetCommand(app))
 	cmd.AddCommand(newRunsWatchCommand(app))
@@ -95,17 +95,20 @@ func jsonMarshal(v any) ([]byte, error) {
 }
 
 func newRunsGetCommand(app *App) *cobra.Command {
+	var responseType string
 	cmd := &cobra.Command{
 		Use:   "get <run-id>",
 		Short: "Fetch a single run by ID",
 		Example: `  extend runs get exr_xK9mLPq
   extend runs get pr_pJDa8iX -o yaml
+  extend runs get pr_pJDa8iX --response-type url -o json
   extend runs get clr_kMXk --jq '.output.confidence' -o raw`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsGet(cmd.Context(), app, args[0])
+			return runRunsGet(cmd.Context(), app, args[0], responseType)
 		},
 	}
+	cmd.Flags().StringVar(&responseType, "response-type", "", "Parse runs only: json|url output payload shape")
 	return cmd
 }
 
@@ -140,14 +143,20 @@ works as expected.`,
 	return cmd
 }
 
-func runRunsGet(ctx context.Context, app *App, id string) error {
+func runRunsGet(ctx context.Context, app *App, id, responseType string) error {
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
 	}
 	kind, ok := client.RunKindFromID(id)
 	if !ok {
-		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_ prefix)", id)
+		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
+	}
+	if responseType != "" && kind != client.KindParse {
+		return fmt.Errorf("--response-type is only supported for parse runs (pr_...); got %s run", kind)
+	}
+	if responseType != "" && responseType != "json" && responseType != "url" {
+		return fmt.Errorf("--response-type must be one of: json|url")
 	}
 	switch kind {
 	case client.KindExtract:
@@ -157,7 +166,7 @@ func runRunsGet(ctx context.Context, app *App, id string) error {
 		}
 		return renderWithDefault(app, run, output.FormatJSON)
 	case client.KindParse:
-		run, err := cli.GetParseRun(ctx, id)
+		run, err := cli.GetParseRunWithOptions(ctx, id, client.GetParseRunOptions{ResponseType: responseType})
 		if err != nil {
 			return err
 		}
@@ -198,7 +207,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	}
 	kind, ok := client.RunKindFromID(id)
 	if !ok {
-		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_ prefix)", id)
+		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Watching %s...", id))
@@ -292,17 +301,17 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 
 func newRunsListCommand(app *App) *cobra.Command {
 	var (
-		runType     string
-		status      string
-		using       string
-		batchID     string
-		source      string
-		sourceID    string
-		fileName    string
-		limit       int
-		all         bool
-		sortBy      string
-		sortDir     string
+		runType  string
+		status   string
+		using    string
+		batchID  string
+		source   string
+		sourceID string
+		fileName string
+		limit    int
+		all      bool
+		sortBy   string
+		sortDir  string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -334,9 +343,9 @@ workflow runs ignore --source and --source-id).`,
 		},
 	}
 	cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (required)")
-	cmd.Flags().StringVar(&status, "status", "", "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED")
+	cmd.Flags().StringVar(&status, "status", "", "Filter by status (varies by type; workflow also supports NEEDS_REVIEW|REJECTED|CANCELLING; parse excludes CANCELLED)")
 	cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
-	cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_... or bpar_...)")
+	cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_..., or bpar_... for parse)")
 	cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
 	cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
 	cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
@@ -634,6 +643,6 @@ func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
 	if err := cli.CancelRun(ctx, id); err != nil {
 		return err
 	}
-	fmt.Fprintf(app.IO.Out, "%s Cancelled %s\n", paletteFor(app.IO).Green("✓"), id)
+	fmt.Fprintf(app.IO.ErrOut, "%s Cancelled %s\n", paletteFor(app.IO).Green("✓"), id)
 	return nil
 }

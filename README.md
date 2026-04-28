@@ -66,8 +66,9 @@ Run `extend <command> --help` for flags.
 ## Output
 
 `-o json|yaml|raw|id|table|markdown` overrides the per-command default.
-`--jq '<expr>'` filters JSON before formatting. Data goes to stdout,
-status to stderr. Honors `NO_COLOR` and `CLICOLOR_FORCE`.
+`--jq '<expr>'` filters structured payloads before `json`, `yaml`, `raw`, or
+`id` formatting. Data goes to stdout, status to stderr. Honors `NO_COLOR` and
+`CLICOLOR_FORCE`.
 
 ## Async transport
 

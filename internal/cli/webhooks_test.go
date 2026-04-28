@@ -38,8 +38,8 @@ func TestWebhooksVerify_ValidSignature(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if !strings.Contains(ta.out.String(), "signature valid") {
-		t.Errorf("expected 'signature valid' in stdout, got: %q", ta.out.String())
+	if !strings.Contains(ta.errOut.String(), "signature valid") {
+		t.Errorf("expected 'signature valid' in stderr, got: %q", ta.errOut.String())
 	}
 }
 

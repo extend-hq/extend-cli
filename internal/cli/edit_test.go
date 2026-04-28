@@ -112,6 +112,52 @@ func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestEdit_OutputFileStdoutDoesNotAppendRunJSON(t *testing.T) {
+	tmp := t.TempDir()
+	schema := filepath.Join(tmp, "schema.json")
+	if err := os.WriteFile(schema, []byte(`{"fields":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	storage := mockStorage(t, "filled-pdf-bytes")
+
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/edit_runs":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PENDING"})
+		case r.Method == http.MethodGet && r.URL.Path == "/edit_runs/edr_x":
+			writeJSON(w, 200, map[string]any{
+				"id":     "edr_x",
+				"status": "PROCESSED",
+				"output": map[string]any{"editedFile": map[string]any{"id": "file_filled", "presignedUrl": storage.URL}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/files/file_filled":
+			writeJSON(w, 200, map[string]any{
+				"id":           "file_filled",
+				"name":         "filled.pdf",
+				"presignedUrl": storage.URL,
+			})
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	ta := newTestApp(t, srv)
+
+	err := runEdit(context.Background(), ta.app, editParams{
+		input:      "file_a",
+		schemaPath: schema,
+		outputFile: "-",
+		nativeOnly: true,
+		flatten:    true,
+		timeout:    2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("runEdit: %v", err)
+	}
+	if got := ta.out.String(); got != "filled-pdf-bytes" {
+		t.Errorf("stdout should contain only downloaded bytes, got %q", got)
+	}
+}
+
 func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/edit_schemas/generate" || r.Method != http.MethodPost {
