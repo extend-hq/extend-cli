@@ -114,6 +114,24 @@ func TestParseBatch_DefaultsToMarkdownTarget(t *testing.T) {
 	}
 }
 
+func TestParseBatch_EngineVersionRoundTrip(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "bpar_test", "status": "PENDING", "runCount": 1})
+	})
+	ta := newTestApp(t, srv)
+	cmd := newParseBatchCommand(ta.app)
+	cmd.SetArgs([]string{"file_a", "--engine", "parse_light", "--engine-version", "0.2.0-beta"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	for _, want := range []string{`"engine":"parse_light"`, `"engineVersion":"0.2.0-beta"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
 func TestWorkflowBatch_ReturnsBatchIDOnly(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/workflow_runs/batch" || r.Method != http.MethodPost {

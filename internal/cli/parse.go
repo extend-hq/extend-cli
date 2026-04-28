@@ -17,6 +17,7 @@ func newParseCommand(app *App) *cobra.Command {
 	var (
 		target              string
 		engine              string
+		engineVersion       string
 		chunkStrategy       string
 		chunkMinChars       int
 		chunkMaxChars       int
@@ -50,6 +51,7 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 		Example: `  extend parse contract.pdf
   extend parse contract.pdf -o markdown > contract.md
   extend parse contract.pdf -o json | jq '.output.chunks | length'
+  extend parse contract.pdf --engine parse_performance --engine-version 1.0.1
   extend parse contract.pdf --chunk-strategy section --chunk-max-chars 4000
   extend parse contract.pdf --block-options block-opts.json
   extend parse contract.pdf --advanced-options advanced.json`,
@@ -63,6 +65,7 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 				input:               args[0],
 				target:              target,
 				engine:              engine,
+				engineVersion:       engineVersion,
 				chunkStrategy:       chunkStrategy,
 				chunkMinChars:       chunkMinChars,
 				chunkMaxChars:       chunkMaxChars,
@@ -78,6 +81,7 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 
 	cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
 	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 	cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 	cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
 	cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
@@ -96,6 +100,7 @@ type parseParams struct {
 	input               string
 	target              string
 	engine              string
+	engineVersion       string
 	chunkStrategy       string
 	chunkMinChars       int
 	chunkMaxChars       int
@@ -172,6 +177,9 @@ func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
 	}
 	if p.engine != "" {
 		cfg.Engine = p.engine
+	}
+	if p.engineVersion != "" {
+		cfg.EngineVersion = p.engineVersion
 	}
 	chunkStrategy := p.chunkStrategy
 	if chunkStrategy == "none" {

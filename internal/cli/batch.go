@@ -216,14 +216,18 @@ func newSplitBatchCommand(app *App) *cobra.Command {
 
 func newParseBatchCommand(app *App) *cobra.Command {
 	var (
-		filesFrom string
-		target    string
-		priority  int
-		meta      metaFlags
+		filesFrom     string
+		target        string
+		engine        string
+		engineVersion string
+		priority      int
+		meta          metaFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "batch <input>...",
 		Short: "Parse up to 1,000 files in one batch",
+		Example: `  extend parse batch file_a file_b
+  extend parse batch --engine parse_performance --engine-version 1.0.1 file_a file_b`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, filesFrom)
 			if err != nil {
@@ -247,7 +251,11 @@ func newParseBatchCommand(app *App) *cobra.Command {
 			}
 			in := client.CreateParseBatchInput{
 				Inputs: items,
-				Config: &client.ParseConfig{Target: target},
+				Config: &client.ParseConfig{
+					Target:        target,
+					Engine:        engine,
+					EngineVersion: engineVersion,
+				},
 			}
 			if priority > 0 {
 				in.Priority = &priority
@@ -261,6 +269,8 @@ func newParseBatchCommand(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&filesFrom, "files-from", "", "Path to a file with one input per line (- for stdin)")
 	cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
+	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	meta.attach(cmd)
 	return cmd

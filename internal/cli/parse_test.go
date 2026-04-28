@@ -111,6 +111,28 @@ func TestParse_ChunkingStrategyOptionsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParse_EngineVersionRoundTrip(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "pr_engine", "status": "PENDING"})
+	})
+	ta := newTestApp(t, srv)
+	if err := runParse(context.Background(), ta.app, parseParams{
+		input:         "file_xK9",
+		target:        "markdown",
+		engine:        "parse_performance",
+		engineVersion: "1.0.1",
+		async:         true,
+	}); err != nil {
+		t.Fatalf("runParse: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	for _, want := range []string{`"engine":"parse_performance"`, `"engineVersion":"1.0.1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
 func TestParse_ChunkingStrategyNoneOmitsChunkingStrategy(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"id": "pr_none", "status": "PENDING"})
