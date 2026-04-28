@@ -1,0 +1,97 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A push and the PR it creates would otherwise run the same workflow twice.
+# Cancel any in-flight run for the same ref so we don't waste minutes.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Unformatted files (run 'gofmt -w'):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: go test -race
+        run: go test -count=1 -race ./...
+
+  # The integration module has its own go.mod and isn't reachable from `go
+  # vet ./...` at the repo root. Vet it here so a syntax error or harness
+  # break gets caught on every PR even though the tests themselves don't
+  # run without env credentials. We use `go vet`, not `go test`, because
+  # `go test` would invoke TestMain which builds the full CLI binary
+  # (redundant with the cross-compile job below).
+  integration-build:
+    name: integration build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: vet integration module
+        working-directory: test/integration
+        run: go vet ./...
+
+  # Cross-compile the CLI binary for every supported platform. We don't run
+  # the binary here — just verify the code compiles for each target.
+  cross-compile:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -trimpath ./cmd/extend

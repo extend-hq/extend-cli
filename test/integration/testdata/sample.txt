@@ -1,0 +1,5 @@
+Invoice
+Number: INV-12345
+Date: 2026-04-27
+Customer: Acme Corp
+Total: $199.99

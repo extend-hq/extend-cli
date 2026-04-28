@@ -1,0 +1,48 @@
+name: integration
+
+# Integration tests cost real credits and mutate workspace state, so they
+# only run on explicit dispatch. The base URL and key flow in via repo
+# secrets (EXTEND_INTEGRATION_BASE_URL, EXTEND_INTEGRATION_API_KEY); the
+# RUN_OPS / DESTRUCTIVE gates are dispatch inputs so the operator opts in
+# per-run.
+on:
+  workflow_dispatch:
+    inputs:
+      run_ops:
+        description: "Enable run-creating tests (extract/parse/classify/split/edit/workflow runs — costs credits)"
+        type: boolean
+        default: false
+      destructive:
+        description: "Enable destructive tests (mutate shared resources — never set against prod)"
+        type: boolean
+        default: false
+
+jobs:
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXTEND_BASE_URL: ${{ secrets.EXTEND_INTEGRATION_BASE_URL }}
+      EXTEND_API_KEY: ${{ secrets.EXTEND_INTEGRATION_API_KEY }}
+      EXTEND_TEST_RUN_OPS: ${{ inputs.run_ops && '1' || '' }}
+      EXTEND_TEST_DESTRUCTIVE: ${{ inputs.destructive && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: verify secrets present
+        run: |
+          if [ -z "$EXTEND_BASE_URL" ] || [ -z "$EXTEND_API_KEY" ]; then
+            echo "::error::EXTEND_INTEGRATION_BASE_URL and EXTEND_INTEGRATION_API_KEY repo secrets must be set"
+            exit 1
+          fi
+
+      - name: run integration tests
+        working-directory: test/integration
+        run: go test -count=1 -v -timeout 15m ./...

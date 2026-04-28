@@ -1,0 +1,144 @@
+name: release
+
+# Tag-driven release: pushing a `v*` tag (e.g. `v0.1.0`) triggers a build
+# matrix that produces archives for every supported platform and uploads
+# them to a GitHub Release with a checksum manifest.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Capture the ldflags values once so the build step stays a one-liner.
+      - name: derive build metadata
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME}"
+          commit="${GITHUB_SHA}"
+          date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "date=$date"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          DATE: ${{ steps.meta.outputs.date }}
+        run: |
+          set -euo pipefail
+          binary=extend
+          if [ "$GOOS" = "windows" ]; then
+            binary=extend.exe
+          fi
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w \
+              -X github.com/extend-hq/extend-cli/internal/version.Version=$VERSION \
+              -X github.com/extend-hq/extend-cli/internal/version.Commit=$COMMIT \
+              -X github.com/extend-hq/extend-cli/internal/version.Date=$DATE" \
+            -o "dist/$binary" \
+            ./cmd/extend
+
+      - name: package archive
+        id: pkg
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          stem="extend_${VERSION}_${GOOS}_${GOARCH}"
+          cd dist
+          if [ "$GOOS" = "windows" ]; then
+            archive="${stem}.zip"
+            zip -q "$archive" extend.exe
+            rm extend.exe
+          else
+            archive="${stem}.tar.gz"
+            tar -czf "$archive" extend
+            rm extend
+          fi
+          # Per-archive checksum for the aggregated SHA256SUMS file.
+          sha256sum "$archive" > "${archive}.sha256"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: upload archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.pkg.outputs.archive }}
+          path: |
+            dist/${{ steps.pkg.outputs.archive }}
+            dist/${{ steps.pkg.outputs.archive }}.sha256
+          retention-days: 7
+
+  release:
+    name: github release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: stage release files
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # Each artifact directory contains the archive plus its per-archive
+          # .sha256 sidecar. Move just the archives into release/, then build
+          # a single SHA256SUMS file across all of them.
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          cd release
+          # Guard against a silent empty release if the upload/download
+          # contract changes underfoot. Update the threshold if the build
+          # matrix changes.
+          archive_count=$(ls -1 extend_* 2>/dev/null | wc -l)
+          if [ "$archive_count" -lt 5 ]; then
+            echo "::error::Expected at least 5 platform archives, found $archive_count"
+            ls -la
+            exit 1
+          fi
+          sha256sum extend_* > SHA256SUMS
+
+      - name: create github release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
