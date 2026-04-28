@@ -104,6 +104,7 @@ func newEvaluationsCreateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an evaluation set",
+		Long:  `Create an evaluation set. --from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, map[string]string{"name": name, "description": description})
 			if err != nil {
@@ -120,7 +121,7 @@ func newEvaluationsCreateCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, s, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
 	cmd.Flags().StringVar(&description, "description", "", "Description (overrides body)")
 	return cmd
@@ -217,6 +218,7 @@ func newEvaluationItemsCreateCommand(app *App) *cobra.Command {
 		Short: "Add one or more items to an evaluation set (bulk create)",
 		Long: `Add one or more items to an evaluation set in a single request. The body
 must match the server's bulk schema: {"items":[{"fileId","expectedOutput"},...]}.
+--from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.
 The response wraps the created items in {"evaluationSetItems":[...]}; this
 command surfaces that envelope verbatim.`,
 		Args: cobra.ExactArgs(1),
@@ -236,7 +238,7 @@ command surfaces that envelope verbatim.`,
 			return renderWithDefault(app, resp, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON bulk body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON bulk body, path, file:// URI, or '-' for stdin")
 	_ = cmd.MarkFlagRequired("from-file")
 	return cmd
 }
@@ -246,6 +248,7 @@ func newEvaluationItemsUpdateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <evaluation-set-id> <item-id>",
 		Short: "Update an evaluation item",
+		Long:  `Update an evaluation item. --from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.`,
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, nil)
@@ -263,7 +266,7 @@ func newEvaluationItemsUpdateCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, it, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON patch body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	_ = cmd.MarkFlagRequired("from-file")
 	return cmd
 }

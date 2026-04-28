@@ -43,10 +43,10 @@ is treated as terminal because it pauses for human action; use the
 dashboard URL to review and approve.
 
 --outputs lets a caller seed the run with pre-computed processor outputs
-(skips the matching steps). The file is a JSON array of {processorId,
-output} objects; output is the same shape that processor would normally
-return (extract: {value}, classify: {id, type, confidence}, split:
-{splits[]}).
+(skips the matching steps). Pass a JSON array inline, as a plain path, or as
+an absolute file:// URI. Each entry is {processorId, output}; output is the
+same shape that processor would normally return (extract: {value}, classify:
+{id, type, confidence}, split: {splits[]}).
 
 --secret key=value provides per-run secrets that step actions can reference.
 Repeatable.`,
@@ -54,6 +54,7 @@ Repeatable.`,
   extend run invoice.pdf --workflow workflow_abc --wait
   extend run invoice.pdf --workflow workflow_abc --version 3 --priority 10
   extend run invoice.pdf --workflow workflow_abc --outputs seeded.json
+  extend run invoice.pdf --workflow workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]'
   extend run invoice.pdf --workflow workflow_abc --secret API_KEY=$KEY`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,7 +82,7 @@ Repeatable.`,
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait when --wait is set")
-	cmd.Flags().StringVar(&outputsPath, "outputs", "", "Path to JSON array of pre-computed [{processorId, output}] entries")
+	cmd.Flags().StringVar(&outputsPath, "outputs", "", "JSON array, path, or file:// URI for pre-computed [{processorId, output}] entries")
 	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	meta.attach(cmd)

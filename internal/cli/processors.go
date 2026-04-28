@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -216,7 +219,7 @@ func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 			return renderWithDefault(app, v, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON body for new version (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
 	if a.noun == "workflow" {
 		cmd.Flags().StringVar(&name, "name", "", "Name for the deployed workflow version (overrides body)")
 	} else {
@@ -228,12 +231,13 @@ func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 
 func versionCreateLong(noun string) string {
 	if noun == "workflow" {
-		return `Deploy a new workflow version. Pass --from-file body.json with the API
-body, or use --name to name the deployed version.`
+		return `Deploy a new workflow version. Pass --from-file with the API body
+(inline JSON, path, file:// URI, or - for stdin), or use --name to name the
+deployed version.`
 	}
 	return `Publish a new version. Pass --release-type major|minor, or provide the
-full API body with --from-file. Use --description to publish the current draft
-with a note.`
+full API body with --from-file (inline JSON, path, file:// URI, or - for stdin).
+Use --description to publish the current draft with a note.`
 }
 
 func requireJSONEnum(body json.RawMessage, field string, allowed ...string) error {
@@ -269,8 +273,9 @@ func (a processorAccessor[T, V]) createCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: fmt.Sprintf("Create %s %s", articleFor(a.noun), a.noun),
-		Long: fmt.Sprintf(`Create %s %s. Pass --from-file with the full API body, optionally
-overlaying --name from flags.`, articleFor(a.noun), a.noun),
+		Long: fmt.Sprintf(`Create %s %s. Pass --from-file with the full API body
+(inline JSON, path, file:// URI, or - for stdin), optionally overlaying --name
+from flags.`, articleFor(a.noun), a.noun),
 		Example: fmt.Sprintf(`  extend %s create --from-file %s.json --name "My %s"
   cat %s.json | extend %s create --from-file -`, a.pluralNoun, a.noun, a.noun, a.noun, a.pluralNoun),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -289,7 +294,7 @@ overlaying --name from flags.`, articleFor(a.noun), a.noun),
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
 	return cmd
 }
@@ -316,7 +321,7 @@ func (a processorAccessor[T, V]) updateCmd(app *App) *cobra.Command {
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON patch body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "New name (overrides body)")
 	return cmd
 }
@@ -346,28 +351,25 @@ func mergeBody(fromFile string, overrides map[string]string) (json.RawMessage, e
 	}
 
 	if fromFile != "" && !hasOverride {
-		raw, err := readBodyFile(fromFile)
+		raw, err := readJSONFile(fromFile, "--from-file")
 		if err != nil {
 			return nil, err
 		}
 		if len(raw) == 0 {
 			return json.RawMessage("{}"), nil
 		}
-		if !json.Valid(raw) {
-			return nil, fmt.Errorf("parse --from-file: invalid JSON")
-		}
 		return raw, nil
 	}
 
 	data := map[string]any{}
 	if fromFile != "" {
-		raw, err := readBodyFile(fromFile)
+		raw, err := readJSONFile(fromFile, "--from-file")
 		if err != nil {
 			return nil, err
 		}
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &data); err != nil {
-				return nil, fmt.Errorf("parse --from-file: %w", err)
+				return nil, fmt.Errorf("--from-file: %w", err)
 			}
 		}
 	}
@@ -381,12 +383,12 @@ func mergeBody(fromFile string, overrides map[string]string) (json.RawMessage, e
 
 const maxBodyFileBytes = 5 << 20
 
-// readJSONFile is readBodyFile with a JSON syntax check. The error message
-// names the flag for clarity ("--config: invalid JSON: ..."). Returns the
-// raw bytes as json.RawMessage so callers can plug it directly into a
-// struct field.
+// readJSONFile accepts inline JSON, a path, stdin (-), or an absolute file://
+// URI, then validates JSON syntax. The error message names the flag for
+// clarity ("--config: invalid JSON: ..."). Returns the raw bytes as
+// json.RawMessage so callers can plug it directly into a struct field.
 func readJSONFile(path, flag string) (json.RawMessage, error) {
-	data, err := readBodyFile(path)
+	data, err := readJSONSource(path)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", flag, err)
 	}
@@ -394,6 +396,51 @@ func readJSONFile(path, flag string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("%s: not valid JSON", flag)
 	}
 	return data, nil
+}
+
+func readJSONSource(source string) ([]byte, error) {
+	trimmed := strings.TrimSpace(source)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return []byte(trimmed), nil
+	}
+	path, err := pathFromFileURI(source)
+	if err != nil {
+		return nil, err
+	}
+	if path != "" {
+		return readBodyFile(path)
+	}
+	return readBodyFile(source)
+}
+
+func pathFromFileURI(source string) (string, error) {
+	if !strings.HasPrefix(strings.ToLower(source), "file://") {
+		return "", nil
+	}
+	u, err := url.Parse(source)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "file" {
+		return "", nil
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("file URI must not include query or fragment")
+	}
+	if u.Host != "" && u.Host != "localhost" {
+		if runtime.GOOS != "windows" {
+			return "", fmt.Errorf("file URI host %q is only supported for Windows UNC paths", u.Host)
+		}
+		return `\\` + u.Host + filepath.FromSlash(u.Path), nil
+	}
+	p := filepath.FromSlash(u.Path)
+	if runtime.GOOS == "windows" && strings.HasPrefix(p, `\`) && len(p) >= 4 && p[2] == ':' {
+		p = p[1:]
+	}
+	if p == "" {
+		return "", fmt.Errorf("file URI must include a path")
+	}
+	return p, nil
 }
 
 func readBodyFile(path string) ([]byte, error) {

@@ -46,15 +46,17 @@ Pass -o json/yaml for the full run object, or -o markdown to force raw.
 
 Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars.
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
---block-options pointing at a JSON file. --advanced-options accepts the
-remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
+--block-options as inline JSON, a plain file path, or an absolute file:// URI.
+--advanced-options accepts the remaining tuning knobs verbatim (return-OCR,
+page ranges, parallelism, etc.) in the same forms.`,
 		Example: `  extend parse contract.pdf
   extend parse contract.pdf -o markdown > contract.md
   extend parse contract.pdf -o json | jq '.output.chunks | length'
   extend parse contract.pdf --engine parse_performance --engine-version 1.0.1
   extend parse contract.pdf --chunk-strategy section --chunk-max-chars 4000
+  extend parse contract.pdf --advanced-options '{"pageRanges":"1-3"}'
   extend parse contract.pdf --block-options block-opts.json
-  extend parse contract.pdf --advanced-options advanced.json`,
+  extend parse contract.pdf --advanced-options file:///absolute/path/advanced.json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
@@ -85,8 +87,8 @@ remaining tuning knobs verbatim (return-OCR, page ranges, parallelism, etc.).`,
 	cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 	cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
 	cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
-	cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "Path to JSON blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
-	cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Path to JSON advancedOptions (returnOcr, pageRanges, etc.)")
+	cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "JSON object, path, or file:// URI for blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
+	cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "JSON object, path, or file:// URI for advancedOptions (returnOcr, pageRanges, etc.)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")

@@ -38,7 +38,7 @@ func newExtractCommand(app *App) *cobra.Command {
 The extraction config can come from one of two sources:
   --using <id>       use an existing extractor (and optionally
                      --override-config to vary it for this one run)
-  --config <path>    inline config without an extractor (one-off extraction)
+  --config <json>    config without an extractor (inline JSON, path, or file:// URI)
 
 The two are mutually exclusive — the server requires exactly one.
 
@@ -48,6 +48,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
   extend extract https://example.com/doc.pdf --using ex_abc
   extend extract file_xK9mLPq --using ex_abc --async
   extend extract invoice.pdf --using ex_abc --override-config override.json
+  extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'
   extend extract invoice.pdf --config inline-config.json
   extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw`,
 		Args: cobra.ExactArgs(1),
@@ -79,8 +80,8 @@ prints the result. Pass --async to print only the run ID and exit.`,
 
 	cmd.Flags().StringVar(&extractorID, "using", "", "Extractor ID (mutually exclusive with --config)")
 	cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Path to JSON overrideConfig that varies the extractor's config for this run only")
-	cmd.Flags().StringVar(&configPath, "config", "", "Path to inline JSON extract config (skips the extractor; mutually exclusive with --using)")
+	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")
+	cmd.Flags().StringVar(&configPath, "config", "", "JSON object, path, or file:// URI for extract config (skips the extractor; mutually exclusive with --using)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,32 @@ func TestMergeBody_OverridesWinOverFile(t *testing.T) {
 	}
 }
 
+func TestMergeBody_FromInlineJSON(t *testing.T) {
+	got, err := mergeBody(`{"name":"inline","description":"ok"}`, map[string]string{"description": "override"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(got, &m)
+	if m["name"] != "inline" || m["description"] != "override" {
+		t.Errorf("unexpected merged body: %s", got)
+	}
+}
+
+func TestMergeBody_FromFileURI(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "body with spaces.json")
+	if err := os.WriteFile(tmp, []byte(`{"name":"from-uri"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := mergeBody((&url.URL{Scheme: "file", Path: tmp}).String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"name":"from-uri"}` {
+		t.Errorf("got %s", got)
+	}
+}
+
 func TestMergeBody_NoFileBuildsFromOverrides(t *testing.T) {
 	got, err := mergeBody("", map[string]string{"name": "only-from-flag"})
 	if err != nil {
@@ -83,7 +110,7 @@ func TestMergeBody_InvalidJSONErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := mergeBody(tmp, nil)
-	if err == nil || !strings.Contains(err.Error(), "parse --from-file") {
+	if err == nil || !strings.Contains(err.Error(), "--from-file") {
 		t.Errorf("expected parse error, got %v", err)
 	}
 }

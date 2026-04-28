@@ -42,10 +42,11 @@ func newRunsUpdateCommand(app *App) *cobra.Command {
 		Long: `Update the metadata on an in-flight or completed workflow run. Only workflow
 runs (workflow_run_...) support this; other run types do not.
 
-Provide a JSON body with --from-file (overrides everything), or use --metadata
-and --tag to set keys individually.`,
+Provide a JSON body with --from-file (inline JSON, path, file:// URI, or - for
+stdin; overrides everything), or use --metadata and --tag to set keys individually.`,
 		Example: `  extend runs update workflow_run_abc --metadata customer=acme --tag prod
-  extend runs update workflow_run_abc --from-file patch.json`,
+  extend runs update workflow_run_abc --from-file patch.json
+  extend runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
@@ -66,7 +67,7 @@ and --tag to set keys individually.`,
 			}
 			var body []byte
 			if fromFile != "" {
-				body, err = readBodyFile(fromFile)
+				body, err = readJSONFile(fromFile, "--from-file")
 				if err != nil {
 					return err
 				}
@@ -85,7 +86,7 @@ and --tag to set keys individually.`,
 			return renderWorkflowResult(app, run)
 		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to JSON patch body (- for stdin)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	meta.attach(cmd)
 	return cmd
 }

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +217,55 @@ func TestParse_BlockOptionsAndAdvancedOptionsFromFile(t *testing.T) {
 	}
 	if !strings.Contains(body, `"advancedOptions":{"returnOcr":{"words":true}}`) {
 		t.Errorf("body should embed advancedOptions: %s", body)
+	}
+}
+
+func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "pr_inline", "status": "PENDING"})
+	})
+	ta := newTestApp(t, srv)
+	if err := runParse(context.Background(), ta.app, parseParams{
+		input:               "file_xK9",
+		target:              "markdown",
+		blockOptionsPath:    `{"tables":{"enabled":true}}`,
+		advancedOptionsPath: `{"pageRanges":"1-3"}`,
+		async:               true,
+	}); err != nil {
+		t.Fatalf("runParse: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	for _, want := range []string{
+		`"blockOptions":{"tables":{"enabled":true}}`,
+		`"advancedOptions":{"pageRanges":"1-3"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestParse_AdvancedOptionsFileURI(t *testing.T) {
+	tmp := t.TempDir()
+	advanced := filepath.Join(tmp, "advanced options.json")
+	if err := writeFileForTest(advanced, []byte(`{"pageRanges":"4-5"}`)); err != nil {
+		t.Fatal(err)
+	}
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "pr_file_uri", "status": "PENDING"})
+	})
+	ta := newTestApp(t, srv)
+	if err := runParse(context.Background(), ta.app, parseParams{
+		input:               "file_xK9",
+		target:              "markdown",
+		advancedOptionsPath: (&url.URL{Scheme: "file", Path: advanced}).String(),
+		async:               true,
+	}); err != nil {
+		t.Fatalf("runParse: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	if !strings.Contains(body, `"advancedOptions":{"pageRanges":"4-5"}`) {
+		t.Errorf("body should embed advancedOptions from file URI: %s", body)
 	}
 }
 

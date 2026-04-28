@@ -34,14 +34,16 @@ with a confidence score.
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
-Pass --override-config to vary the classifier's config for this one run
-without modifying the persisted classifier.
+Pass --override-config as inline JSON, a plain file path, or an absolute
+file:// URI to vary the classifier's config for this one run without modifying
+the persisted classifier.
 
 By default, the command waits until the run reaches a terminal state and
 prints the result. Pass --async to print only the run ID and exit.`,
 		Example: `  extend classify invoice.pdf --using cl_abc
   extend classify https://example.com/x.pdf --using cl_abc -o json
   extend classify invoice.pdf --using cl_abc --override-config override.json
+  extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'
   extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,7 +67,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
 
 	cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Path to JSON overrideConfig that varies the classifier's config for this run only")
+	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")

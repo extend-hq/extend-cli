@@ -34,14 +34,16 @@ func newSplitCommand(app *App) *cobra.Command {
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
-Pass --override-config to vary the splitter's config for this one run
-without modifying the persisted splitter.
+Pass --override-config as inline JSON, a plain file path, or an absolute
+file:// URI to vary the splitter's config for this one run without modifying
+the persisted splitter.
 
 By default, the command waits until the run reaches a terminal state and
 prints the segments table. Pass --async to print only the run ID and exit.`,
 		Example: `  extend split combined.pdf --using spl_abc
   extend split combined.pdf --using spl_abc -o json
   extend split combined.pdf --using spl_abc --override-config override.json
+  extend split combined.pdf --using spl_abc --override-config '{"foo":"bar"}'
   extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,7 +67,7 @@ prints the segments table. Pass --async to print only the run ID and exit.`,
 
 	cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Path to JSON overrideConfig that varies the splitter's config for this run only")
+	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the splitter's config for this run only")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
