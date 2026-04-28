@@ -29,8 +29,23 @@ func NewRoot() *cobra.Command {
 	app := &App{IO: io}
 
 	root := &cobra.Command{
-		Use:           "extend",
-		Short:         "CLI for the Extend document AI platform",
+		Use:   "extend",
+		Short: "CLI for the Extend document AI platform",
+		Long: `CLI for the Extend document AI platform.
+
+Authenticate by setting EXTEND_API_KEY in your environment:
+
+    export EXTEND_API_KEY=sk_xxx
+
+Environment variables:
+  EXTEND_API_KEY         API key (required)
+  EXTEND_BASE_URL        Override base URL (e.g. https://api.extend.ai)
+  EXTEND_REGION          Region: us|us2 (ignored if EXTEND_BASE_URL is set)
+  EXTEND_WORKSPACE_ID    Workspace ID for org-scoped API keys
+  EXTEND_API_VERSION     Pin the API version sent with each request
+  EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
+
+The --workspace and --region flags override their respective env vars.`,
 		Version:       versionShort(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
