@@ -143,3 +143,30 @@ func TestFilesList_MarkdownFormatRendersTable(t *testing.T) {
 		}
 	}
 }
+
+// TestFilesList_IDFormat is a regression test for the bug where
+// `extend files list -o id` errored with
+// "--output id requires payload with an 'id' field; got map[string]interface {}".
+// The bug was that renderList delegated -o id to output.Render which then
+// tried to extract an 'id' from the page envelope ({data:[],nextPageToken:""})
+// rather than emitting one ID per item.
+func TestFilesList_IDFormat(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"data": []map[string]any{
+				{"id": "file_a", "name": "doc.pdf", "type": "PDF", "createdAt": "2025-01-01T00:00:00Z"},
+				{"id": "file_b", "name": "img.png", "type": "PNG", "createdAt": "2025-01-02T00:00:00Z"},
+			},
+		})
+	})
+	ta := newTestApp(t, srv)
+	ta.app.Format = "id"
+	if err := runFilesList(context.Background(), ta.app, 20, false, "desc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := ta.out.String()
+	want := "file_a\nfile_b\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

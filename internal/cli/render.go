@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/extend-hq/extend-cli/internal/output"
 )
@@ -61,9 +62,34 @@ func renderList(app *App, pages []any, headers []string, rows [][]string, emptyM
 			return nil
 		}
 		return output.RenderMarkdownTable(app.IO.Out, headers, rows)
+	case output.FormatID:
+		// `-o id` on a list emits one ID per row so the result composes with
+		// xargs / shell pipes. We use the rows + headers we already built for
+		// the table: locate the "id" column case-insensitively (some lists,
+		// e.g. processor versions, put id in column 1, not 0). If the list
+		// has no id column we fall through to renderWithDefault so the user
+		// gets the same error they would have hit before.
+		if idx := indexOfHeader(headers, "id"); idx >= 0 {
+			for _, row := range rows {
+				if idx < len(row) {
+					fmt.Fprintln(app.IO.Out, row[idx])
+				}
+			}
+			return nil
+		}
+		return renderWithDefault(app, raw, output.FormatJSON)
 	default:
 		return renderWithDefault(app, raw, output.FormatJSON)
 	}
+}
+
+func indexOfHeader(headers []string, name string) int {
+	for i, h := range headers {
+		if strings.EqualFold(h, name) {
+			return i
+		}
+	}
+	return -1
 }
 
 func renderTableOrEmpty(app *App, headers []string, rows [][]string, emptyMsg string) error {
