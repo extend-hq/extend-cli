@@ -60,6 +60,42 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	}
 }
 
+func TestEdit_UnwrapsGeneratedSchemaEnvelope(t *testing.T) {
+	tmp := t.TempDir()
+	schema := filepath.Join(tmp, "schema.json")
+	if err := os.WriteFile(schema, []byte(`{"schema":{"type":"object","properties":{"name":{"type":"string"}}},"annotatedSchema":{"type":"object"},"mappingResult":null}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/edit_runs":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		case r.Method == http.MethodGet && r.URL.Path == "/edit_runs/edr_x":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	ta := newTestApp(t, srv)
+	if err := runEdit(context.Background(), ta.app, editParams{
+		input:      "file_a",
+		schemaPath: schema,
+		nativeOnly: true,
+		flatten:    true,
+		timeout:    2 * time.Second,
+	}); err != nil {
+		t.Fatalf("runEdit: %v", err)
+	}
+	postBody := string(srv.requests[0].Body)
+	if !strings.Contains(postBody, `"schema":{"type":"object","properties":{"name":{"type":"string"}}}`) {
+		t.Errorf("schema envelope should be unwrapped before sending to API; got %s", postBody)
+	}
+	if strings.Contains(postBody, "annotatedSchema") || strings.Contains(postBody, "mappingResult") {
+		t.Errorf("generated schema envelope fields leaked into edit request: %s", postBody)
+	}
+}
+
 func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
@@ -163,7 +199,11 @@ func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
 		if r.URL.Path != "/edit_schemas/generate" || r.Method != http.MethodPost {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		writeJSON(w, 200, map[string]any{"fields": []any{}})
+		writeJSON(w, 200, map[string]any{
+			"schema":          map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}},
+			"annotatedSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+			"mappingResult":   nil,
+		})
 	})
 	ta := newTestApp(t, srv)
 	cmd := newEditSchemaGenerateCommand(ta.app)
@@ -175,8 +215,12 @@ func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
 	if !strings.Contains(body, `"file":{"id":"file_xK9"}`) {
 		t.Errorf("body missing file ref: %s", body)
 	}
-	if !strings.Contains(ta.out.String(), `"fields"`) {
-		t.Errorf("output should contain schema fields: %s", ta.out.String())
+	out := ta.out.String()
+	if !strings.Contains(out, `"type":"object"`) || !strings.Contains(out, `"name"`) {
+		t.Errorf("output should contain inner schema: %s", out)
+	}
+	if strings.Contains(out, "annotatedSchema") || strings.Contains(out, "mappingResult") {
+		t.Errorf("schema generate should output directly reusable schema, got envelope: %s", out)
 	}
 }
 

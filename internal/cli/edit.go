@@ -105,9 +105,9 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		},
 	}
 	if p.schemaPath != "" {
-		raw, err := os.ReadFile(p.schemaPath)
+		raw, err := readEditSchema(p.schemaPath, "--schema")
 		if err != nil {
-			return fmt.Errorf("read --schema: %w", err)
+			return err
 		}
 		cfg.Schema = raw
 	}
@@ -169,6 +169,45 @@ func outputFileID(run *client.EditRun) string {
 	return run.Output.EditedFile.ID
 }
 
+// readEditSchema accepts either a raw EditRootJSON schema or the response
+// envelope returned by POST /edit_schemas/generate:
+// {"schema": {...}, "annotatedSchema": ..., "mappingResult": ...}.
+// Older CLI versions wrote that envelope to disk, so unwrap it here to make
+// those generated schema.json files usable with `extend edit --schema`.
+func readEditSchema(source, flag string) (json.RawMessage, error) {
+	raw, err := readJSONFile(source, flag)
+	if err != nil {
+		return nil, err
+	}
+	return unwrapEditSchemaEnvelope(raw)
+}
+
+func unwrapEditSchemaEnvelope(raw json.RawMessage) (json.RawMessage, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	if _, hasType := obj["type"]; hasType {
+		return raw, nil
+	}
+	inner, ok := obj["schema"]
+	if !ok {
+		return raw, nil
+	}
+	if !json.Valid(inner) {
+		return nil, fmt.Errorf("generated edit schema envelope contains invalid schema")
+	}
+	return inner, nil
+}
+
+func generatedEditSchema(raw json.RawMessage) (json.RawMessage, error) {
+	inner, err := unwrapEditSchemaEnvelope(raw)
+	if err != nil {
+		return nil, err
+	}
+	return inner, nil
+}
+
 func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileID, outPath string) error {
 	if outPath == "-" {
 		_, err := cli.DownloadFile(ctx, fileID, app.IO.Out)
@@ -228,8 +267,9 @@ func newEditSchemaGenerateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate <input>",
 		Short: "Detect form fields and scaffold an edit schema (sync)",
-		Long: `Detect form fields in a PDF and emit a starting-point schema. This is the
-one synchronous endpoint in the edit family; there is no async variant.`,
+		Long: `Detect form fields in a PDF and emit a starting-point schema that can be
+passed directly to 'extend edit --schema'. This is the one synchronous endpoint
+in the edit family; there is no async variant.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
@@ -247,16 +287,20 @@ one synchronous endpoint in the edit family; there is no async variant.`,
 				},
 			}
 			if inputSchemaPath != "" {
-				raw, err := os.ReadFile(inputSchemaPath)
+				raw, err := readEditSchema(inputSchemaPath, "--input-schema")
 				if err != nil {
-					return fmt.Errorf("read --input-schema: %w", err)
+					return err
 				}
 				cfg.InputSchema = raw
 			}
-			schema, err := cli.GenerateEditSchema(cmd.Context(), client.GenerateEditSchemaInput{
+			resp, err := cli.GenerateEditSchema(cmd.Context(), client.GenerateEditSchemaInput{
 				File:   ref,
 				Config: cfg,
 			})
+			if err != nil {
+				return err
+			}
+			schema, err := generatedEditSchema(resp)
 			if err != nil {
 				return err
 			}
