@@ -108,7 +108,7 @@ func TestFilesList_TableFormatRendersTable(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "table"
-	if err := runFilesList(context.Background(), ta.app, "", 20, false, "desc"); err != nil {
+	if err := runFilesList(stubCmdWithCtx(context.Background(), "list"), ta.app, "", 20, false, "", "desc"); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	out := ta.out.String()
@@ -133,7 +133,7 @@ func TestFilesList_MarkdownFormatRendersTable(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "markdown"
-	if err := runFilesList(context.Background(), ta.app, "", 20, false, "desc"); err != nil {
+	if err := runFilesList(stubCmdWithCtx(context.Background(), "list"), ta.app, "", 20, false, "", "desc"); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	out := ta.out.String()
@@ -161,7 +161,7 @@ func TestFilesList_IDFormat(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "id"
-	if err := runFilesList(context.Background(), ta.app, "", 20, false, "desc"); err != nil {
+	if err := runFilesList(stubCmdWithCtx(context.Background(), "list"), ta.app, "", 20, false, "", "desc"); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	got := ta.out.String()

@@ -129,7 +129,7 @@ func TestRunsList_AllAutoPaginates(t *testing.T) {
 		}
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, runsListParams{
+	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
 		runType: "extract",
 		limit:   5,
 		all:     true,
@@ -171,7 +171,7 @@ func TestRunsList_TypeRoutesToCorrectEndpoint(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, runsListParams{
+	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
 		runType: "extract",
 		status:  "PROCESSED",
 		batchID: "bpr_xyz",
@@ -199,7 +199,7 @@ func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, runsListParams{
+	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
 		runType:  "extract",
 		using:    "ex_abc",
 		source:   "WORKFLOW_RUN",
@@ -236,7 +236,7 @@ func TestRunsList_ParseUsesLimitAndDropsSort(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, runsListParams{
+	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
 		runType: "parse",
 		using:   "ex_abc", // ignored — parse has no processor
 		sortBy:  "createdAt",

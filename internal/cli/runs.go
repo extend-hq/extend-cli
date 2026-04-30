@@ -316,17 +316,18 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 
 func newRunsListCommand(app *App) *cobra.Command {
 	var (
-		runType  string
-		status   string
-		using    string
-		batchID  string
-		source   string
-		sourceID string
-		fileName string
-		limit    int
-		all      bool
-		sortBy   string
-		sortDir  string
+		runType   string
+		status    string
+		using     string
+		batchID   string
+		source    string
+		sourceID  string
+		fileName  string
+		limit     int
+		all       bool
+		pageToken string
+		sortBy    string
+		sortDir   string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -334,26 +335,30 @@ func newRunsListCommand(app *App) *cobra.Command {
 		Long: `List runs for a given processor type. Most filter flags map directly to
 documented query parameters on the run-list endpoints; the wire shape varies
 slightly by type (e.g. parse runs ignore --using, --sort-by, and --sort;
-workflow runs ignore --source and --source-id).`,
+workflow runs ignore --source and --source-id).
+
+` + paginationGuidance,
 		Example: `  extend runs list --type extract
   extend runs list --type extract --using ex_abc --status PROCESSED
   extend runs list --type workflow --using workflow_abc --file-name invoice
   extend runs list --type extract --source WORKFLOW_RUN --source-id workflow_run_x
-  extend runs list --type extract --batch bpr_xK9mLPq --all
+  extend runs list --type extract --batch bpr_xK9mLPq
+  extend runs list --type extract --page-token <token-from-previous-response>
   extend runs list --type extract --sort-by updatedAt --sort asc`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsList(cmd.Context(), app, runsListParams{
-				runType:  runType,
-				status:   status,
-				using:    using,
-				batchID:  batchID,
-				source:   source,
-				sourceID: sourceID,
-				fileName: fileName,
-				limit:    limit,
-				all:      all,
-				sortBy:   sortBy,
-				sortDir:  sortDir,
+			return runRunsList(cmd, app, runsListParams{
+				runType:   runType,
+				status:    status,
+				using:     using,
+				batchID:   batchID,
+				source:    source,
+				sourceID:  sourceID,
+				fileName:  fileName,
+				limit:     limit,
+				all:       all,
+				pageToken: pageToken,
+				sortBy:    sortBy,
+				sortDir:   sortDir,
 			})
 		},
 	}
@@ -365,7 +370,8 @@ workflow runs ignore --source and --source-id).`,
 	cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
 	cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to return per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every run matching filters")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
 	_ = cmd.MarkFlagRequired("type")
@@ -374,20 +380,22 @@ workflow runs ignore --source and --source-id).`,
 }
 
 type runsListParams struct {
-	runType  string
-	status   string
-	using    string
-	batchID  string
-	source   string
-	sourceID string
-	fileName string
-	limit    int
-	all      bool
-	sortBy   string
-	sortDir  string
+	runType   string
+	status    string
+	using     string
+	batchID   string
+	source    string
+	sourceID  string
+	fileName  string
+	limit     int
+	all       bool
+	pageToken string
+	sortBy    string
+	sortDir   string
 }
 
-func runRunsList(ctx context.Context, app *App, p runsListParams) error {
+func runRunsList(cmd *cobra.Command, app *App, p runsListParams) error {
+	ctx := cmd.Context()
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
@@ -405,6 +413,7 @@ func runRunsList(ctx context.Context, app *App, p runsListParams) error {
 		SourceID:         p.sourceID,
 		FileNameContains: p.fileName,
 		Limit:            p.limit,
+		PageToken:        p.pageToken,
 		SortBy:           p.sortBy,
 		SortDir:          p.sortDir,
 	}
@@ -414,7 +423,7 @@ func runRunsList(ctx context.Context, app *App, p runsListParams) error {
 		return err
 	}
 
-	return renderList(app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
+	return renderListForCmd(cmd, app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
 }
 
 func parseRunKind(s string) (client.RunKind, error) {

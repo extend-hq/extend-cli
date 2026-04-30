@@ -2,15 +2,29 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/extend-hq/extend-cli/internal/client"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
+
+// stubCmdWithCtx returns a *cobra.Command whose context is set, suitable
+// for tests that call into RunE-style functions which expect a Cobra
+// command but don't actually need a real command tree. The returned
+// command has its name set so renderListForCmd's pagination hint, if
+// triggered, renders a recognizable command path.
+func stubCmdWithCtx(ctx context.Context, name string) *cobra.Command {
+	c := &cobra.Command{Use: name}
+	c.SetContext(ctx)
+	return c
+}
 
 type recordedRequest struct {
 	Method string

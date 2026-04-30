@@ -64,6 +64,7 @@ func newFilesListCommand(app *App) *cobra.Command {
 		nameContains string
 		limit        int
 		all          bool
+		pageToken    string
 		sortDir      string
 	)
 	cmd := &cobra.Command{
@@ -72,24 +73,29 @@ func newFilesListCommand(app *App) *cobra.Command {
 		Long: `List previously uploaded files in the current workspace.
 
 Filter by --name-contains for substring matching on the original filename.
-Without --all, returns the first --limit (default 20) results; the JSON
-response includes nextPageToken for manual paging.`,
+By default returns the first --limit (default 20) files; advance pages by
+passing the response's nextPageToken to --page-token.
+
+` + paginationGuidance,
 		Example: `  extend files list
   extend files list --name-contains invoice --limit 50
-  extend files list --all -o json --jq '.data[].id'`,
+  extend files list --page-token <token-from-previous-response>
+  extend files list -o json --jq '.data[].id'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd.Context(), app, nameContains, limit, all, sortDir)
+			return runFilesList(cmd, app, nameContains, limit, all, pageToken, sortDir)
 		},
 	}
 	cmd.Flags().StringVar(&nameContains, "name-contains", "", "Filter to files whose name contains this substring")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum files to return per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every file")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (by createdAt)")
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
-func runFilesList(ctx context.Context, app *App, nameContains string, limit int, all bool, sortDir string) error {
+func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit int, all bool, pageToken, sortDir string) error {
+	ctx := cmd.Context()
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
@@ -98,6 +104,7 @@ func runFilesList(ctx context.Context, app *App, nameContains string, limit int,
 		NameContains: nameContains,
 		SortDir:      sortDir,
 		Limit:        limit,
+		PageToken:    pageToken,
 	}
 	var rows [][]string
 	var pages []any
@@ -121,7 +128,7 @@ func runFilesList(ctx context.Context, app *App, nameContains string, limit int,
 		opts.PageToken = page.NextPageToken
 	}
 
-	return renderList(app, pages, []string{"id", "name", "type", "created"}, rows, "No files.")
+	return renderListForCmd(cmd, app, pages, []string{"id", "name", "type", "created"}, rows, "No files.")
 }
 
 func truncate(s string, max int) string {

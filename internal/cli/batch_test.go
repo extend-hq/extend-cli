@@ -177,7 +177,7 @@ func TestRunsList_BatchFilterReachesQuery(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(context.Background(), ta.app, runsListParams{
+	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
 		runType: "extract",
 		batchID: "bpr_xyz",
 		limit:   5,

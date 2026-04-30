@@ -42,10 +42,11 @@ func newWebhookEndpointsCommand(app *App) *cobra.Command {
 
 func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 	var (
-		status  string
-		sortDir string
-		limit   int
-		all     bool
+		status    string
+		sortDir   string
+		limit     int
+		all       bool
+		pageToken string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -54,19 +55,22 @@ func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 
 Endpoints are the recipients of webhook events; subscriptions bind an
 endpoint to a specific resource and event set. Use 'extend webhooks
-subscriptions list' to see what each endpoint is subscribed to.`,
+subscriptions list' to see what each endpoint is subscribed to.
+
+` + paginationGuidance,
 		Example: `  extend webhooks endpoints list
   extend webhooks endpoints list --status enabled
-  extend webhooks endpoints list --all -o id`,
+  extend webhooks endpoints list --page-token <token-from-previous-response>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
 			opts := client.ListWebhookEndpointsOptions{
-				Status:  status,
-				SortDir: sortDir,
-				Limit:   limit,
+				Status:    status,
+				SortDir:   sortDir,
+				Limit:     limit,
+				PageToken: pageToken,
 			}
 			var rows [][]string
 			var pages []any
@@ -84,13 +88,14 @@ subscriptions list' to see what each endpoint is subscribed to.`,
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			return renderList(app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
+			return renderListForCmd(cmd, app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status: enabled|disabled")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
@@ -362,13 +367,15 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 		sortDir    string
 		limit      int
 		all        bool
+		pageToken  string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List webhook subscriptions",
 		Example: `  extend webhooks subscriptions list
   extend webhooks subscriptions list --endpoint we_abc
-  extend webhooks subscriptions list --resource ex_abc --all`,
+  extend webhooks subscriptions list --resource ex_abc
+  extend webhooks subscriptions list --page-token <token-from-previous-response>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -379,6 +386,7 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 				ResourceID:        resourceID,
 				SortDir:           sortDir,
 				Limit:             limit,
+				PageToken:         pageToken,
 			}
 			var rows [][]string
 			var pages []any
@@ -396,20 +404,20 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			return renderList(app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
+			return renderListForCmd(cmd, app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
 		},
 	}
 	cmd.Flags().StringVar(&endpointID, "endpoint", "", "Filter by webhook endpoint ID (we_...)")
 	cmd.Flags().StringVar(&resourceID, "resource", "", "Filter by resource ID (extractor/classifier/splitter/workflow)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	cmd.Long = `List webhook subscriptions. A subscription binds an endpoint to a
 specific resource (extractor, classifier, splitter, or workflow) and a set
-of event types. Use --endpoint or --resource to filter.`
-	cmd.Example = `  extend webhooks subscriptions list
-  extend webhooks subscriptions list --endpoint whe_abc
-  extend webhooks subscriptions list --resource workflow_xyz`
+of event types. Use --endpoint or --resource to filter.
+
+` + paginationGuidance
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
