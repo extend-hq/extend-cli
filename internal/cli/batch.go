@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,24 +15,93 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
+// defaultUploadConcurrency is the parallelism for `uploadAllOrResolve` when a
+// command's --upload-concurrency flag isn't passed. Five strikes a balance
+// between making batch uploads materially faster (a 100-file batch finishes
+// in roughly 1/5 the time vs. serial) and not pummeling the upload endpoint
+// from a single CLI invocation.
+const defaultUploadConcurrency = 5
+
+// uploadAllOrResolve resolves every input concurrently. file_xxx and https://
+// inputs are cheap (no I/O), but local file paths each upload to the API; the
+// concurrency cap bounds in-flight POSTs to the upload endpoint.
+//
+// Order of the returned slice matches the order of inputs. The first error
+// returned by any worker cancels the remaining work and is propagated to the
+// caller.
 func uploadAllOrResolve(ctx context.Context, app *App, cli *client.Client, inputs []string) ([]client.FileRef, error) {
-	out := make([]client.FileRef, 0, len(inputs))
-	for _, in := range inputs {
-		ref, err := uploadOrResolve(ctx, app, cli, in)
-		if err != nil {
-			return nil, err
+	return uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, defaultUploadConcurrency)
+}
+
+func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *client.Client, inputs []string, concurrency int) ([]client.FileRef, error) {
+	if concurrency <= 0 {
+		concurrency = defaultUploadConcurrency
+	}
+	if concurrency > len(inputs) {
+		concurrency = len(inputs)
+	}
+	if concurrency <= 1 || len(inputs) <= 1 {
+		// Fast path: no goroutines for tiny batches.
+		out := make([]client.FileRef, 0, len(inputs))
+		for _, in := range inputs {
+			ref, err := uploadOrResolve(ctx, app, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ref)
 		}
-		out = append(out, ref)
+		return out, nil
+	}
+
+	out := make([]client.FileRef, len(inputs))
+	jobs := make(chan int, len(inputs))
+	for i := range inputs {
+		jobs <- i
+	}
+	close(jobs)
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		errOnce  sync.Once
+		firstErr error
+	)
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if cancelCtx.Err() != nil {
+					return
+				}
+				ref, err := uploadOrResolve(cancelCtx, app, cli, inputs[i])
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = err
+						cancel()
+					})
+					return
+				}
+				out[i] = ref
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return out, nil
 }
 
 type batchFlags struct {
-	using     string
-	version   string
-	priority  int
-	filesFrom string
-	meta      metaFlags
+	using             string
+	version           string
+	priority          int
+	filesFrom         string
+	uploadConcurrency int
+	meta              metaFlags
 }
 
 func (f *batchFlags) attach(cmd *cobra.Command, processorFlag string) {
@@ -39,6 +109,7 @@ func (f *batchFlags) attach(cmd *cobra.Command, processorFlag string) {
 	cmd.Flags().StringVar(&f.version, "version", "", "Processor version (latest, draft, or specific)")
 	cmd.Flags().IntVar(&f.priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().StringVar(&f.filesFrom, "files-from", "", "Path to a file with one input path/URL/id per line (- for stdin)")
+	cmd.Flags().IntVar(&f.uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
 	f.meta.attach(cmd)
 	_ = cmd.MarkFlagRequired(processorFlag)
 }
@@ -96,7 +167,7 @@ schema does not accept top-level metadata.`,
 			if err != nil {
 				return err
 			}
-			refs, err := uploadAllOrResolve(cmd.Context(), app, cli, inputs)
+			refs, err := uploadAllOrResolveWithConcurrency(cmd.Context(), app, cli, inputs, f.uploadConcurrency)
 			if err != nil {
 				return err
 			}
@@ -153,7 +224,7 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			refs, err := uploadAllOrResolve(cmd.Context(), app, cli, inputs)
+			refs, err := uploadAllOrResolveWithConcurrency(cmd.Context(), app, cli, inputs, f.uploadConcurrency)
 			if err != nil {
 				return err
 			}
@@ -208,7 +279,7 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			refs, err := uploadAllOrResolve(cmd.Context(), app, cli, inputs)
+			refs, err := uploadAllOrResolveWithConcurrency(cmd.Context(), app, cli, inputs, f.uploadConcurrency)
 			if err != nil {
 				return err
 			}
@@ -241,12 +312,13 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 
 func newParseBatchCommand(app *App) *cobra.Command {
 	var (
-		filesFrom     string
-		target        string
-		engine        string
-		engineVersion string
-		priority      int
-		meta          metaFlags
+		filesFrom         string
+		target            string
+		engine            string
+		engineVersion     string
+		priority          int
+		uploadConcurrency int
+		meta              metaFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "batch <input>...",
@@ -271,7 +343,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			refs, err := uploadAllOrResolve(cmd.Context(), app, cli, inputs)
+			refs, err := uploadAllOrResolveWithConcurrency(cmd.Context(), app, cli, inputs, uploadConcurrency)
 			if err != nil {
 				return err
 			}
@@ -306,6 +378,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
 	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+	cmd.Flags().IntVar(&uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
 	meta.attach(cmd)
 	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
@@ -343,7 +416,7 @@ them. Track progress with:
 			if err != nil {
 				return err
 			}
-			refs, err := uploadAllOrResolve(cmd.Context(), app, cli, inputs)
+			refs, err := uploadAllOrResolveWithConcurrency(cmd.Context(), app, cli, inputs, f.uploadConcurrency)
 			if err != nil {
 				return err
 			}
