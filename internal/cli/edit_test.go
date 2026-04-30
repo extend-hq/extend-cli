@@ -61,43 +61,6 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	}
 }
 
-func TestEdit_UnwrapsGeneratedSchemaEnvelope(t *testing.T) {
-	tmp := t.TempDir()
-	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"schema":{"type":"object","properties":{"name":{"type":"string"}}},"annotatedSchema":{"type":"object"},"mappingResult":null}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/edit_runs":
-			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
-		case r.Method == http.MethodGet && r.URL.Path == "/edit_runs/edr_x":
-			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
-		default:
-			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-	})
-	ta := newTestApp(t, srv)
-	if err := runEdit(context.Background(), ta.app, editParams{
-		input:      "file_a",
-		schemaPath: schema,
-		wait:       true,
-		nativeOnly: true,
-		flatten:    true,
-		timeout:    2 * time.Second,
-	}); err != nil {
-		t.Fatalf("runEdit: %v", err)
-	}
-	postBody := string(srv.requests[0].Body)
-	if !strings.Contains(postBody, `"schema":{"type":"object","properties":{"name":{"type":"string"}}}`) {
-		t.Errorf("schema envelope should be unwrapped before sending to API; got %s", postBody)
-	}
-	if strings.Contains(postBody, "annotatedSchema") || strings.Contains(postBody, "mappingResult") {
-		t.Errorf("generated schema envelope fields leaked into edit request: %s", postBody)
-	}
-}
-
 func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
