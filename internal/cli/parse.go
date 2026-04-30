@@ -145,11 +145,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForParseRun(ctx, run.ID, client.WaitOptions{
-		Interval:    1 * time.Second,
-		MaxInterval: 10 * time.Second,
-		Timeout:     p.timeout,
-	}, func(r *client.ParseRun) {
+	final, err := cli.WaitForParseRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.ParseRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")

@@ -526,10 +526,10 @@ The body is read from --body-file or stdin. The signing secret can come from
     --body-file payload.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if secret == "" {
-				secret = os.Getenv("EXTEND_WEBHOOK_SECRET")
+				secret = os.Getenv(client.EnvWebhookSecret)
 			}
 			if secret == "" {
-				return errors.New("signing secret required (--secret or EXTEND_WEBHOOK_SECRET env)")
+				return fmt.Errorf("signing secret required (--secret or %s env)", client.EnvWebhookSecret)
 			}
 			body, err := readBody(app, bodyFile)
 			if err != nil {
