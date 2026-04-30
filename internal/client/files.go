@@ -166,10 +166,9 @@ func (c *Client) UploadStream(ctx context.Context, body io.Reader, filename, con
 //	http://... or https://...-> FileRef{URL}
 //	any other string         -> os.Stat probe; error if no file exists
 //
-// When stat fails, the error tries to guess the user's intent from the
-// shape of the input and suggests a fix. This is the entry point for
-// every <input> argument across the CLI, so the error message is the only
-// place a typo gets caught before a confusing 404 comes back from the API.
+// When stat fails, the wrapped error lists the valid input forms so the
+// caller can self-diagnose. The base error is wrapped so callers using
+// errors.Is(err, fs.ErrNotExist) still work.
 func ResolveInput(input string) (ref FileRef, localPath string, err error) {
 	switch {
 	case input == "-":
@@ -182,42 +181,11 @@ func ResolveInput(input string) (ref FileRef, localPath string, err error) {
 	if _, statErr := os.Stat(input); statErr == nil {
 		return FileRef{}, input, nil
 	} else {
-		return FileRef{}, "", unresolvedInputError(input, statErr)
+		return FileRef{}, "", fmt.Errorf(
+			"input %q is not a local file, file_id, or URL: %w (valid forms: a local path, a file_xxx ID, or an https:// URL)",
+			input, statErr,
+		)
 	}
-}
-
-// unresolvedInputError builds an actionable error when ResolveInput cannot
-// classify the input as stdin / file_id / URL / local file. The base error
-// is wrapped so callers using errors.Is(err, fs.ErrNotExist) still work.
-func unresolvedInputError(input string, statErr error) error {
-	hint := suggestFixForUnresolvedInput(input)
-	if hint != "" {
-		return fmt.Errorf("input %q is not a local file, file_id, or URL: %w (%s)", input, statErr, hint)
-	}
-	return fmt.Errorf(
-		"input %q is not a local file, file_id, or URL: %w (valid forms: a local path, a file_xxx ID, or an https:// URL)",
-		input, statErr,
-	)
-}
-
-// suggestFixForUnresolvedInput returns a short user-facing hint when the
-// input looks like a typoed version of a valid form. Empty string means no
-// confident guess.
-func suggestFixForUnresolvedInput(input string) string {
-	lower := strings.ToLower(input)
-	switch {
-	case strings.HasPrefix(lower, "file_") && !strings.HasPrefix(input, "file_"):
-		return "did you mean a lowercase 'file_' prefix?"
-	case strings.HasPrefix(lower, "file-") || strings.HasPrefix(lower, "file."):
-		return "file IDs use an underscore: 'file_xxx', not 'file-xxx' or 'file.xxx'"
-	case strings.HasPrefix(lower, "flie_") || strings.HasPrefix(lower, "fiel_"):
-		return "did you mean 'file_'?"
-	case strings.Contains(input, "://") && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://"):
-		return "only http:// and https:// URLs are accepted"
-	case strings.HasPrefix(input, "www.") || (strings.Contains(input, ".") && !strings.Contains(input, "/") && !strings.Contains(input, " ")):
-		return "URLs must include the scheme (e.g. https://" + input + ")"
-	}
-	return ""
 }
 
 func guessContentType(path string) string {
