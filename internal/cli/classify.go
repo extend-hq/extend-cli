@@ -17,7 +17,7 @@ func newClassifyCommand(app *App) *cobra.Command {
 		version            string
 		overrideConfigPath string
 		password           string
-		async              bool
+		wait               bool
 		priority           int
 		timeout            time.Duration
 		meta               metaFlags
@@ -39,7 +39,8 @@ file:// URI to vary the classifier's config for this one run without modifying
 the persisted classifier.
 
 By default, the command waits until the run reaches a terminal state and
-prints the result. Pass --async to print only the run ID and exit.`,
+prints the result. Pass --wait=false to print only the run ID and exit
+immediately.`,
 		Example: `  extend classify invoice.pdf --using cl_abc
   extend classify https://example.com/x.pdf --using cl_abc -o json
   extend classify invoice.pdf --using cl_abc --override-config override.json
@@ -57,7 +58,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
 				version:            version,
 				overrideConfigPath: overrideConfigPath,
 				password:           password,
-				async:              async,
+				wait:               wait,
 				priority:           priority,
 				timeout:            timeout,
 				metadata:           md,
@@ -73,7 +74,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
 	cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
 	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
+	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 	meta.attach(cmd)
@@ -89,7 +90,7 @@ type classifyParams struct {
 	version            string
 	overrideConfigPath string
 	password           string
-	async              bool
+	wait               bool
 	priority           int
 	timeout            time.Duration
 	metadata           map[string]any
@@ -128,7 +129,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 		return fmt.Errorf("create run: %w", err)
 	}
 
-	if p.async {
+	if !p.wait {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 

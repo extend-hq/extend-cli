@@ -24,7 +24,7 @@ func newParseCommand(app *App) *cobra.Command {
 		blockOptionsPath    string
 		advancedOptionsPath string
 		password            string
-		async               bool
+		wait                bool
 		timeout             time.Duration
 		meta                metaFlags
 	)
@@ -79,7 +79,7 @@ Caveats:
 				blockOptionsPath:    blockOptionsPath,
 				advancedOptionsPath: advancedOptionsPath,
 				password:            password,
-				async:               async,
+				wait:                wait,
 				timeout:             timeout,
 				metadata:            md,
 			})
@@ -95,7 +95,7 @@ Caveats:
 	cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "JSON object, path, or file:// URI for blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
 	cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "JSON object, path, or file:// URI for advancedOptions (returnOcr, pageRanges, etc.)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
+	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 	meta.attach(cmd)
 
@@ -118,7 +118,7 @@ type parseParams struct {
 	blockOptionsPath    string
 	advancedOptionsPath string
 	password            string
-	async               bool
+	wait                bool
 	timeout             time.Duration
 	metadata            map[string]any
 }
@@ -149,7 +149,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		return fmt.Errorf("create run: %w", err)
 	}
 
-	if p.async {
+	if !p.wait {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 
