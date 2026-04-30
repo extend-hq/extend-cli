@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -186,5 +187,98 @@ func TestRunsList_BatchFilterReachesQuery(t *testing.T) {
 	}
 	if !strings.Contains(srv.lastRequest().Query, "batchId=bpr_xyz") {
 		t.Errorf("query missing batchId filter: %s", srv.lastRequest().Query)
+	}
+}
+
+// TestUploadAllOrResolve_PreservesOrder ensures the parallel upload returns
+// FileRefs in the same order as the inputs, even when individual uploads
+// complete out of order. It works by parsing the uploaded filename out of
+// the multipart form and echoing it back as the file_id.
+func TestUploadAllOrResolve_PreservesOrder(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/files/upload" {
+			// Random sleep so completions interleave non-deterministically.
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+			fhs := r.MultipartForm.File["file"]
+			if len(fhs) != 1 {
+				http.Error(w, "expected 1 file", 400)
+				return
+			}
+			name := fhs[0].Filename
+			writeJSON(w, 200, map[string]any{"id": "file_" + strings.TrimSuffix(name, ".pdf")})
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ta := newTestApp(t, srv)
+	c, _ := ta.app.NewClient()
+
+	tmp := t.TempDir()
+	inputs := make([]string, 12)
+	for i := range inputs {
+		path := filepath.Join(tmp, strconv.Itoa(i)+".pdf")
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		inputs[i] = path
+	}
+
+	refs, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, 4)
+	if err != nil {
+		t.Fatalf("uploadAllOrResolve: %v", err)
+	}
+	if len(refs) != len(inputs) {
+		t.Fatalf("len(refs) = %d, want %d", len(refs), len(inputs))
+	}
+	for i, ref := range refs {
+		want := "file_" + strconv.Itoa(i)
+		if ref.ID != want {
+			t.Errorf("refs[%d].ID = %q, want %q (order not preserved)", i, ref.ID, want)
+		}
+	}
+}
+
+// TestUploadAllOrResolve_BoundsConcurrency confirms the concurrency cap is
+// respected: the number of in-flight upload calls never exceeds the cap.
+func TestUploadAllOrResolve_BoundsConcurrency(t *testing.T) {
+	var inFlight, peak int32
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/files/upload" {
+			now := atomic.AddInt32(&inFlight, 1)
+			for {
+				p := atomic.LoadInt32(&peak)
+				if now <= p || atomic.CompareAndSwapInt32(&peak, p, now) {
+					break
+				}
+			}
+			// Sleep briefly so workers actually overlap.
+			defer atomic.AddInt32(&inFlight, -1)
+			writeJSON(w, 200, map[string]any{"id": "file_x"})
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ta := newTestApp(t, srv)
+	c, _ := ta.app.NewClient()
+
+	tmp := t.TempDir()
+	inputs := make([]string, 20)
+	for i := range inputs {
+		path := filepath.Join(tmp, strconv.Itoa(i)+".pdf")
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		inputs[i] = path
+	}
+
+	const cap = 3
+	if _, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, cap); err != nil {
+		t.Fatalf("uploadAllOrResolve: %v", err)
+	}
+	if got := atomic.LoadInt32(&peak); got > cap {
+		t.Errorf("peak in-flight uploads = %d, want <= %d", got, cap)
 	}
 }
