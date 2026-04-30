@@ -111,7 +111,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		},
 	}
 	if p.schemaPath != "" {
-		raw, err := readEditSchema(p.schemaPath, "--schema")
+		raw, err := readJSONFile(p.schemaPath, "--schema")
 		if err != nil {
 			return err
 		}
@@ -171,43 +171,26 @@ func outputFileID(run *client.EditRun) string {
 	return run.Output.EditedFile.ID
 }
 
-// readEditSchema accepts either a raw EditRootJSON schema or the response
-// envelope returned by POST /edit_schemas/generate:
-// {"schema": {...}, "annotatedSchema": ..., "mappingResult": ...}.
-// Older CLI versions wrote that envelope to disk, so unwrap it here to make
-// those generated schema.json files usable with `extend edit --schema`.
-func readEditSchema(source, flag string) (json.RawMessage, error) {
-	raw, err := readJSONFile(source, flag)
-	if err != nil {
-		return nil, err
-	}
-	return unwrapEditSchemaEnvelope(raw)
-}
-
-func unwrapEditSchemaEnvelope(raw json.RawMessage) (json.RawMessage, error) {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil, err
-	}
-	if _, hasType := obj["type"]; hasType {
-		return raw, nil
-	}
-	inner, ok := obj["schema"]
-	if !ok {
-		return raw, nil
-	}
-	if !json.Valid(inner) {
-		return nil, fmt.Errorf("generated edit schema envelope contains invalid schema")
-	}
-	return inner, nil
-}
-
+// generatedEditSchema unwraps the documented response shape from
+// POST /edit_schemas/generate:
+//
+//	{"schema": {...}, "annotatedSchema": ..., "mappingResult": ...}
+//
+// Only the inner `schema` field is exposed to users; the rest is debug data.
 func generatedEditSchema(raw json.RawMessage) (json.RawMessage, error) {
-	inner, err := unwrapEditSchemaEnvelope(raw)
-	if err != nil {
-		return nil, err
+	var env struct {
+		Schema json.RawMessage `json:"schema"`
 	}
-	return inner, nil
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("decode generated edit schema: %w", err)
+	}
+	if len(env.Schema) == 0 {
+		return nil, fmt.Errorf("generated edit schema response missing 'schema' field")
+	}
+	if !json.Valid(env.Schema) {
+		return nil, fmt.Errorf("generated edit schema response contains invalid schema")
+	}
+	return env.Schema, nil
 }
 
 func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileID, outPath string) error {
@@ -297,7 +280,7 @@ are overlaid onto your starting point.`,
 				},
 			}
 			if inputSchemaPath != "" {
-				raw, err := readEditSchema(inputSchemaPath, "--input-schema")
+				raw, err := readJSONFile(inputSchemaPath, "--input-schema")
 				if err != nil {
 					return err
 				}
