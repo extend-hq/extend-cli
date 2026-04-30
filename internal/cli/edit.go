@@ -269,7 +269,15 @@ func newEditSchemaGenerateCommand(app *App) *cobra.Command {
 		Short: "Detect form fields and scaffold an edit schema (sync)",
 		Long: `Detect form fields in a PDF and emit a starting-point schema that can be
 passed directly to 'extend edit --schema'. This is the one synchronous endpoint
-in the edit family; there is no async variant.`,
+in the edit family; there is no async variant.
+
+Use --instructions to guide the schema generator about which fields to
+include or how to interpret ambiguous form layouts. Use --input-schema to
+seed the generator with an existing schema, in which case detected fields
+are overlaid onto your starting point.`,
+		Example: `  extend edit schema generate form.pdf > schema.json
+  extend edit schema generate form.pdf --instructions "skip the signature block"
+  extend edit schema generate form.pdf --input-schema base.json > merged.json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()

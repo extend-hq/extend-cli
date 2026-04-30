@@ -59,6 +59,16 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: fmt.Sprintf("List %s", a.pluralNoun),
+		Long: fmt.Sprintf(`List %s in the current workspace.
+
+Sorted by updatedAt descending by default. Without --all, returns the first
+page (--limit, default 20); use --all to auto-paginate. The %s ID
+column is the input for `+"`extend %s get <id>`"+`.`, a.pluralNoun, a.noun, a.pluralNoun),
+		Example: fmt.Sprintf(`  extend %s list
+  extend %s list --sort-by createdAt --all
+  extend %s list -o id | head -5
+  extend %s list --jq '.data[].id' -o raw`,
+			a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -101,7 +111,14 @@ func (a processorAccessor[T, V]) getCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   fmt.Sprintf("get <%s-id>", a.noun),
 		Short: fmt.Sprintf("Show one %s by ID", a.noun),
-		Args:  cobra.ExactArgs(1),
+		Long: fmt.Sprintf(`Show full details for one %s, including its current draft and
+deployed-version metadata. Use `+"`extend %s versions list <id>`"+` to enumerate
+historical versions, or `+"`extend %s versions get <id> <version>`"+` to inspect
+a specific one.`, a.noun, a.pluralNoun, a.pluralNoun),
+		Example: fmt.Sprintf(`  extend %s get %s
+  extend %s get %s --jq '.name' -o raw`,
+			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -131,7 +148,16 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:   fmt.Sprintf("list <%s-id>", a.noun),
 		Short: fmt.Sprintf("List versions of %s %s", articleFor(a.noun), a.noun),
-		Args:  cobra.ExactArgs(1),
+		Long: fmt.Sprintf(`List every published version of %s %s.
+
+Versions are immutable snapshots of a %s's config; the row labeled "draft"
+is the editable working copy. Sort defaults to descending by createdAt
+(newest first).`, articleFor(a.noun), a.noun, a.noun),
+		Example: fmt.Sprintf(`  extend %s versions list %s
+  extend %s versions list %s --all
+  extend %s versions list %s --jq '.data[].version' -o raw`,
+			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -170,7 +196,16 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 	getVerCmd := &cobra.Command{
 		Use:   fmt.Sprintf("get <%s-id> <version>", a.noun),
 		Short: fmt.Sprintf("Show one %s version", a.noun),
-		Args:  cobra.ExactArgs(2),
+		Long: fmt.Sprintf(`Show the full config for one published %s version. Pass
+"draft" as <version> to inspect the working copy. The output is the
+canonical JSON shape used by `+"`extend %s versions create --from-file`"+`,
+so this command is also useful for cloning a known-good version into a
+new one.`, a.noun, a.pluralNoun),
+		Example: fmt.Sprintf(`  extend %s versions get %s 1.0
+  extend %s versions get %s draft
+  extend %s versions get %s 1.0 > snapshot.json`,
+			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -192,10 +227,11 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 	var fromFile, description, releaseType, name string
 	cmd := &cobra.Command{
-		Use:   fmt.Sprintf("create <%s-id>", a.noun),
-		Short: fmt.Sprintf("Publish a new version of %s %s", articleFor(a.noun), a.noun),
-		Args:  cobra.ExactArgs(1),
-		Long:  versionCreateLong(a.noun),
+		Use:     fmt.Sprintf("create <%s-id>", a.noun),
+		Short:   fmt.Sprintf("Publish a new version of %s %s", articleFor(a.noun), a.noun),
+		Args:    cobra.ExactArgs(1),
+		Long:    versionCreateLong(a.noun),
+		Example: versionCreateExample(a.noun, a.pluralNoun, a.exampleID),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			overrides := map[string]string{}
 			if a.noun == "workflow" {
@@ -237,13 +273,32 @@ func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 
 func versionCreateLong(noun string) string {
 	if noun == "workflow" {
-		return `Deploy a new workflow version. Pass --from-file with the API body
-(inline JSON, path, file:// URI, or - for stdin), or use --name to name the
-deployed version.`
+		return `Deploy a new workflow version. Workflows version differently from
+processors: each deploy is a named snapshot rather than a major/minor bump.
+Pass --from-file with the API body (inline JSON, path, file:// URI, or - for
+stdin), or use --name to name the deployed version.
+
+Once deployed, refer to the version by its name in extend run --version.`
 	}
-	return `Publish a new version. Pass --release-type major|minor, or provide the
-full API body with --from-file (inline JSON, path, file:// URI, or - for stdin).
-Use --description to publish the current draft with a note.`
+	return `Publish a new version of the draft.
+
+Pass --release-type major|minor (or provide the full API body via --from-file
+which must include releaseType). Use --description to record what changed.
+
+Versions are immutable: future updates create new versions; past versions
+remain reachable via the version number. Workflow versioning differs (uses
+named deploys instead of major/minor); see ` + "`extend workflows versions create --help`."
+}
+
+func versionCreateExample(noun, plural, exampleID string) string {
+	if noun == "workflow" {
+		return fmt.Sprintf(`  extend %s versions create %s --name "v2-with-review"
+  extend %s versions create %s --from-file deploy.json`,
+			plural, exampleID, plural, exampleID)
+	}
+	return fmt.Sprintf(`  extend %s versions create %s --release-type minor --description "Added line_items field"
+  extend %s versions create %s --from-file release.json`,
+		plural, exampleID, plural, exampleID)
 }
 
 func requireJSONEnum(body json.RawMessage, field string, allowed ...string) error {
@@ -279,9 +334,19 @@ func (a processorAccessor[T, V]) createCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: fmt.Sprintf("Create %s %s", articleFor(a.noun), a.noun),
-		Long: fmt.Sprintf(`Create %s %s. Pass --from-file with the full API body
-(inline JSON, path, file:// URI, or - for stdin), optionally overlaying --name
-from flags.`, articleFor(a.noun), a.noun),
+		Long: fmt.Sprintf(`Create %s %s in the current workspace.
+
+Pass --from-file with the full API body (inline JSON, path, file:// URI, or
+- for stdin); --name overrides any name in the body. The new %s starts as
+a draft (no published version); use `+"`extend %s versions create`"+` once
+you're ready to deploy.
+
+For the request body shape, copy from an existing %s:
+
+    extend %s versions get <existing-id> 1.0 > template.json
+
+Then edit and pass via --from-file.`,
+			articleFor(a.noun), a.noun, a.noun, a.pluralNoun, a.noun, a.pluralNoun),
 		Example: fmt.Sprintf(`  extend %s create --from-file %s.json --name "My %s"
   cat %s.json | extend %s create --from-file -`, a.pluralNoun, a.noun, a.noun, a.noun, a.pluralNoun),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -311,7 +376,17 @@ func (a processorAccessor[T, V]) updateCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   fmt.Sprintf("update <%s-id>", a.noun),
 		Short: fmt.Sprintf("Update an existing %s", a.noun),
-		Args:  cobra.ExactArgs(1),
+		Long: fmt.Sprintf(`Update an existing %s's draft config. Updates apply to the
+draft version only; they do NOT affect already-deployed versions. Use
+`+"`extend %s versions create`"+` to publish the updated draft as a new
+version.
+
+Pass --from-file with a full or partial JSON body (inline JSON, path, file://
+URI, or - for stdin); --name overrides any name in the body.`, a.noun, a.pluralNoun),
+		Example: fmt.Sprintf(`  extend %s update %s --from-file patch.json
+  extend %s update %s --name "New name"`,
+			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, map[string]string{"name": name})
 			if err != nil {

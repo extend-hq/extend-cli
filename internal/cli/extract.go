@@ -40,7 +40,7 @@ The extraction config can come from one of two sources:
                      --override-config to vary it for this one run)
   --config <json>    config without an extractor (inline JSON, path, or file:// URI)
 
-The two are mutually exclusive — the server requires exactly one.
+The two are mutually exclusive; the server requires exactly one.
 
 By default, the command waits until the run reaches a terminal state and
 prints the result. Pass --async to print only the run ID and exit.`,

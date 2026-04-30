@@ -28,7 +28,7 @@ var UserAgent = func() string {
 
 // RetryConfig describes the request-level retry policy. The same policy
 // applies to GETs (full retries on transient errors) and POSTs (only on
-// 429s, never on 5xx — POSTs are not assumed idempotent).
+// 429s, never on 5xx, since POSTs are not assumed idempotent).
 //
 // Help topics render these numbers from DefaultRetryConfig so the docs are
 // always in sync with the binary.

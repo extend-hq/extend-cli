@@ -48,7 +48,12 @@ Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
 --block-options as inline JSON, a plain file path, or an absolute file:// URI.
 --advanced-options accepts the remaining tuning knobs verbatim (return-OCR,
-page ranges, parallelism, etc.) in the same forms.`,
+page ranges, parallelism, etc.) in the same forms.
+
+Caveats:
+  --target spatial does not support --chunk-strategy section.
+  --jq cannot be combined with -o markdown (markdown is not JSON; use
+  -o json --jq instead and select the markdown chunk paths).`,
 		Example: `  extend parse contract.pdf
   extend parse contract.pdf -o markdown > contract.md
   extend parse contract.pdf -o json | jq '.output.chunks | length'

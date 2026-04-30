@@ -32,9 +32,17 @@ func newFilesUploadCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upload <path>",
 		Short: "Upload a local file and print its file_id",
-		Args:  cobra.ExactArgs(1),
+		Long: `Upload a local file to Extend's storage and return the file metadata,
+including the file_id used by subsequent runs.
+
+You typically do not need to call this directly: extract, classify, split,
+parse, edit, and run all auto-upload local paths passed as <input>. Use
+this when you want to upload once and reference the file_id from multiple
+subsequent runs, or when scripting against the API directly.`,
+		Args: cobra.ExactArgs(1),
 		Example: `  extend files upload invoice.pdf
-  extend files upload doc.pdf -o id`,
+  extend files upload doc.pdf -o id
+  FID=$(extend files upload doc.pdf -o id) && extend extract "$FID" --using ex_abc`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -61,6 +69,11 @@ func newFilesListCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List uploaded files",
+		Long: `List previously uploaded files in the current workspace.
+
+Filter by --name-contains for substring matching on the original filename.
+Without --all, returns the first --limit (default 20) results; the JSON
+response includes nextPageToken for manual paging.`,
 		Example: `  extend files list
   extend files list --name-contains invoice --limit 50
   extend files list --all -o json --jq '.data[].id'`,
@@ -163,7 +176,16 @@ func newFilesDeleteCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <file-id>",
 		Short: "Delete an uploaded file",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete an uploaded file by ID. The deletion is permanent and removes
+the file from storage immediately. Existing run records that reference
+the file are not affected, but the file's content can no longer be
+retrieved via 'extend files download'.
+
+Prompts for confirmation when stdin is a TTY; pass --yes to skip the
+prompt (required in non-interactive scripts).`,
+		Example: `  extend files delete file_xK9
+  extend files delete file_xK9 --yes`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFilesDelete(cmd.Context(), app, args[0], yes)
 		},

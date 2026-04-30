@@ -214,87 +214,14 @@ func helpTextExempt(cmd *cobra.Command) bool {
 		return true
 	}
 	exempt := map[string]bool{
-		// Umbrella resource families: have templated Long but no Example
-		// suitable for the umbrella; subcommands carry the examples. Allow
-		// these to skip Example only — Short/Long are checked below.
-		"extend extractors":             true,
-		"extend classifiers":            true,
-		"extend splitters":              true,
-		"extend workflows":              true,
-		"extend extractors versions":    true,
-		"extend classifiers versions":   true,
-		"extend splitters versions":     true,
-		"extend workflows versions":     true,
-		"extend webhooks":               true,
-		"extend webhooks endpoints":     true,
-		"extend webhooks subscriptions": true,
-		"extend evaluations":            true,
-		"extend evaluations items":      true,
-		"extend evaluations runs":       true,
-		"extend runs":                   true,
-		"extend batches":                true,
-		"extend files":                  true,
-		// Commands with bare Short and no Long/Example. Each gets fixed in
-		// PR 4; the entry here keeps verification green in the meantime.
-		"extend extractors list":               true,
-		"extend extractors get":                true,
-		"extend extractors update":             true,
-		"extend extractors create":             true,
-		"extend extractors versions list":      true,
-		"extend extractors versions get":       true,
-		"extend extractors versions create":    true,
-		"extend classifiers list":              true,
-		"extend classifiers get":               true,
-		"extend classifiers update":            true,
-		"extend classifiers create":            true,
-		"extend classifiers versions list":     true,
-		"extend classifiers versions get":      true,
-		"extend classifiers versions create":   true,
-		"extend splitters list":                true,
-		"extend splitters get":                 true,
-		"extend splitters update":              true,
-		"extend splitters create":              true,
-		"extend splitters versions list":       true,
-		"extend splitters versions get":        true,
-		"extend splitters versions create":     true,
-		"extend workflows list":                true,
-		"extend workflows get":                 true,
-		"extend workflows update":              true,
-		"extend workflows create":              true,
-		"extend workflows versions list":       true,
-		"extend workflows versions get":        true,
-		"extend workflows versions create":     true,
-		"extend classify batch":                true,
-		"extend split batch":                   true,
-		"extend batches get":                   true,
-		"extend batches watch":                 true,
-		"extend files upload":                  true,
-		"extend files list":                    true,
-		"extend files delete":                  true,
-		"extend webhooks endpoints get":        true,
-		"extend webhooks endpoints update":     true,
-		"extend webhooks endpoints delete":     true,
-		"extend webhooks subscriptions list":   true,
-		"extend webhooks subscriptions get":    true,
-		"extend webhooks subscriptions update": true,
-		"extend webhooks subscriptions delete": true,
-		"extend evaluations list":              true,
-		"extend evaluations get":               true,
-		"extend evaluations create":            true,
-		"extend evaluations items list":        true,
-		"extend evaluations items get":         true,
-		"extend evaluations items create":      true,
-		"extend evaluations items update":      true,
-		"extend evaluations items delete":      true,
-		"extend evaluations runs get":          true,
-		"extend edit schema generate":          true,
-		"extend parse batch":                   true,
-		"extend run batch":                     true,
-		"extend runs get":                      true,
-		"extend runs cancel":                   true,
-		"extend runs delete":                   true,
-		"extend webhooks endpoints list":       true,
-		"extend version":                       true,
+		// version: trivial command that prints a fixed string from
+		// internal/version. No Long/Example would add information beyond
+		// Short, so it stays exempt.
+		"extend version": true,
+
+		// Commands still pending Long/Example. Each gets fixed in this PR
+		// in batches; the entry here keeps verification green between
+		// batches. Goal: this list reaches empty by end of PR 4.
 	}
 	return exempt[cmd.CommandPath()]
 }
