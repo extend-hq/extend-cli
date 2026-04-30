@@ -51,33 +51,42 @@ func (a processorAccessor[T, V]) cmd(app *App) *cobra.Command {
 
 func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 	var (
-		sortBy  string
-		sortDir string
-		limit   int
-		all     bool
+		sortBy    string
+		sortDir   string
+		limit     int
+		all       bool
+		pageToken string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: fmt.Sprintf("List %s", a.pluralNoun),
 		Long: fmt.Sprintf(`List %s in the current workspace.
 
-Sorted by updatedAt descending by default. Without --all, returns the first
-page (--limit, default 20); use --all to auto-paginate. The %s ID
-column is the input for `+"`extend %s get <id>`"+`.`, a.pluralNoun, a.noun, a.pluralNoun),
+Sorted by updatedAt descending by default. By default, returns the first
+page (--limit, default 20). When more pages exist, the response's
+nextPageToken (and a stderr hint on TTYs) tells you the token to pass to
+--page-token to fetch the next page.
+
+%s
+
+The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
+			a.pluralNoun, paginationGuidance, a.noun, a.pluralNoun),
 		Example: fmt.Sprintf(`  extend %s list
-  extend %s list --sort-by createdAt --all
+  extend %s list --sort-by createdAt
+  extend %s list --page-token <token-from-previous-response>
   extend %s list -o id | head -5
   extend %s list --jq '.data[].id' -o raw`,
-			a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun),
+			a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
 			opts := client.ListProcessorsOptions{
-				Limit:   limit,
-				SortBy:  sortBy,
-				SortDir: sortDir,
+				Limit:     limit,
+				SortBy:    sortBy,
+				SortDir:   sortDir,
+				PageToken: pageToken,
 			}
 			var rows [][]string
 			var pages []any
@@ -95,14 +104,15 @@ column is the input for `+"`extend %s get <id>`"+`.`, a.pluralNoun, a.noun, a.pl
 				}
 				opts.PageToken = next
 			}
-			return renderList(app, pages, []string{"id", "name", "created"}, rows,
+			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows,
 				fmt.Sprintf("No %s.", a.pluralNoun))
 		},
 	}
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every result")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
@@ -141,9 +151,10 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 		Short: fmt.Sprintf("List or inspect versions of %s %s", articleFor(a.noun), a.noun),
 	}
 	var (
-		verSortDir string
-		verLimit   int
-		verAll     bool
+		verSortDir   string
+		verLimit     int
+		verAll       bool
+		verPageToken string
 	)
 	listCmd := &cobra.Command{
 		Use:   fmt.Sprintf("list <%s-id>", a.noun),
@@ -152,9 +163,11 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 
 Versions are immutable snapshots of a %s's config; the row labeled "draft"
 is the editable working copy. Sort defaults to descending by createdAt
-(newest first).`, articleFor(a.noun), a.noun, a.noun),
+(newest first).
+
+%s`, articleFor(a.noun), a.noun, a.noun, paginationGuidance),
 		Example: fmt.Sprintf(`  extend %s versions list %s
-  extend %s versions list %s --all
+  extend %s versions list %s --page-token <token-from-previous-response>
   extend %s versions list %s --jq '.data[].version' -o raw`,
 			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
 		Args: cobra.ExactArgs(1),
@@ -164,8 +177,9 @@ is the editable working copy. Sort defaults to descending by createdAt
 				return err
 			}
 			opts := client.ListProcessorVersionsOptions{
-				SortDir: verSortDir,
-				Limit:   verLimit,
+				SortDir:   verSortDir,
+				Limit:     verLimit,
+				PageToken: verPageToken,
 			}
 			var allItems []V
 			var pages []any
@@ -185,12 +199,13 @@ is the editable working copy. Sort defaults to descending by createdAt
 			for _, v := range allItems {
 				rows = append(rows, a.verRowFn(v))
 			}
-			return renderList(app, pages, []string{"version", "id", "created"}, rows, "No versions.")
+			return renderListForCmd(cmd, app, pages, []string{"version", "id", "created"}, rows, "No versions.")
 		},
 	}
 	listCmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
 	listCmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
-	listCmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate to fetch every version")
+	listCmd.Flags().StringVar(&verPageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	listCmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	SetIOAnnotations(listCmd, OutputTable, OutputJSON)
 	cmd.AddCommand(listCmd)
 	getVerCmd := &cobra.Command{

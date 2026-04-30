@@ -194,6 +194,18 @@ func RunnableLeaves(root *cobra.Command) []*cobra.Command {
 	return out
 }
 
+// paginationGuidance is the boilerplate paragraph every list command's Long
+// references for pagination behavior. Centralising it means the recommended
+// pattern (token-by-token, NOT --all, same filters across pages) stays
+// consistent across the surface.
+const paginationGuidance = `Pagination: agents and scripts should iterate page-by-page using
+--page-token rather than --all, which fetches every page into a single
+response and can blow past context limits on busy workspaces. The token
+is bound to the originating query on the server, so every paginated
+follow-up call must repeat the same filter flags as the first call;
+changing them mid-iteration produces incorrect results. The stderr
+hint emitted on TTYs prints the exact next-page command for you.`
+
 // HelpTopicAnnotation marks a Cobra command as a runtime-rendered help topic
 // rather than a regular CLI verb. Topics are runnable (their Run prints the
 // rendered content) but they:
@@ -368,9 +380,27 @@ func renderOutputTopic(root *cobra.Command) string {
 		fmt.Fprintf(&b, "  %-*s  %-9s  %s\n", pathLen, r[0], r[1], r[2])
 	}
 	b.WriteString("\nPagination:\n\n")
-	b.WriteString("  List commands take --limit (default 20) and --all. Without --all,\n")
-	b.WriteString("  only the first page is returned; nextPageToken appears in the JSON\n")
-	b.WriteString("  output for manual paging.\n")
+	b.WriteString("  List commands return one page at a time. Each response includes a\n")
+	b.WriteString("  nextPageToken (visible in JSON output, surfaced as a stderr hint on\n")
+	b.WriteString("  TTYs). Pass that value to the next call's --page-token to advance.\n\n")
+	b.WriteString("  Page tokens are bound to the originating query on the server, so\n")
+	b.WriteString("  every follow-up call must repeat the same filter flags as the\n")
+	b.WriteString("  first one (--type, --using, --status, --batch, --sort, etc.).\n")
+	b.WriteString("  Changing filters between pages yields incorrect results.\n\n")
+	b.WriteString("  Recommended pattern (agents and scripts) — note FILTERS reused:\n\n")
+	b.WriteString("      FILTERS=(--type extract --using ex_abc --status PROCESSED)\n")
+	b.WriteString("      tok=\"\"\n")
+	b.WriteString("      while :; do\n")
+	b.WriteString("        page=$(extend runs list \"${FILTERS[@]}\" \\\n")
+	b.WriteString("                 --page-token \"$tok\" -o json)\n")
+	b.WriteString("        echo \"$page\" | jq '.data[]'    # do work on this page\n")
+	b.WriteString("        tok=$(echo \"$page\" | jq -r '.nextPageToken')\n")
+	b.WriteString("        [ -z \"$tok\" ] || [ \"$tok\" = \"null\" ] && break\n")
+	b.WriteString("      done\n\n")
+	b.WriteString("  --all is also supported but discouraged: it auto-paginates every\n")
+	b.WriteString("  page into a single response, which can exceed context limits on\n")
+	b.WriteString("  busy workspaces. Use it only for interactive shell sessions where\n")
+	b.WriteString("  you know the result set is small.\n")
 	return b.String()
 }
 

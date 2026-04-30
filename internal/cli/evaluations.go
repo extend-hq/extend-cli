@@ -25,11 +25,12 @@ func newEvaluationsCommand(app *App) *cobra.Command {
 
 func newEvaluationsListCommand(app *App) *cobra.Command {
 	var (
-		entity  string
-		sortBy  string
-		sortDir string
-		limit   int
-		all     bool
+		entity    string
+		sortBy    string
+		sortDir   string
+		limit     int
+		all       bool
+		pageToken string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -38,20 +39,23 @@ func newEvaluationsListCommand(app *App) *cobra.Command {
 
 Filter to those scoped to a specific extractor, classifier, or splitter
 with --entity. Evaluation sets contain ground-truth items used to measure
-processor accuracy via 'extend evaluations runs get'.`,
+processor accuracy via 'extend evaluations runs get'.
+
+` + paginationGuidance,
 		Example: `  extend evaluations list
   extend evaluations list --entity ex_abc --sort-by updatedAt
-  extend evaluations list --all -o id`,
+  extend evaluations list --page-token <token-from-previous-response>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
 			opts := client.ListEvaluationSetsOptions{
-				EntityID: entity,
-				SortBy:   sortBy,
-				SortDir:  sortDir,
-				Limit:    limit,
+				EntityID:  entity,
+				SortBy:    sortBy,
+				SortDir:   sortDir,
+				Limit:     limit,
+				PageToken: pageToken,
 			}
 			var rows [][]string
 			var pages []any
@@ -69,14 +73,15 @@ processor accuracy via 'extend evaluations runs get'.`,
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			return renderList(app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
+			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
 		},
 	}
 	cmd.Flags().StringVar(&entity, "entity", "", "Filter by extractor/classifier/splitter ID (ex_/cl_/spl_)")
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
@@ -162,19 +167,22 @@ func newEvaluationItemsCommand(app *App) *cobra.Command {
 
 func newEvaluationItemsListCommand(app *App) *cobra.Command {
 	var (
-		sortBy  string
-		sortDir string
-		limit   int
-		all     bool
+		sortBy    string
+		sortDir   string
+		limit     int
+		all       bool
+		pageToken string
 	)
 	cmd := &cobra.Command{
 		Use:   "list <evaluation-set-id>",
 		Short: "List items in an evaluation set",
 		Long: `List the ground-truth items in an evaluation set. Each item pairs a
 file with its expected output; the set runs every item against a processor
-version to produce an accuracy score.`,
+version to produce an accuracy score.
+
+` + paginationGuidance,
 		Example: `  extend evaluations items list evs_abc
-  extend evaluations items list evs_abc --all -o id`,
+  extend evaluations items list evs_abc --page-token <token-from-previous-response>`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
@@ -182,9 +190,10 @@ version to produce an accuracy score.`,
 				return err
 			}
 			opts := client.ListProcessorsOptions{
-				Limit:   limit,
-				SortBy:  sortBy,
-				SortDir: sortDir,
+				Limit:     limit,
+				SortBy:    sortBy,
+				SortDir:   sortDir,
+				PageToken: pageToken,
 			}
 			var rows [][]string
 			var pages []any
@@ -206,13 +215,14 @@ version to produce an accuracy score.`,
 				}
 				opts.PageToken = page.NextPageToken
 			}
-			return renderList(app, pages, []string{"id", "file"}, rows, "No items.")
+			return renderListForCmd(cmd, app, pages, []string{"id", "file"}, rows, "No items.")
 		},
 	}
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
