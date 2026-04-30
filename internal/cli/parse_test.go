@@ -32,6 +32,7 @@ func TestParse_RawMarkdownWhenPiped(t *testing.T) {
 	if err := runParse(context.Background(), ta.app, parseParams{
 		input:   "file_xK9",
 		target:  "markdown",
+		wait:    true,
 		timeout: 2 * time.Second,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
@@ -64,6 +65,7 @@ func TestParse_JSONFormatRendersFullRun(t *testing.T) {
 	if err := runParse(context.Background(), ta.app, parseParams{
 		input:   "file_xK9",
 		target:  "markdown",
+		wait:    true,
 		timeout: 2 * time.Second,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
@@ -83,7 +85,7 @@ func TestParse_AsyncReturnsRunID(t *testing.T) {
 	if err := runParse(context.Background(), ta.app, parseParams{
 		input:  "file_xK9",
 		target: "markdown",
-		async:  true,
+		wait:   false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -103,7 +105,7 @@ func TestParse_ChunkingStrategyOptionsRoundTrip(t *testing.T) {
 		chunkStrategy: "section",
 		chunkMinChars: 100,
 		chunkMaxChars: 4000,
-		async:         true,
+		wait:          false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -123,7 +125,7 @@ func TestParse_EngineVersionRoundTrip(t *testing.T) {
 		target:        "markdown",
 		engine:        "parse_performance",
 		engineVersion: "1.0.1",
-		async:         true,
+		wait:          false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -144,7 +146,7 @@ func TestParse_ChunkingStrategyNoneOmitsChunkingStrategy(t *testing.T) {
 		input:         "file_xK9",
 		target:        "markdown",
 		chunkStrategy: "none",
-		async:         true,
+		wait:          false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -163,7 +165,7 @@ func TestParse_InvalidChunkingStrategyErrorsBeforeRequest(t *testing.T) {
 		input:         "file_xK9",
 		target:        "markdown",
 		chunkStrategy: "chapters",
-		async:         true,
+		wait:          false,
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown --chunk-strategy") {
 		t.Fatalf("expected chunk strategy error, got %v", err)
@@ -180,7 +182,7 @@ func TestParse_ChunkingStrategyNoneRejectsChunkOptions(t *testing.T) {
 		target:        "markdown",
 		chunkStrategy: "none",
 		chunkMaxChars: 1000,
-		async:         true,
+		wait:          false,
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot be used with --chunk-strategy none") {
 		t.Fatalf("expected contradictory chunk options error, got %v", err)
@@ -207,7 +209,7 @@ func TestParse_BlockOptionsAndAdvancedOptionsFromFile(t *testing.T) {
 		target:              "markdown",
 		blockOptionsPath:    bo,
 		advancedOptionsPath: ao,
-		async:               true,
+		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -230,7 +232,7 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 		target:              "markdown",
 		blockOptionsPath:    `{"tables":{"enabled":true}}`,
 		advancedOptionsPath: `{"pageRanges":"1-3"}`,
-		async:               true,
+		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -259,7 +261,7 @@ func TestParse_AdvancedOptionsFileURI(t *testing.T) {
 		input:               "file_xK9",
 		target:              "markdown",
 		advancedOptionsPath: (&url.URL{Scheme: "file", Path: advanced}).String(),
-		async:               true,
+		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
@@ -278,7 +280,7 @@ func TestParse_OnlyMaxCharsOmitsMin(t *testing.T) {
 		input:         "file_xK9",
 		target:        "markdown",
 		chunkMaxChars: 8000,
-		async:         true,
+		wait:          false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}

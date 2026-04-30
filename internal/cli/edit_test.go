@@ -32,6 +32,7 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 		input:        "file_a",
 		schemaPath:   schema,
 		instructions: "be thorough",
+		wait:         true,
 		nativeOnly:   true,
 		flatten:      true,
 		timeout:      2 * time.Second,
@@ -81,6 +82,7 @@ func TestEdit_UnwrapsGeneratedSchemaEnvelope(t *testing.T) {
 	if err := runEdit(context.Background(), ta.app, editParams{
 		input:      "file_a",
 		schemaPath: schema,
+		wait:       true,
 		nativeOnly: true,
 		flatten:    true,
 		timeout:    2 * time.Second,
@@ -132,6 +134,7 @@ func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 		input:      "file_a",
 		schemaPath: schema,
 		outputFile: out,
+		wait:       true,
 		nativeOnly: true,
 		flatten:    true,
 		timeout:    2 * time.Second,
@@ -182,6 +185,7 @@ func TestEdit_OutputFileStdoutDoesNotAppendRunJSON(t *testing.T) {
 		input:      "file_a",
 		schemaPath: schema,
 		outputFile: "-",
+		wait:       true,
 		nativeOnly: true,
 		flatten:    true,
 		timeout:    2 * time.Second,
@@ -247,6 +251,7 @@ func TestEdit_FailedRunSurfacesFailureMessage(t *testing.T) {
 	err := runEdit(context.Background(), ta.app, editParams{
 		input:      "file_a",
 		schemaPath: schema,
+		wait:       true,
 		timeout:    2 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "No form fields detected") {

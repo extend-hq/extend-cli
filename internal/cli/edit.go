@@ -21,7 +21,7 @@ func newEditCommand(app *App) *cobra.Command {
 		schemaGenInstructions string
 		outputFile            string
 		password              string
-		async                 bool
+		wait                  bool
 		nativeOnly            bool
 		flatten               bool
 		timeout               time.Duration
@@ -37,7 +37,9 @@ scaffold a schema; populate the values inline (as 'default' on each field);
 then run 'extend edit <input> --schema schema.json'.
 
 By default, the command waits for the run to complete and prints a summary.
-Pass --output-file to auto-download the filled PDF.`,
+Pass --output-file to auto-download the filled PDF, or --wait=false to
+return the run ID immediately and fetch the filled PDF later via 'extend
+files download'.`,
 		Example: `  extend edit schema generate form.pdf > schema.json
   # populate default values inline in schema.json, then:
   extend edit form.pdf --schema schema.json --output-file filled.pdf`,
@@ -50,7 +52,7 @@ Pass --output-file to auto-download the filled PDF.`,
 				schemaGenInstructions: schemaGenInstructions,
 				outputFile:            outputFile,
 				password:              password,
-				async:                 async,
+				wait:                  wait,
 				nativeOnly:            nativeOnly,
 				flatten:               flatten,
 				timeout:               timeout,
@@ -63,7 +65,7 @@ Pass --output-file to auto-download the filled PDF.`,
 	cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Instructions used only when auto-generating the schema (no --schema)")
 	cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
+	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 	cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
 	cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
@@ -83,7 +85,7 @@ type editParams struct {
 	schemaGenInstructions string
 	outputFile            string
 	password              string
-	async                 bool
+	wait                  bool
 	nativeOnly            bool
 	flatten               bool
 	timeout               time.Duration
@@ -125,7 +127,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		return fmt.Errorf("create run: %w", err)
 	}
 
-	if p.async {
+	if !p.wait {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 

@@ -24,7 +24,7 @@ func TestExtract_AsyncReturnsRunID(t *testing.T) {
 	err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "file_xK9",
 		extractorID: "ex_abc",
-		async:       true,
+		wait:        false,
 	})
 	if err != nil {
 		t.Fatalf("runExtract: %v", err)
@@ -68,7 +68,7 @@ func TestExtract_WaitPath(t *testing.T) {
 	err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "file_xK9",
 		extractorID: "ex_abc",
-		async:       false,
+		wait:        true,
 		timeout:     2 * time.Second,
 	})
 	if err != nil {
@@ -96,6 +96,7 @@ func TestExtract_FailedRunSurfacesAsError(t *testing.T) {
 	err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "file_xK9",
 		extractorID: "ex_abc",
+		wait:        true,
 		timeout:     2 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "failed") {
@@ -112,7 +113,7 @@ func TestExtract_APIErrorRenderedNicely(t *testing.T) {
 	err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "file_xK9",
 		extractorID: "ex_doesnotexist",
-		async:       true,
+		wait:        false,
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -131,7 +132,7 @@ func TestExtract_URLInputPassedThrough(t *testing.T) {
 	if err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "https://example.com/x.pdf",
 		extractorID: "ex_abc",
-		async:       true,
+		wait:        false,
 	}); err != nil {
 		t.Fatalf("runExtract: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestExtract_MetadataAndTagsInRequestBody(t *testing.T) {
 	if err := runExtract(context.Background(), ta.app, extractParams{
 		input:       "file_xK9",
 		extractorID: "ex_abc",
-		async:       true,
+		wait:        false,
 		metadata: map[string]any{
 			"customer":          "acme",
 			"env":               "staging",
@@ -184,7 +185,7 @@ func TestExtract_OverrideConfigFromFile(t *testing.T) {
 		input:              "file_xK9",
 		extractorID:        "ex_abc",
 		overrideConfigPath: tmp,
-		async:              true,
+		wait:               false,
 	}); err != nil {
 		t.Fatalf("runExtract: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestExtract_InlineConfigSkipsExtractor(t *testing.T) {
 	if err := runExtract(context.Background(), ta.app, extractParams{
 		input:      "file_xK9",
 		configPath: tmp,
-		async:      true,
+		wait:       false,
 	}); err != nil {
 		t.Fatalf("runExtract: %v", err)
 	}
@@ -263,7 +264,7 @@ func TestExtract_InvalidJSONOverrideConfigErrorsClearly(t *testing.T) {
 		input:              "file_xK9",
 		extractorID:        "ex_abc",
 		overrideConfigPath: tmp,
-		async:              true,
+		wait:               false,
 	})
 	if err == nil || !strings.Contains(err.Error(), "--override-config") {
 		t.Errorf("expected --override-config error, got %v", err)

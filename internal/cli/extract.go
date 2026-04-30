@@ -19,7 +19,7 @@ func newExtractCommand(app *App) *cobra.Command {
 		overrideConfigPath string
 		configPath         string
 		password           string
-		async              bool
+		wait               bool
 		priority           int
 		timeout            time.Duration
 		meta               metaFlags
@@ -43,10 +43,12 @@ The extraction config can come from one of two sources:
 The two are mutually exclusive; the server requires exactly one.
 
 By default, the command waits until the run reaches a terminal state and
-prints the result. Pass --async to print only the run ID and exit.`,
+prints the result. Pass --wait=false to print only the run ID and exit
+immediately, then poll with 'extend runs watch <id>' or fetch with
+'extend runs get <id>'.`,
 		Example: `  extend extract invoice.pdf --using ex_abc
   extend extract https://example.com/doc.pdf --using ex_abc
-  extend extract file_xK9mLPq --using ex_abc --async
+  extend extract file_xK9mLPq --using ex_abc --wait=false
   extend extract invoice.pdf --using ex_abc --override-config override.json
   extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'
   extend extract invoice.pdf --config inline-config.json
@@ -70,7 +72,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
 				overrideConfigPath: overrideConfigPath,
 				configPath:         configPath,
 				password:           password,
-				async:              async,
+				wait:               wait,
 				priority:           priority,
 				timeout:            timeout,
 				metadata:           md,
@@ -87,7 +89,7 @@ prints the result. Pass --async to print only the run ID and exit.`,
 	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")
 	cmd.Flags().StringVar(&configPath, "config", "", "JSON object, path, or file:// URI for extract config (skips the extractor; mutually exclusive with --using)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&async, "async", false, "Return run ID immediately without waiting")
+	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 	meta.attach(cmd)
@@ -103,7 +105,7 @@ type extractParams struct {
 	overrideConfigPath string
 	configPath         string
 	password           string
-	async              bool
+	wait               bool
 	priority           int
 	timeout            time.Duration
 	metadata           map[string]any
@@ -151,7 +153,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 		return fmt.Errorf("create run: %w", err)
 	}
 
-	if p.async {
+	if !p.wait {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 
