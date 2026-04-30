@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -42,51 +43,107 @@ func renderList(app *App, pages []any, headers []string, rows [][]string, emptyM
 		raw = pages[0]
 	}
 
-	if app.Format == "" {
-		if app.JQ != "" {
-			return renderWithDefault(app, raw, output.FormatJSON)
+	var renderErr error
+	switch {
+	case app.Format == "":
+		switch {
+		case app.JQ != "":
+			renderErr = renderWithDefault(app, raw, output.FormatJSON)
+		case app.IO.IsStdoutTTY():
+			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
+		default:
+			renderErr = renderWithDefault(app, raw, output.FormatJSON)
 		}
-		if app.IO.IsStdoutTTY() {
-			return renderTableOrEmpty(app, headers, rows, emptyMsg)
-		}
-		return renderWithDefault(app, raw, output.FormatJSON)
-	}
-
-	parsed, err := output.ParseFormat(app.Format)
-	if err != nil {
-		return err
-	}
-	switch parsed {
-	case output.FormatTable:
-		return renderTableOrEmpty(app, headers, rows, emptyMsg)
-	case output.FormatMarkdown:
-		if len(rows) == 0 {
-			fmt.Fprintln(app.IO.Out, emptyMsg)
-			return nil
-		}
-		return output.RenderMarkdownTable(app.IO.Out, headers, rows)
-	case output.FormatID:
-		if app.JQ != "" {
-			return renderWithDefault(app, raw, output.FormatJSON)
-		}
-		// `-o id` on a list emits one ID per row so the result composes with
-		// xargs / shell pipes. We use the rows + headers we already built for
-		// the table: locate the "id" column case-insensitively (some lists,
-		// e.g. processor versions, put id in column 1, not 0). If the list
-		// has no id column we fall through to renderWithDefault so the user
-		// gets the same error they would have hit before.
-		if idx := indexOfHeader(headers, "id"); idx >= 0 {
-			for _, row := range rows {
-				if idx < len(row) {
-					fmt.Fprintln(app.IO.Out, row[idx])
-				}
-			}
-			return nil
-		}
-		return renderWithDefault(app, raw, output.FormatJSON)
 	default:
-		return renderWithDefault(app, raw, output.FormatJSON)
+		parsed, err := output.ParseFormat(app.Format)
+		if err != nil {
+			return err
+		}
+		switch parsed {
+		case output.FormatTable:
+			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
+		case output.FormatMarkdown:
+			if len(rows) == 0 {
+				fmt.Fprintln(app.IO.Out, emptyMsg)
+			} else {
+				renderErr = output.RenderMarkdownTable(app.IO.Out, headers, rows)
+			}
+		case output.FormatID:
+			if app.JQ != "" {
+				renderErr = renderWithDefault(app, raw, output.FormatJSON)
+				break
+			}
+			// `-o id` on a list emits one ID per row so the result composes
+			// with xargs / shell pipes. We use the rows + headers already
+			// built for the table: locate the "id" column case-insensitively
+			// (some lists, e.g. processor versions, put id in column 1, not
+			// 0). If the list has no id column we fall through to
+			// renderWithDefault so the user gets the same error they would
+			// have hit before.
+			if idx := indexOfHeader(headers, "id"); idx >= 0 {
+				for _, row := range rows {
+					if idx < len(row) {
+						fmt.Fprintln(app.IO.Out, row[idx])
+					}
+				}
+				break
+			}
+			renderErr = renderWithDefault(app, raw, output.FormatJSON)
+		default:
+			renderErr = renderWithDefault(app, raw, output.FormatJSON)
+		}
 	}
+	if renderErr != nil {
+		return renderErr
+	}
+	maybePrintPaginationHint(app, pages)
+	return nil
+}
+
+// maybePrintPaginationHint writes a dimmed line to stderr when the rendered
+// list has more pages available. Conditions:
+//
+//   - The last page has a non-empty NextPageToken (more results exist).
+//   - Stderr is a TTY (don't pollute logs/pipes for non-interactive use).
+//
+// This is the only hint the user gets that --all could fetch more rows; the
+// JSON output already exposes nextPageToken, but the table/-o id renders
+// drop it.
+func maybePrintPaginationHint(app *App, pages []any) {
+	if len(pages) == 0 || !app.IO.IsStderrTTY() {
+		return
+	}
+	token := nextPageTokenOf(pages[len(pages)-1])
+	if token == "" {
+		return
+	}
+	pal := paletteFor(app.IO)
+	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("more results available; pass --all or filter further (next-page-token: %s)", token))
+}
+
+// nextPageTokenOf extracts a NextPageToken string field from a struct (or
+// pointer to struct) using reflection. Returns "" when the field is absent
+// or empty. Used by the pagination hint so a single check works across
+// every list response type.
+func nextPageTokenOf(page any) string {
+	if page == nil {
+		return ""
+	}
+	v := reflect.ValueOf(page)
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return ""
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	f := v.FieldByName("NextPageToken")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
 }
 
 func indexOfHeader(headers []string, name string) int {

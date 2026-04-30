@@ -51,6 +51,7 @@ func (s *IOStreams) IsStdinTTY() bool        { return s.stdinTTY }
 func (s *IOStreams) ColorEnabled() bool      { return s.colorOn }
 func (s *IOStreams) SetColorEnabled(on bool) { s.colorOn = on }
 func (s *IOStreams) SetStdoutTTY(on bool)    { s.stdoutTTY = on }
+func (s *IOStreams) SetStderrTTY(on bool)    { s.stderrTTY = on }
 
 // detectColor precedence:
 //
