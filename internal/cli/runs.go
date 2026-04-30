@@ -212,11 +212,10 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Watching %s...", id))
-	opts := client.WaitOptions{
-		Interval:    1 * time.Second,
-		MaxInterval: 10 * time.Second,
-		Timeout:     timeout,
-	}
+	// Watching uses the short profile uniformly, even for workflow runs:
+	// users invoking `runs watch` are explicitly asking for live progress and
+	// expect responsive updates.
+	opts := client.WaitProfileOptions(client.ProfileShort, timeout)
 
 	var status client.RunStatus
 	var renderErr error

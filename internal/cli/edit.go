@@ -126,11 +126,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForEditRun(ctx, run.ID, client.WaitOptions{
-		Interval:    1 * time.Second,
-		MaxInterval: 10 * time.Second,
-		Timeout:     p.timeout,
-	}, func(r *client.EditRun) {
+	final, err := cli.WaitForEditRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.EditRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")

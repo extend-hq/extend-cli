@@ -401,11 +401,7 @@ func newBatchesWatchCommand(app *App) *cobra.Command {
 			}
 			id := args[0]
 			sp := app.IO.StartSpinner(fmt.Sprintf("Batch %s: ?", id))
-			final, err := cli.WaitForBatchRun(cmd.Context(), id, client.WaitOptions{
-				Interval:    2 * time.Second,
-				MaxInterval: 30 * time.Second,
-				Timeout:     timeout,
-			}, func(r *client.BatchRun) {
+			final, err := cli.WaitForBatchRun(cmd.Context(), id, client.WaitProfileOptions(client.ProfileLong, timeout), func(r *client.BatchRun) {
 				sp.Update(fmt.Sprintf("Batch %s: %s (%d run%s)", r.ID, r.Status, r.RunCount, pluralize(r.RunCount)))
 			})
 			sp.Stop("")

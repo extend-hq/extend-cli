@@ -20,6 +20,33 @@ const (
 	StatusCancelling  RunStatus = "CANCELLING"
 )
 
+// TerminalSuccessStates lists the run statuses that represent a successful
+// terminal outcome. Action commands (extract, classify, ...) exit zero on
+// these.
+var TerminalSuccessStates = []RunStatus{StatusProcessed}
+
+// TerminalFailureStates lists the run statuses that represent a failed
+// terminal outcome and cause action commands to exit non-zero. NEEDS_REVIEW
+// is intentionally not in this list: it pauses for human action but the run
+// itself has not failed. Per-kind subsets apply (parse runs cannot be
+// CANCELLED or REJECTED), but commands check membership here.
+var TerminalFailureStates = []RunStatus{StatusFailed, StatusCancelled, StatusRejected}
+
+// TerminalReviewStates lists statuses that are terminal but indicate the
+// run is awaiting a human decision rather than complete or failed.
+var TerminalReviewStates = []RunStatus{StatusNeedsReview}
+
+// IsTerminalFailure reports whether s is a terminal-failure state. Use this
+// in exit-code logic instead of comparing against statuses individually.
+func (s RunStatus) IsTerminalFailure() bool {
+	for _, t := range TerminalFailureStates {
+		if s == t {
+			return true
+		}
+	}
+	return false
+}
+
 func (s RunStatus) IsTerminal() bool {
 	switch s {
 	case StatusProcessed, StatusFailed, StatusCancelled, StatusNeedsReview, StatusRejected:
@@ -256,11 +283,12 @@ func waitForRun[T any](
 }
 
 func applyWaitDefaults(opts WaitOptions) WaitOptions {
+	short := waitProfileTable[ProfileShort]
 	if opts.Interval <= 0 {
-		opts.Interval = 1 * time.Second
+		opts.Interval = short.Interval
 	}
 	if opts.MaxInterval <= 0 {
-		opts.MaxInterval = 10 * time.Second
+		opts.MaxInterval = short.MaxInterval
 	}
 	return opts
 }

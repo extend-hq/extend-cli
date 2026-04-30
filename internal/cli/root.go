@@ -63,15 +63,15 @@ The --workspace and --region flags override their respective env vars.`,
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 
 	app.NewClient = func() (*client.Client, error) {
-		key := os.Getenv("EXTEND_API_KEY")
+		key := os.Getenv(client.EnvAPIKey)
 		if key == "" {
-			return nil, errors.New("EXTEND_API_KEY environment variable is required")
+			return nil, fmt.Errorf("%s environment variable is required", client.EnvAPIKey)
 		}
 		c := client.New(key)
 
 		region := app.Region
 		if region == "" {
-			region = os.Getenv("EXTEND_REGION")
+			region = os.Getenv(client.EnvRegion)
 		}
 		if region != "" {
 			url, ok := client.RegionBaseURL(region)
@@ -80,16 +80,16 @@ The --workspace and --region flags override their respective env vars.`,
 			}
 			c.BaseURL = url
 		}
-		if v := os.Getenv("EXTEND_BASE_URL"); v != "" {
+		if v := os.Getenv(client.EnvBaseURL); v != "" {
 			c.BaseURL = v
 		}
-		if v := os.Getenv("EXTEND_API_VERSION"); v != "" {
+		if v := os.Getenv(client.EnvAPIVersion); v != "" {
 			c.APIVersion = v
 		}
 
 		ws := app.Workspace
 		if ws == "" {
-			ws = os.Getenv("EXTEND_WORKSPACE_ID")
+			ws = os.Getenv(client.EnvWorkspaceID)
 		}
 		c.WorkspaceID = ws
 

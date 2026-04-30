@@ -10,13 +10,43 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/extend-hq/extend-cli/internal/version"
 )
 
 const (
 	DefaultBaseURL    = "https://api.extend.ai"
 	DefaultAPIVersion = "2026-02-09"
-	userAgent         = "extend-cli/0.1"
 )
+
+// userAgent is built lazily so the binary's version (set via -ldflags or
+// resolved from build info) is reflected on every request. Tests that want
+// to override it can swap UserAgent.
+var UserAgent = func() string {
+	return "extend-cli/" + version.Short()
+}
+
+// RetryConfig describes the request-level retry policy. The same policy
+// applies to GETs (full retries on transient errors) and POSTs (only on
+// 429s, never on 5xx — POSTs are not assumed idempotent).
+//
+// Help topics render these numbers from DefaultRetryConfig so the docs are
+// always in sync with the binary.
+type RetryConfig struct {
+	// MaxAttempts is the total number of attempts (including the first).
+	MaxAttempts int
+	// InitialBackoff is the wait before the first retry.
+	InitialBackoff time.Duration
+	// MaxBackoff caps the exponential backoff between retries.
+	MaxBackoff time.Duration
+}
+
+// DefaultRetryConfig is the policy used by every client method.
+var DefaultRetryConfig = RetryConfig{
+	MaxAttempts:    4,
+	InitialBackoff: 500 * time.Millisecond,
+	MaxBackoff:     5 * time.Second,
+}
 
 type Client struct {
 	BaseURL     string
@@ -72,7 +102,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("x-extend-api-version", c.APIVersion)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent())
 	if c.WorkspaceID != "" {
 		req.Header.Set("X-Extend-Workspace-Id", c.WorkspaceID)
 	}
@@ -123,17 +153,17 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	const maxAttempts = 4
-	backoff := 500 * time.Millisecond
+	rc := DefaultRetryConfig
+	backoff := rc.InitialBackoff
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := 0; attempt < rc.MaxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
-			backoff = min(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, rc.MaxBackoff)
 		}
 		resp, err := c.do(ctx, http.MethodPost, path, bytes.NewReader(body), "application/json")
 		if err == nil {
@@ -164,17 +194,17 @@ func isRateLimited(err error) bool {
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	const maxAttempts = 4
-	backoff := 500 * time.Millisecond
+	rc := DefaultRetryConfig
+	backoff := rc.InitialBackoff
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := 0; attempt < rc.MaxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
-			backoff = min(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, rc.MaxBackoff)
 		}
 		resp, err := c.do(ctx, http.MethodGet, path, nil, "")
 		if err == nil {

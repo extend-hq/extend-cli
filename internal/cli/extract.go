@@ -152,11 +152,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForExtractRun(ctx, run.ID, client.WaitOptions{
-		Interval:    1 * time.Second,
-		MaxInterval: 10 * time.Second,
-		Timeout:     p.timeout,
-	}, func(r *client.ExtractRun) {
+	final, err := cli.WaitForExtractRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.ExtractRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")

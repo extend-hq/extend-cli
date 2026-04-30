@@ -157,11 +157,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForWorkflowRun(ctx, run.ID, client.WaitOptions{
-		Interval:    2 * time.Second,
-		MaxInterval: 30 * time.Second,
-		Timeout:     p.timeout,
-	}, func(r *client.WorkflowRun) {
+	final, err := cli.WaitForWorkflowRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileLong, p.timeout), func(r *client.WorkflowRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")

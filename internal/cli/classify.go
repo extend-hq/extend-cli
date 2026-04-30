@@ -129,11 +129,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForClassifyRun(ctx, run.ID, client.WaitOptions{
-		Interval:    1 * time.Second,
-		MaxInterval: 10 * time.Second,
-		Timeout:     p.timeout,
-	}, func(r *client.ClassifyRun) {
+	final, err := cli.WaitForClassifyRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.ClassifyRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")
