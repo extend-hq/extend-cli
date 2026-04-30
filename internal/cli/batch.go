@@ -123,6 +123,7 @@ schema does not accept top-level metadata.`,
 		},
 	}
 	f.attach(cmd, "using")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -167,6 +168,7 @@ func newClassifyBatchCommand(app *App) *cobra.Command {
 		},
 	}
 	f.attach(cmd, "using")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -211,6 +213,7 @@ func newSplitBatchCommand(app *App) *cobra.Command {
 		},
 	}
 	f.attach(cmd, "using")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -273,6 +276,7 @@ func newParseBatchCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	meta.attach(cmd)
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -325,6 +329,7 @@ endpoint for workflow batches. Track progress with:
 		},
 	}
 	f.attach(cmd, "workflow")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -382,6 +387,7 @@ func newBatchesGetCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, br, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -424,5 +430,8 @@ func newBatchesWatchCommand(app *App) *cobra.Command {
 	}
 	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait")
 	cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileLong, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
 	return cmd
 }

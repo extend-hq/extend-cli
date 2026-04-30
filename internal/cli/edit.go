@@ -68,6 +68,10 @@ Pass --output-file to auto-download the filled PDF.`,
 	cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed)
+
 	cmd.AddCommand(newEditSchemaCommand(app))
 	return cmd
 }
@@ -312,5 +316,6 @@ in the edit family; there is no async variant.`,
 	cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
 	cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Path to a starting-point JSON Schema (overlaid by detection)")
 	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }

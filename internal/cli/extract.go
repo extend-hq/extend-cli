@@ -78,6 +78,10 @@ prints the result. Pass --async to print only the run ID and exit.`,
 		},
 	}
 
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
+
 	cmd.Flags().StringVar(&extractorID, "using", "", "Extractor ID (mutually exclusive with --config)")
 	cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
 	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")

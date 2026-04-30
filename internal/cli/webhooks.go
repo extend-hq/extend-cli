@@ -86,6 +86,7 @@ func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -106,6 +107,7 @@ func newWebhookEndpointsGetCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, ep, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -227,6 +229,7 @@ once the body exceeds --url-threshold-bytes.`,
 	cmd.Flags().StringArrayVar(&events, "events", nil, "Enabled events (comma-separated or repeated; required)")
 	cmd.Flags().StringVar(&apiVersion, "api-version", client.DefaultAPIVersion, "API version for events")
 	advanced.attach(cmd)
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -289,6 +292,7 @@ without --header instead.`,
 	cmd.Flags().BoolVar(&disable, "disable", false, "Set status to 'disabled'")
 	cmd.Flags().StringArrayVar(&events, "events", nil, "Replace enabled events list")
 	advanced.attach(cmd)
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -310,6 +314,7 @@ func newWebhookEndpointsDeleteCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 
@@ -375,6 +380,7 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -395,6 +401,7 @@ func newWebhookSubscriptionsGetCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, s, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -452,6 +459,7 @@ unknown prefixes.`,
 	cmd.Flags().StringVar(&resourceID, "resource", "", "Resource ID to scope events to, e.g. workflow_xxx (required)")
 	cmd.Flags().StringVar(&resourceType, "resource-type", "", "Resource type: extractor|classifier|splitter|workflow (auto-detected from --resource prefix)")
 	cmd.Flags().StringArrayVar(&events, "events", nil, "Enabled events (comma-separated or repeated; required)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -479,6 +487,7 @@ func newWebhookSubscriptionsUpdateCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&events, "events", nil, "Replacement enabled events (comma-separated or repeated; required)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -500,6 +509,7 @@ func newWebhookSubscriptionsDeleteCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 
@@ -551,6 +561,7 @@ The body is read from --body-file or stdin. The signing secret can come from
 	cmd.Flags().DurationVar(&maxAge, "max-age", 5*time.Minute, "Reject if timestamp is older than this; 0 to skip the time check")
 	_ = cmd.MarkFlagRequired("signature")
 	_ = cmd.MarkFlagRequired("timestamp")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 
