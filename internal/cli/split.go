@@ -65,6 +65,10 @@ prints the segments table. Pass --async to print only the run ID and exit.`,
 		},
 	}
 
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
+
 	cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
 	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the splitter's config for this run only")

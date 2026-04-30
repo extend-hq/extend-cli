@@ -94,6 +94,10 @@ page ranges, parallelism, etc.) in the same forms.`,
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
 	meta.attach(cmd)
 
+	SetIOAnnotations(cmd, OutputMarkdown, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed)
+
 	cmd.AddCommand(newParseBatchCommand(app))
 	return cmd
 }

@@ -88,6 +88,7 @@ stdin; overrides everything), or use --metadata and --tag to set keys individual
 	}
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	meta.attach(cmd)
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
 	return cmd
 }
 
@@ -110,6 +111,7 @@ func newRunsGetCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&responseType, "response-type", "", "Parse runs only: json|url output payload shape")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -141,6 +143,9 @@ works as expected.`,
 	}
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait")
 	cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
 	return cmd
 }
 
@@ -354,6 +359,7 @@ workflow runs ignore --source and --source-id).`,
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
 	_ = cmd.MarkFlagRequired("type")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -582,6 +588,7 @@ the ID prefix. Parse runs cannot be cancelled.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -600,6 +607,7 @@ The run type is auto-detected from the ID prefix (exr_/pr_/clr_/splr_/edr_/workf
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 

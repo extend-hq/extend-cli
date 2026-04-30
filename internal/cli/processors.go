@@ -93,6 +93,7 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every result")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -113,6 +114,7 @@ func (a processorAccessor[T, V]) getCmd(app *App) *cobra.Command {
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -163,8 +165,9 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 	listCmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
 	listCmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
 	listCmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate to fetch every version")
+	SetIOAnnotations(listCmd, OutputTable, OutputJSON)
 	cmd.AddCommand(listCmd)
-	cmd.AddCommand(&cobra.Command{
+	getVerCmd := &cobra.Command{
 		Use:   fmt.Sprintf("get <%s-id> <version>", a.noun),
 		Short: fmt.Sprintf("Show one %s version", a.noun),
 		Args:  cobra.ExactArgs(2),
@@ -179,7 +182,9 @@ func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
 			}
 			return renderWithDefault(app, v, output.FormatJSON)
 		},
-	})
+	}
+	SetIOAnnotations(getVerCmd, OutputJSON, OutputJSON)
+	cmd.AddCommand(getVerCmd)
 	cmd.AddCommand(a.versionsCreateCmd(app))
 	return cmd
 }
@@ -226,6 +231,7 @@ func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 		cmd.Flags().StringVar(&releaseType, "release-type", "", "Release type: major|minor (required unless provided by --from-file)")
 		cmd.Flags().StringVar(&description, "description", "", "Description for the new version (overrides body)")
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -296,6 +302,7 @@ from flags.`, articleFor(a.noun), a.noun),
 	}
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -323,6 +330,7 @@ func (a processorAccessor[T, V]) updateCmd(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "New name (overrides body)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 

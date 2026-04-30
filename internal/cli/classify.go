@@ -65,6 +65,10 @@ prints the result. Pass --async to print only the run ID and exit.`,
 		},
 	}
 
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileShort, true)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
+
 	cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
 	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")

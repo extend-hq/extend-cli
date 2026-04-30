@@ -47,6 +47,7 @@ func newFilesUploadCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, f, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -71,6 +72,7 @@ func newFilesListCommand(app *App) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum files to return per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate to fetch every file")
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (by createdAt)")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -152,6 +154,7 @@ content under the response's "contents" field. The flags may be combined.`,
 	cmd.Flags().BoolVar(&rawText, "raw-text", false, "Include raw text content under contents.rawText")
 	cmd.Flags().BoolVar(&markdown, "markdown", false, "Include markdown content under contents.markdown / contents.pages[].markdown")
 	cmd.Flags().BoolVar(&html, "html", false, "Include HTML content under contents.pages[].html")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -166,6 +169,7 @@ func newFilesDeleteCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 
@@ -211,6 +215,7 @@ Pass --output-file <path> to choose a path, or --output-file - to stream to stdo
 		},
 	}
 	cmd.Flags().StringVarP(&outPath, "output-file", "O", "", "Output path (defaults to file's name; '-' for stdout)")
+	SetIOAnnotations(cmd, OutputBinary, OutputBinary)
 	return cmd
 }
 

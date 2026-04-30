@@ -72,6 +72,7 @@ func newEvaluationsListCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -92,6 +93,7 @@ func newEvaluationsGetCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, s, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -124,6 +126,7 @@ func newEvaluationsCreateCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
 	cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
 	cmd.Flags().StringVar(&description, "description", "", "Description (overrides body)")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -188,6 +191,7 @@ func newEvaluationItemsListCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
 
@@ -208,6 +212,7 @@ func newEvaluationItemsGetCommand(app *App) *cobra.Command {
 			return renderWithDefault(app, it, output.FormatJSON)
 		},
 	}
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -240,6 +245,7 @@ command surfaces that envelope verbatim.`,
 	}
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON bulk body, path, file:// URI, or '-' for stdin")
 	_ = cmd.MarkFlagRequired("from-file")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -268,6 +274,7 @@ func newEvaluationItemsUpdateCommand(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
 	_ = cmd.MarkFlagRequired("from-file")
+	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
 	return cmd
 }
 
@@ -290,6 +297,7 @@ func newEvaluationItemsDeleteCommand(app *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	SetIOAnnotations(cmd, OutputNone, OutputNone)
 	return cmd
 }
 
@@ -298,7 +306,7 @@ func newEvaluationRunsCommand(app *App) *cobra.Command {
 		Use:   "runs",
 		Short: "Inspect evaluation runs (read-only)",
 	}
-	cmd.AddCommand(&cobra.Command{
+	getRunCmd := &cobra.Command{
 		Use:   "get <run-id>",
 		Short: "Show one evaluation run",
 		Long: `Show one evaluation run by ID. The server route is
@@ -315,6 +323,8 @@ func newEvaluationRunsCommand(app *App) *cobra.Command {
 			}
 			return renderWithDefault(app, run, output.FormatJSON)
 		},
-	})
+	}
+	SetIOAnnotations(getRunCmd, OutputJSON, OutputJSON)
+	cmd.AddCommand(getRunCmd)
 	return cmd
 }

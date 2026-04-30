@@ -88,6 +88,10 @@ Repeatable.`,
 	meta.attach(cmd)
 	_ = cmd.MarkFlagRequired("workflow")
 
+	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
+	SetWaitAnnotations(cmd, client.ProfileLong, false)
+	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled, client.StatusRejected)
+
 	cmd.AddCommand(newWorkflowBatchCommand(app))
 	return cmd
 }
