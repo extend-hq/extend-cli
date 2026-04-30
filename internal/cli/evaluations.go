@@ -34,6 +34,11 @@ func newEvaluationsListCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List evaluation sets",
+		Long: `List evaluation sets in the current workspace.
+
+Filter to those scoped to a specific extractor, classifier, or splitter
+with --entity. Evaluation sets contain ground-truth items used to measure
+processor accuracy via 'extend evaluations runs get'.`,
 		Example: `  extend evaluations list
   extend evaluations list --entity ex_abc --sort-by updatedAt
   extend evaluations list --all -o id`,
@@ -80,7 +85,11 @@ func newEvaluationsGetCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <evaluation-set-id>",
 		Short: "Show one evaluation set",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show metadata for one evaluation set: its name, description, and the
+processor it is scoped to. Use 'extend evaluations items list <id>' to see
+the items it contains.`,
+		Example: `  extend evaluations get evs_abc`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -106,7 +115,15 @@ func newEvaluationsCreateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an evaluation set",
-		Long:  `Create an evaluation set. --from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.`,
+		Long: `Create an evaluation set scoped to one extractor, classifier, or
+splitter. The set is created empty; add ground-truth items afterward with
+'extend evaluations items create <set-id>'.
+
+Pass --from-file with the API body (inline JSON, path, file:// URI, or -
+for stdin); --name and --description override their counterparts in the
+body.`,
+		Example: `  extend evaluations create --name "Q3 invoices" --from-file body.json
+  extend evaluations create --from-file '{"name":"smoke","entityId":"ex_abc"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, map[string]string{"name": name, "description": description})
 			if err != nil {
@@ -153,7 +170,12 @@ func newEvaluationItemsListCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list <evaluation-set-id>",
 		Short: "List items in an evaluation set",
-		Args:  cobra.ExactArgs(1),
+		Long: `List the ground-truth items in an evaluation set. Each item pairs a
+file with its expected output; the set runs every item against a processor
+version to produce an accuracy score.`,
+		Example: `  extend evaluations items list evs_abc
+  extend evaluations items list evs_abc --all -o id`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -199,7 +221,10 @@ func newEvaluationItemsGetCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <evaluation-set-id> <item-id>",
 		Short: "Show one evaluation item",
-		Args:  cobra.ExactArgs(2),
+		Long: `Show one item in an evaluation set: its file reference and expected
+output (the ground-truth that processor runs are scored against).`,
+		Example: `  extend evaluations items get evs_abc esi_xyz`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -221,11 +246,17 @@ func newEvaluationItemsCreateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <evaluation-set-id>",
 		Short: "Add one or more items to an evaluation set (bulk create)",
-		Long: `Add one or more items to an evaluation set in a single request. The body
-must match the server's bulk schema: {"items":[{"fileId","expectedOutput"},...]}.
---from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.
-The response wraps the created items in {"evaluationSetItems":[...]}; this
-command surfaces that envelope verbatim.`,
+		Long: `Add one or more items to an evaluation set in a single request.
+
+The body must match the server's bulk schema:
+
+    {"items":[{"fileId":"file_xxx","expectedOutput":{...}}, ...]}
+
+--from-file accepts inline JSON, a plain path, an absolute file:// URI, or
+- for stdin. The response wraps the created items in
+{"evaluationSetItems":[...]}; this command surfaces that envelope verbatim.`,
+		Example: `  extend evaluations items create evs_abc --from-file items.json
+  cat items.json | extend evaluations items create evs_abc --from-file -`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, nil)
@@ -254,8 +285,11 @@ func newEvaluationItemsUpdateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <evaluation-set-id> <item-id>",
 		Short: "Update an evaluation item",
-		Long:  `Update an evaluation item. --from-file accepts inline JSON, a plain path, an absolute file:// URI, or - for stdin.`,
-		Args:  cobra.ExactArgs(2),
+		Long: `Update one item in an evaluation set, typically to change the expected
+output as the ground truth evolves. --from-file accepts inline JSON, a
+plain path, an absolute file:// URI, or - for stdin.`,
+		Example: `  extend evaluations items update evs_abc esi_xyz --from-file patch.json`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, nil)
 			if err != nil {
@@ -283,7 +317,14 @@ func newEvaluationItemsDeleteCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <evaluation-set-id> <item-id>",
 		Short: "Delete an evaluation item",
-		Args:  cobra.ExactArgs(2),
+		Long: `Delete one item from an evaluation set. The set is left in place;
+only that ground-truth pair is removed.
+
+Prompts for confirmation when stdin is a TTY; pass --yes to skip the
+prompt (required in non-interactive scripts).`,
+		Example: `  extend evaluations items delete evs_abc esi_xyz
+  extend evaluations items delete evs_abc esi_xyz --yes`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			setID, itemID := args[0], args[1]
 			return deleteWithConfirm(cmd.Context(), app, "evaluation item", itemID, yes,
@@ -310,7 +351,13 @@ func newEvaluationRunsCommand(app *App) *cobra.Command {
 		Use:   "get <run-id>",
 		Short: "Show one evaluation run",
 		Long: `Show one evaluation run by ID. The server route is
-/evaluation_set_runs/{run-id} (no eval-set ID needed in the path).`,
+/evaluation_set_runs/{run-id} (no eval-set ID needed in the path).
+
+Evaluation runs are read-only here; create them via the dashboard. This
+command surfaces the per-item results, accuracy metrics, and any diffs
+the run produced.`,
+		Example: `  extend evaluations runs get esr_abc
+  extend evaluations runs get esr_abc --jq '.accuracy' -o raw`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()

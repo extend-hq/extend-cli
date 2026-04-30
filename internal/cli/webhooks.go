@@ -50,6 +50,11 @@ func newWebhookEndpointsListCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List webhook endpoints",
+		Long: `List webhook endpoints (the receiving URLs configured in the workspace).
+
+Endpoints are the recipients of webhook events; subscriptions bind an
+endpoint to a specific resource and event set. Use 'extend webhooks
+subscriptions list' to see what each endpoint is subscribed to.`,
 		Example: `  extend webhooks endpoints list
   extend webhooks endpoints list --status enabled
   extend webhooks endpoints list --all -o id`,
@@ -94,7 +99,15 @@ func newWebhookEndpointsGetCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <endpoint-id>",
 		Short: "Show one webhook endpoint",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show one webhook endpoint's full configuration: URL, name, status,
+enabled events, custom headers, payload format, and api-version.
+
+The signing secret is not included in this response; it is shown only once
+at creation time and cannot be retrieved later. To rotate the secret,
+delete and recreate the endpoint.`,
+		Example: `  extend webhooks endpoints get whe_abc
+  extend webhooks endpoints get whe_abc --jq '.enabledEvents' -o json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -251,9 +264,12 @@ to change; omitted fields are left untouched. The api-version field cannot
 be updated; create a new endpoint to migrate.
 
 Setting --header replaces the entire custom-headers map; pass each header
-to keep, plus any new ones. To clear all custom headers, pass --header
-with an empty value? — not supported by the server; recreate the endpoint
-without --header instead.`,
+to keep, plus any new ones. The server does not support clearing all
+custom headers via --header. To remove every custom header, recreate the
+endpoint without --header instead.`,
+		Example: `  extend webhooks endpoints update whe_abc --url https://new.example.com/hook
+  extend webhooks endpoints update whe_abc --disable
+  extend webhooks endpoints update whe_abc --events extract_run.processed,extract_run.failed`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enable && disable {
@@ -301,7 +317,15 @@ func newWebhookEndpointsDeleteCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <endpoint-id>",
 		Short: "Delete a webhook endpoint",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a webhook endpoint. All subscriptions bound to this endpoint
+are deleted with it; future events for those resources will not fire on
+this endpoint or any other.
+
+Prompts for confirmation when stdin is a TTY; pass --yes to skip the
+prompt (required in non-interactive scripts).`,
+		Example: `  extend webhooks endpoints delete whe_abc
+  extend webhooks endpoints delete whe_abc --yes`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return deleteWithConfirm(cmd.Context(), app, "webhook endpoint", args[0], yes,
 				func(ctx context.Context, id string) error {
@@ -380,6 +404,12 @@ func newWebhookSubscriptionsListCommand(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
 	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate")
+	cmd.Long = `List webhook subscriptions. A subscription binds an endpoint to a
+specific resource (extractor, classifier, splitter, or workflow) and a set
+of event types. Use --endpoint or --resource to filter.`
+	cmd.Example = `  extend webhooks subscriptions list
+  extend webhooks subscriptions list --endpoint whe_abc
+  extend webhooks subscriptions list --resource workflow_xyz`
 	SetIOAnnotations(cmd, OutputTable, OutputJSON)
 	return cmd
 }
@@ -388,7 +418,10 @@ func newWebhookSubscriptionsGetCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <subscription-id>",
 		Short: "Show one webhook subscription",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show one webhook subscription including its endpoint, target resource,
+and the list of enabled event types.`,
+		Example: `  extend webhooks subscriptions get whs_abc`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -468,7 +501,12 @@ func newWebhookSubscriptionsUpdateCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <subscription-id>",
 		Short: "Replace the enabled events on a webhook subscription",
-		Args:  cobra.ExactArgs(1),
+		Long: `Replace the enabled events on an existing subscription. The server only
+allows updating the enabledEvents field; the bound endpoint and resource
+are immutable. To change endpoint or resource, delete and recreate the
+subscription.`,
+		Example: `  extend webhooks subscriptions update whs_abc --events extract_run.processed,extract_run.failed`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(events) == 0 {
 				return errors.New("--events is required (server only allows updating enabledEvents)")
@@ -496,7 +534,15 @@ func newWebhookSubscriptionsDeleteCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <subscription-id>",
 		Short: "Delete a webhook subscription",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a webhook subscription. The endpoint itself is left in place;
+only the binding between this endpoint and resource is removed. After
+deletion, no further events for that resource fire on this endpoint.
+
+Prompts for confirmation when stdin is a TTY; pass --yes to skip the
+prompt (required in non-interactive scripts).`,
+		Example: `  extend webhooks subscriptions delete whs_abc
+  extend webhooks subscriptions delete whs_abc --yes`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return deleteWithConfirm(cmd.Context(), app, "webhook subscription", args[0], yes,
 				func(ctx context.Context, id string) error {

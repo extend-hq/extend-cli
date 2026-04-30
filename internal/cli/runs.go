@@ -101,6 +101,16 @@ func newRunsGetCommand(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <run-id>",
 		Short: "Fetch a single run by ID",
+		Long: `Fetch one run by ID. The run type is auto-detected from the ID prefix
+(exr_ extract, pr_ parse, clr_ classify, splr_ split, workflow_run_, edr_
+edit), so a single 'extend runs get' call works across all kinds.
+
+Unlike action commands (extract/classify/etc.), this never waits or polls;
+it returns whatever state the run is currently in. To wait for a terminal
+state, use 'extend runs watch'.
+
+For parse runs, --response-type url returns a presigned URL to the parsed
+output instead of the inline payload (useful for large documents).`,
 		Example: `  extend runs get exr_xK9mLPq
   extend runs get pr_pJDa8iX -o yaml
   extend runs get pr_pJDa8iX --response-type url -o json
@@ -347,7 +357,7 @@ workflow runs ignore --source and --source-id).`,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (required)")
+	cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (edit is not listable; use 'extend runs get')")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status (varies by type; workflow also supports NEEDS_REVIEW|REJECTED|CANCELLING; parse excludes CANCELLED)")
 	cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
 	cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_..., or bpar_... for parse)")
@@ -581,7 +591,18 @@ func newRunsCancelCommand(app *App) *cobra.Command {
 		Use:   "cancel <run-id>",
 		Short: "Cancel a run by ID",
 		Long: `Cancel a non-terminal run by ID. The run type is determined from
-the ID prefix. Parse runs cannot be cancelled.`,
+the ID prefix. Parse runs cannot be cancelled (the API rejects the
+attempt).
+
+Cancellation is best-effort: an in-flight run may still complete before
+the cancellation takes effect. The terminal status will be CANCELLED if
+cancellation succeeded, or the original outcome (PROCESSED/FAILED/etc.)
+if the run finished first.
+
+Cancel stops a running operation; it does not remove the historical
+record. Use 'extend runs delete' for that.`,
+		Example: `  extend runs cancel exr_xK9
+  extend runs cancel workflow_run_abc --yes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsCancel(cmd.Context(), app, args[0], yes)
@@ -600,7 +621,12 @@ func newRunsDeleteCommand(app *App) *cobra.Command {
 		Long: `Delete a run record by ID. Cancel stops a running operation; delete
 removes the historical record once it has reached a terminal state.
 
-The run type is auto-detected from the ID prefix (exr_/pr_/clr_/splr_/edr_/workflow_run_).`,
+The run type is auto-detected from the ID prefix
+(exr_/pr_/clr_/splr_/edr_/workflow_run_). Deletion is permanent and the
+record cannot be recovered. Use this to clean up runs from the workspace
+inventory; it does not affect billing.`,
+		Example: `  extend runs delete exr_xK9
+  extend runs delete pr_abc --yes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsDelete(cmd.Context(), app, args[0], yes)

@@ -12,7 +12,7 @@ import (
 
 // Annotation keys used on Cobra commands. Help topics introspect these to
 // render up-to-date reference tables, so adding or renaming a value is a
-// documented protocol change — verification tests fail builds when a new
+// documented protocol change; verification tests fail builds when a new
 // command lacks required annotations or sets one to an unknown value.
 const (
 	// AnnotOutputTTY: format rendered when stdout is a terminal and no
@@ -405,7 +405,7 @@ func renderRunsTopic(root *cobra.Command) string {
 		def := c.Annotations[AnnotWaitDefault]
 		fail := c.Annotations[AnnotLifecycleFailureCodes]
 		if fail == "" {
-			fail = "—"
+			fail = "(none)"
 		}
 		path := c.CommandPath()
 		if len(path) > pathLen {
@@ -449,8 +449,8 @@ func renderRunsTopic(root *cobra.Command) string {
 	b.WriteString("  terminal status to the exit code:\n\n")
 	b.WriteString("      extend runs watch <id> --exit-status && downstream-script.sh\n\n")
 	b.WriteString("  Without --exit-status, watch commands exit 0 on any successful\n")
-	b.WriteString("  poll regardless of run status — useful when you want the JSON\n")
-	b.WriteString("  output and plan to inspect the status field yourself.\n\n")
+	b.WriteString("  poll regardless of run status. That is useful when you want the\n")
+	b.WriteString("  JSON output and plan to inspect the status field yourself.\n\n")
 	b.WriteString("Webhooks alternative:\n\n")
 	b.WriteString("  For long-running workflow operations, configure a webhook endpoint\n")
 	b.WriteString("  instead of polling. See `extend webhooks endpoints --help`.\n")
@@ -472,11 +472,11 @@ func renderErrorsTopic(_ *cobra.Command) string {
 	b.WriteString("  }\n\n")
 	b.WriteString("The CLI prints errors to stderr in red and includes the request_id\n")
 	b.WriteString("on its own dimmed line. Cite the request_id when filing support\n")
-	b.WriteString("tickets — it lets the team correlate your call to server-side logs.\n\n")
+	b.WriteString("tickets so the team can correlate your call to server-side logs.\n\n")
 	b.WriteString("Retries\n\n")
 	fmt.Fprintf(&b, "  GET requests retry up to %d times on 429 and 5xx errors with\n", rc.MaxAttempts)
 	fmt.Fprintf(&b, "  exponential backoff (%v -> %v).\n\n", rc.InitialBackoff, rc.MaxBackoff)
-	b.WriteString("  POST requests only retry on 429 — POSTs are not assumed idempotent\n")
+	b.WriteString("  POST requests only retry on 429. POSTs are not assumed idempotent\n")
 	b.WriteString("  and will not be replayed on 5xx errors. The server's `retryable`\n")
 	b.WriteString("  field overrides this for non-2xx responses where the server\n")
 	b.WriteString("  explicitly opts in to retries.\n\n")
