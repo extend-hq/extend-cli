@@ -108,81 +108,12 @@ type ExtractRun struct {
 	UpdatedAt        string                   `json:"updatedAt,omitempty"`
 }
 
-// ExtractOutput is the 2026-02-09 extract result shape. The struct also
-// carries the original bytes in Raw so legacy (pre-2026-02-09) outputs that
-// don't fit the {value, metadata} shape can be round-tripped through the
-// CLI's `--json` output unchanged. Callers reading typed fields should
-// check `Value != nil` to distinguish legacy from new shapes.
-type ExtractOutput struct {
-	Value    map[string]any                  `json:"value,omitempty"`
-	Metadata map[string]ExtractFieldMetadata `json:"metadata,omitempty"`
-
-	// Raw is the verbatim server JSON, set by UnmarshalJSON. Marshalling an
-	// ExtractOutput that has Raw set returns the original bytes (preserving
-	// any legacy fields the typed Value/Metadata can't represent); callers
-	// who modify Value/Metadata in place must clear Raw to opt back into
-	// re-encoding.
-	Raw json.RawMessage `json:"-"`
-}
-
-// ExtractFieldMetadata is one entry of ExtractOutput.Metadata, keyed by the
-// extractor field name. Confidence values are in [0,1]; Citations and
-// Insights may be omitted by the server when irrelevant for the field type.
-type ExtractFieldMetadata struct {
-	OCRConfidence      *float64          `json:"ocrConfidence,omitempty"`
-	LogprobsConfidence *float64          `json:"logprobsConfidence,omitempty"`
-	ReviewAgentScore   *float64          `json:"reviewAgentScore,omitempty"`
-	Citations          []ExtractCitation `json:"citations,omitempty"`
-	Insights           []ExtractInsight  `json:"insights,omitempty"`
-}
-
-type ExtractCitation struct {
-	Page          *ExtractCitationPage `json:"page,omitempty"`
-	ReferenceText string               `json:"referenceText,omitempty"`
-	Polygon       []Point              `json:"polygon,omitempty"`
-}
-
-type ExtractCitationPage struct {
-	Number int     `json:"number,omitempty"`
-	Width  float64 `json:"width,omitempty"`
-	Height float64 `json:"height,omitempty"`
-}
-
-// ExtractInsight is one of the per-field annotations the server emits to
-// explain its choice. Type is a closed enum on the server.
-type ExtractInsight struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-}
-
-func (o *ExtractOutput) UnmarshalJSON(data []byte) error {
-	o.Raw = make(json.RawMessage, len(data))
-	copy(o.Raw, data)
-	type plain struct {
-		Value    map[string]any                  `json:"value,omitempty"`
-		Metadata map[string]ExtractFieldMetadata `json:"metadata,omitempty"`
-	}
-	// Best-effort decode. Legacy outputs (a flat field-name->result map) won't
-	// match this shape; we leave Value/Metadata empty in that case and rely
-	// on Raw for round-tripping.
-	var p plain
-	if err := json.Unmarshal(data, &p); err == nil {
-		o.Value = p.Value
-		o.Metadata = p.Metadata
-	}
-	return nil
-}
-
-func (o ExtractOutput) MarshalJSON() ([]byte, error) {
-	if len(o.Raw) > 0 {
-		return o.Raw, nil
-	}
-	type plain struct {
-		Value    map[string]any                  `json:"value,omitempty"`
-		Metadata map[string]ExtractFieldMetadata `json:"metadata,omitempty"`
-	}
-	return json.Marshal(plain{Value: o.Value, Metadata: o.Metadata})
-}
+// ExtractOutput is the verbatim server JSON for an extract result. The
+// server returns one of two shapes depending on the extractor: the modern
+// {value, metadata} envelope or a legacy flat field-name->result map.
+// Callers that need typed access can json.Unmarshal it into whichever shape
+// they expect.
+type ExtractOutput = json.RawMessage
 
 type ExtractorSummary struct {
 	ID        string `json:"id"`

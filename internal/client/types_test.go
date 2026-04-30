@@ -453,60 +453,28 @@ func TestParseConfigPassesBlockOptionsAndAdvancedOptionsThrough(t *testing.T) {
 	}
 }
 
-func TestExtractOutputDecodesTypedAndPreservesRaw(t *testing.T) {
-	body := []byte(`{
-		"value":{"invoice_id":"INV-1","amount":42},
-		"metadata":{
-			"invoice_id":{"ocrConfidence":0.99,"logprobsConfidence":0.95,"insights":[{"type":"reasoning","content":"matched"}]},
-			"amount":{"logprobsConfidence":null,"citations":[{"page":{"number":1,"width":612,"height":792},"referenceText":"42 USD","polygon":[{"x":0,"y":0},{"x":1,"y":0},{"x":1,"y":0.05},{"x":0,"y":0.05}]}]}
-		}
-	}`)
-	var o ExtractOutput
-	if err := json.Unmarshal(body, &o); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+func TestExtractOutputRoundTripsBothShapes(t *testing.T) {
+	// The server returns either the new {value, metadata} envelope or a
+	// legacy flat field-name->result map. Both must pass through the CLI's
+	// JSON output verbatim.
+	cases := map[string]string{
+		"new shape":    `{"value":{"invoice_id":"INV-1"},"metadata":{"invoice_id":{"ocrConfidence":0.99}}}`,
+		"legacy shape": `{"invoice_id":{"id":"f1","value":"INV-1","confidence":0.99}}`,
 	}
-	if o.Value["invoice_id"] != "INV-1" {
-		t.Errorf("Value.invoice_id = %v, want INV-1", o.Value["invoice_id"])
-	}
-	md := o.Metadata["invoice_id"]
-	if md.OCRConfidence == nil || *md.OCRConfidence != 0.99 {
-		t.Errorf("invoice_id.OCRConfidence = %v, want 0.99", md.OCRConfidence)
-	}
-	if len(md.Insights) != 1 || md.Insights[0].Type != "reasoning" {
-		t.Errorf("Insights = %+v", md.Insights)
-	}
-	cit := o.Metadata["amount"].Citations
-	if len(cit) != 1 || cit[0].Page == nil || cit[0].Page.Number != 1 {
-		t.Errorf("amount.Citations = %+v", cit)
-	}
-	if len(o.Raw) == 0 {
-		t.Error("Raw should be preserved for round-tripping")
-	}
-}
-
-func TestExtractOutputLegacyShapeFallsBackToRaw(t *testing.T) {
-	// Legacy ExternalExtractionOutput is a flat field-name -> field-result map
-	// without `value`/`metadata` top-level keys. Decoding leaves Value/Metadata
-	// empty but keeps Raw for re-emission.
-	body := []byte(`{"invoice_id":{"id":"f1","value":"INV-1","confidence":0.99,"type":"string","insights":[],"references":[],"schema":[]}}`)
-	var o ExtractOutput
-	if err := json.Unmarshal(body, &o); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if o.Value != nil || o.Metadata != nil {
-		t.Errorf("legacy shape should leave Value/Metadata nil; got Value=%v Metadata=%v", o.Value, o.Metadata)
-	}
-	if len(o.Raw) == 0 {
-		t.Error("Raw should preserve legacy bytes")
-	}
-
-	// Marshal returns the original bytes verbatim.
-	got, err := json.Marshal(o)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(got), `"invoice_id"`) {
-		t.Errorf("re-marshalled body should contain legacy keys; got %s", got)
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			var o ExtractOutput
+			if err := json.Unmarshal([]byte(body), &o); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			got, err := json.Marshal(o)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(got) != body {
+				t.Errorf("round-trip mismatch:\n  got:  %s\n  want: %s", got, body)
+			}
+		})
 	}
 }
 
