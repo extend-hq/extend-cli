@@ -1,11 +1,86 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+// TestHelpTopicsExist confirms the four expected topics are registered. If
+// you rename or remove a topic, the footer text in renderTopicFooter and any
+// per-command "see `extend help X`" references must also update.
+func TestHelpTopicsExist(t *testing.T) {
+	root := NewRoot()
+	want := []string{"auth", "errors", "lifecycle", "output"}
+	got := helpTopicNames(root)
+	gotSet := map[string]bool{}
+	for _, n := range got {
+		gotSet[n] = true
+	}
+	for _, w := range want {
+		if !gotSet[w] {
+			t.Errorf("missing help topic %q (registered: %v)", w, got)
+		}
+	}
+}
+
+// TestHelpTopicsRender runs each topic and checks it produces non-empty
+// output without erroring. Catches drift in the renderers and protects
+// against accidentally registering a topic with a nil renderer.
+func TestHelpTopicsRender(t *testing.T) {
+	for _, name := range helpTopicNames(NewRoot()) {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			r := NewRoot()
+			r.SetOut(&buf)
+			r.SetArgs([]string{name})
+			if err := r.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if buf.Len() == 0 {
+				t.Errorf("topic produced empty output")
+			}
+		})
+	}
+}
+
+// TestTopicFooterAppearsOnCommands checks that a representative non-topic
+// command's --help output ends with the topic-pointer footer, and that the
+// topics themselves do NOT include the footer (would be self-referential).
+func TestTopicFooterAppearsOnCommands(t *testing.T) {
+	root := NewRoot()
+
+	// Non-topic command: footer present.
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetArgs([]string{"extract", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("extract --help: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Learn more:") {
+		t.Errorf("extract --help missing 'Learn more:' footer:\n%s", out)
+	}
+	for _, topic := range []string{"auth", "errors", "lifecycle", "output"} {
+		if !strings.Contains(out, "extend help "+topic) {
+			t.Errorf("extract --help missing pointer to topic %q", topic)
+		}
+	}
+
+	// Topic command: footer absent (would be recursive).
+	buf.Reset()
+	root2 := NewRoot()
+	root2.SetOut(&buf)
+	root2.SetArgs([]string{"auth"})
+	if err := root2.Execute(); err != nil {
+		t.Fatalf("auth: %v", err)
+	}
+	if strings.Contains(buf.String(), "Learn more:") {
+		t.Errorf("topic 'auth' output should not include the topic footer:\n%s", buf.String())
+	}
+}
 
 // TestEveryRunnableLeafHasIOAnnotations enforces that every runnable command
 // declares its output behavior via annotations. This is the contract the
@@ -131,7 +206,13 @@ func isAnnotationExempt(cmd *cobra.Command) bool {
 // helpTextExempt is the explicit allowlist of commands that haven't been
 // brought up to the Long/Example standard yet. Shrinking this list is the
 // goal of subsequent PRs; it should reach empty.
+//
+// Help topics are also exempt: their body is rendered at runtime, so the
+// static Long/Example fields are not where the docs live.
 func helpTextExempt(cmd *cobra.Command) bool {
+	if cmd.Annotations[HelpTopicAnnotation] == "true" {
+		return true
+	}
 	exempt := map[string]bool{
 		// Umbrella resource families: have templated Long but no Example
 		// suitable for the umbrella; subcommands carry the examples. Allow
