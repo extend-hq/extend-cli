@@ -118,6 +118,7 @@ The --workspace and --region flags override their respective env vars.`,
 		newEvaluationsCommand(app),
 	)
 	root.AddCommand(newVersionCommand(app))
+	installHelpTopics(root)
 	return root
 }
 
