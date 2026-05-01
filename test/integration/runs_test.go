@@ -36,10 +36,10 @@ func pickFirstID(t *testing.T, env envSetup, kind string) string {
 }
 
 // TestExtractRun_AsyncLifecycle uploads a sample document, submits it for
-// extraction with `--async`, polls `runs get` until terminal, and verifies
-// the response shape: extractorVersion includes its parent extractorId,
-// output decodes as {value, metadata}, parseRunId is populated, and usage
-// is present.
+// extraction with `--wait=false`, polls `runs get` until terminal, and
+// verifies the response shape: extractorVersion includes its parent
+// extractorId, output decodes as {value, metadata}, parseRunId is
+// populated, and usage is present.
 //
 // Costs credits — gated behind EXTEND_TEST_RUN_OPS=1.
 func TestExtractRun_AsyncLifecycle(t *testing.T) {
@@ -48,12 +48,12 @@ func TestExtractRun_AsyncLifecycle(t *testing.T) {
 
 	extractorID := pickFirstID(t, env, "extractors")
 
-	// Submit. The CLI's --async flag returns the run ID synchronously; we
-	// then poll separately to verify the watch path also works.
+	// Submit. --wait=false returns the run ID immediately; we then poll
+	// separately to verify the watch path also works.
 	submitRes := runExtend(t, env,
 		"extract", "testdata/sample.txt",
 		"--using", extractorID,
-		"--async",
+		"--wait=false",
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "extract")
@@ -259,7 +259,7 @@ func TestClassifyRun_AsyncLifecycle(t *testing.T) {
 	submitRes := runExtend(t, env,
 		"classify", "testdata/sample.txt",
 		"--using", classifierID,
-		"--async",
+		"--wait=false",
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "classify")
@@ -307,7 +307,7 @@ func TestSplitRun_AsyncLifecycle(t *testing.T) {
 	submitRes := runExtend(t, env,
 		"split", "testdata/sample.txt",
 		"--using", splitterID,
-		"--async",
+		"--wait=false",
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "split")
@@ -352,9 +352,9 @@ func TestWorkflowRun_UpdateMetadata(t *testing.T) {
 
 	workflowID := pickFirstID(t, env, "workflows")
 
-	// Workflow runs are async by default — no --async flag needed; --wait
-	// is the opt-in for blocking. We don't wait here because the metadata
-	// update endpoint accepts in-flight runs.
+	// Workflow runs are async by default (--wait defaults to false on
+	// `run`). We don't wait here because the metadata update endpoint
+	// accepts in-flight runs.
 	submitRes := runExtend(t, env,
 		"run", "testdata/sample.txt",
 		"--workflow", workflowID,
@@ -415,7 +415,7 @@ func TestRunsCancel_ExtractRun(t *testing.T) {
 	submitRes := runExtend(t, env,
 		"extract", "testdata/sample.txt",
 		"--using", extractorID,
-		"--async",
+		"--wait=false",
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "extract")
@@ -488,7 +488,7 @@ func TestParseRun_AsyncLifecycle(t *testing.T) {
 	submitRes := runExtend(t, env,
 		"parse", "testdata/sample.txt",
 		"--target", "markdown",
-		"--async",
+		"--wait=false",
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "parse")
