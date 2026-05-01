@@ -16,14 +16,16 @@ func TestWorkflowsList(t *testing.T) {
 	res := runExtend(t, env, "workflows", "list", "--limit", "5", "-o", "json")
 	res.requireOK(t, "workflows", "list")
 
-	var arr []map[string]any
-	if err := json.Unmarshal(res.Stdout, &arr); err != nil {
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(res.Stdout, &page); err != nil {
 		t.Fatalf("decode: %v\nstdout: %s", err, res.Stdout)
 	}
-	if len(arr) == 0 {
+	if len(page.Data) == 0 {
 		t.Skip("workspace has no workflows; this test needs at least one to verify list shape")
 	}
-	for i, w := range arr {
+	for i, w := range page.Data {
 		if id, _ := w["id"].(string); !strings.HasPrefix(id, "workflow_") {
 			t.Errorf("item %d id = %q, want workflow_ prefix", i, id)
 		}
@@ -47,17 +49,19 @@ func TestWorkflowGet_ExposesDraftVersionWithSteps(t *testing.T) {
 	listRes := runExtend(t, env, "workflows", "list", "--limit", "1", "-o", "json")
 	listRes.requireOK(t, "workflows", "list")
 
-	var arr []struct {
-		ID string `json:"id"`
+	var page struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(listRes.Stdout, &arr); err != nil {
+	if err := json.Unmarshal(listRes.Stdout, &page); err != nil {
 		t.Fatalf("decode list: %v\nstdout: %s", err, listRes.Stdout)
 	}
-	if len(arr) == 0 {
+	if len(page.Data) == 0 {
 		t.Skip("workspace has no workflows; this test needs at least one to verify GET draftVersion shape")
 	}
 
-	id := arr[0].ID
+	id := page.Data[0].ID
 	getRes := runExtend(t, env, "workflows", "get", id, "-o", "json")
 	getRes.requireOK(t, "workflows", "get", id)
 
