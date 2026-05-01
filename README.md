@@ -9,7 +9,21 @@ A CLI for [Extend](https://extend.ai).
 
 ## Install
 
+Homebrew (macOS, Linux):
+
+    brew install extend-hq/tap/extend
+
+npm / npx (no install):
+
+    npx @extend-ai/cli --help
+    # or globally
+    npm install -g @extend-ai/cli
+
+From source (requires Go toolchain):
+
     go install github.com/extend-hq/extend-cli/cmd/extend@latest
+
+Or grab a signed binary from the [releases page](https://github.com/extend-hq/extend-cli/releases).
 
 ## Authenticate
 
