@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -37,6 +38,7 @@ type recordedRequest struct {
 type fakeServer struct {
 	t        *testing.T
 	srv      *httptest.Server
+	mu       sync.Mutex // guards requests; concurrent handler invocations append
 	requests []recordedRequest
 	handler  http.HandlerFunc
 }
@@ -47,6 +49,7 @@ func newFakeServer(t *testing.T, h http.HandlerFunc) *fakeServer {
 	fs.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body.Close()
+		fs.mu.Lock()
 		fs.requests = append(fs.requests, recordedRequest{
 			Method: r.Method,
 			Path:   r.URL.Path,
@@ -54,6 +57,7 @@ func newFakeServer(t *testing.T, h http.HandlerFunc) *fakeServer {
 			Header: r.Header.Clone(),
 			Body:   body,
 		})
+		fs.mu.Unlock()
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		fs.handler(w, r)
 	}))
@@ -65,6 +69,8 @@ func (fs *fakeServer) URL() string { return fs.srv.URL }
 
 func (fs *fakeServer) lastRequest() recordedRequest {
 	fs.t.Helper()
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 	if len(fs.requests) == 0 {
 		fs.t.Fatal("no requests recorded")
 	}
