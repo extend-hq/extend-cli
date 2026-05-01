@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Postinstall for the extendcli wrapper package (name in ./package.json).
+// Postinstall for the @extend-ai/cli wrapper package.
 //
 // Detects the platform, finds the matching native binary from
 // optionalDependencies, and copies it over the bin/extend.exe placeholder.

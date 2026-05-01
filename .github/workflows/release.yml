@@ -247,7 +247,7 @@ jobs:
           {
             "name": "$pkg",
             "version": "$VERSION",
-            "description": "Native binary for extendcli (${node_os}-${node_cpu})",
+            "description": "Native binary for @extend-ai/cli (${node_os}-${node_cpu})",
             "homepage": "https://github.com/extend-hq/extend-cli",
             "repository": {
               "type": "git",
@@ -269,31 +269,28 @@ jobs:
             fi
           done
 
-      - name: stage and publish wrapper packages
+      - name: stage and publish wrapper package
         env:
           AUTHORIZED: "1"
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          # Two wrapper packages are published from the same source: the
-          # unscoped 'extendcli' and the scoped '@extend-ai/cli'. They are
-          # byte-identical except for the "name" field in package.json.
-          for wrapper_name in "extendcli" "@extend-ai/cli"; do
-            if [ -n "$(npm view "$wrapper_name@$VERSION" version 2>/dev/null)" ]; then
-              echo "$wrapper_name@$VERSION already published, skipping"
-              continue
-            fi
-            tmp=$(mktemp -d)
-            cp -r npm/extendcli/. "$tmp/"
-            (cd "$tmp" && node -e "
-              const fs = require('fs');
-              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-              pkg.name = '$wrapper_name';
-              pkg.version = process.env.VERSION;
-              for (const dep of Object.keys(pkg.optionalDependencies)) {
-                pkg.optionalDependencies[dep] = process.env.VERSION;
-              }
-              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            ")
-            (cd "$tmp" && npx -y npm@latest publish --access public --provenance)
-          done
+          # Wrapper package source lives in npm/cli/. Source-of-truth name
+          # in package.json is @extend-ai/cli; the version + optionalDeps
+          # are templated in here from the release tag.
+          if [ -n "$(npm view "@extend-ai/cli@$VERSION" version 2>/dev/null)" ]; then
+            echo "@extend-ai/cli@$VERSION already published, skipping"
+            exit 0
+          fi
+          tmp=$(mktemp -d)
+          cp -r npm/cli/. "$tmp/"
+          (cd "$tmp" && node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.VERSION;
+            for (const dep of Object.keys(pkg.optionalDependencies)) {
+              pkg.optionalDependencies[dep] = process.env.VERSION;
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          ")
+          (cd "$tmp" && npx -y npm@latest publish --access public --provenance)

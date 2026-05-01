@@ -1,19 +1,17 @@
-# extendcli
+# @extend-ai/cli
 
 Command-line interface for [Extend](https://extend.ai).
 
 ## Install
 
 ```sh
-npx extendcli --help
-# or
 npx @extend-ai/cli --help
 ```
 
 For permanent install:
 
 ```sh
-npm install -g extendcli
+npm install -g @extend-ai/cli
 extend --help
 ```
 
@@ -32,7 +30,7 @@ If you install with `--ignore-scripts` or `--omit=optional`, the postinstall
 won't run. In that case, invoke the fallback launcher:
 
 ```sh
-node node_modules/extendcli/cli-wrapper.cjs --help
+node node_modules/@extend-ai/cli/cli-wrapper.cjs --help
 ```
 
 ## Source
