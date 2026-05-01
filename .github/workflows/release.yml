@@ -259,8 +259,14 @@ jobs:
           }
           EOF
 
-            # Use latest npm to ensure OIDC/provenance support.
-            (cd "$tmp" && npx -y npm@latest publish --access public --provenance)
+            # Idempotency: skip if this version is already on the registry.
+            # Lets the job be safely re-run after a partial failure.
+            if [ -n "$(npm view "$pkg@$VERSION" version 2>/dev/null)" ]; then
+              echo "$pkg@$VERSION already published, skipping"
+            else
+              # Use latest npm to ensure OIDC/provenance support.
+              (cd "$tmp" && npx -y npm@latest publish --access public --provenance)
+            fi
           done
 
       - name: stage and publish wrapper packages
@@ -273,6 +279,10 @@ jobs:
           # unscoped 'extendcli' and the scoped '@extend-ai/cli'. They are
           # byte-identical except for the "name" field in package.json.
           for wrapper_name in "extendcli" "@extend-ai/cli"; do
+            if [ -n "$(npm view "$wrapper_name@$VERSION" version 2>/dev/null)" ]; then
+              echo "$wrapper_name@$VERSION already published, skipping"
+              continue
+            fi
             tmp=$(mktemp -d)
             cp -r npm/extendcli/. "$tmp/"
             (cd "$tmp" && node -e "
