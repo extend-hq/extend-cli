@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fallback launcher for the extendcli wrapper package.
+// Fallback launcher for the @extend-ai/cli wrapper package.
 //
 // Normally the postinstall script copies the native binary over
 // bin/extend.exe, so this file is never invoked. It exists for environments
