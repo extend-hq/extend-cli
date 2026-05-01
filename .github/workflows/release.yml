@@ -72,6 +72,29 @@ jobs:
             -o "dist/$binary" \
             ./cmd/extend
 
+      # Sign and notarize Mac binaries with Apple's Developer ID and notary
+      # service. Uses anchore/quill so it runs on the Linux runner without
+      # needing to spin up a macOS runner. The bare binary is what gets
+      # signed; the .tar.gz wrapper is created in the next step.
+      - name: install quill
+        if: matrix.goos == 'darwin'
+        run: |
+          curl -sSfL https://get.anchore.io/quill | sudo sh -s -- -b /usr/local/bin v0.7.1
+          quill version
+
+      - name: sign and notarize macOS binary
+        if: matrix.goos == 'darwin'
+        env:
+          QUILL_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          quill sign-and-notarize dist/extend
+          quill describe dist/extend | head -40
+
       - name: package archive
         id: pkg
         env:
