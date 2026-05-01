@@ -1,0 +1,37 @@
+{
+  "name": "extendcli",
+  "version": "0.0.0",
+  "description": "Command-line interface for Extend",
+  "bin": {
+    "extend": "bin/extend.exe"
+  },
+  "scripts": {
+    "postinstall": "node install.cjs",
+    "prepare": "node -e \"if (!process.env.AUTHORIZED) { console.error('ERROR: Direct publishing is not allowed. Publish via the GitHub release workflow.'); process.exit(1); }\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "homepage": "https://github.com/extend-hq/extend-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/extend-hq/extend-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/extend-hq/extend-cli/issues"
+  },
+  "license": "Apache-2.0",
+  "files": [
+    "bin/extend.exe",
+    "install.cjs",
+    "cli-wrapper.cjs",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@extend-ai/cli-darwin-arm64": "0.0.0",
+    "@extend-ai/cli-darwin-x64": "0.0.0",
+    "@extend-ai/cli-linux-x64": "0.0.0",
+    "@extend-ai/cli-linux-arm64": "0.0.0",
+    "@extend-ai/cli-win32-x64": "0.0.0"
+  }
+}

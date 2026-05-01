@@ -165,3 +165,125 @@ jobs:
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  npm-publish:
+    name: npm publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # for npm provenance
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+
+      - name: configure npm auth
+        run: npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: extract binaries from archives
+        run: |
+          set -euo pipefail
+          mkdir -p binaries
+          for dir in artifacts/*/; do
+            archive=$(find "$dir" -maxdepth 1 -type f \( -name "*.tar.gz" -o -name "*.zip" \) | head -1)
+            if [ -z "$archive" ]; then continue; fi
+            stem=$(basename "$archive" | sed -E 's/\.(tar\.gz|zip)$//')
+            mkdir -p "binaries/$stem"
+            case "$archive" in
+              *.tar.gz) tar -xzf "$archive" -C "binaries/$stem" ;;
+              *.zip)    unzip -q "$archive" -d "binaries/$stem" ;;
+            esac
+          done
+          ls binaries/
+
+      - name: derive npm version
+        id: ver
+        run: |
+          # Strip leading 'v' from the tag for semver.
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: publish platform packages
+        env:
+          AUTHORIZED: "1"   # guard against accidental local publishes
+          VERSION: ${{ steps.ver.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Map: GOOS:GOARCH:NODE_OS:NODE_CPU:BIN_NAME
+          # Node.js process.platform uses 'win32', not 'windows', and
+          # process.arch uses 'x64', not 'amd64'. Sub-package names follow
+          # the Node convention.
+          for entry in \
+            "linux:amd64:linux:x64:extend" \
+            "linux:arm64:linux:arm64:extend" \
+            "darwin:amd64:darwin:x64:extend" \
+            "darwin:arm64:darwin:arm64:extend" \
+            "windows:amd64:win32:x64:extend.exe"
+          do
+            IFS=':' read -r goos goarch node_os node_cpu bin_name <<< "$entry"
+            pkg="@extend-ai/cli-${node_os}-${node_cpu}"
+            stem="extend_${REF_NAME}_${goos}_${goarch}"
+            src_dir="binaries/$stem"
+            if [ ! -d "$src_dir" ]; then
+              echo "::error::Missing binary directory $src_dir"
+              exit 1
+            fi
+
+            tmp=$(mktemp -d)
+            mkdir -p "$tmp/bin"
+            cp "$src_dir/$bin_name" "$tmp/bin/$bin_name"
+            chmod +x "$tmp/bin/$bin_name"
+
+            cat > "$tmp/package.json" <<EOF
+          {
+            "name": "$pkg",
+            "version": "$VERSION",
+            "description": "Native binary for extendcli (${node_os}-${node_cpu})",
+            "homepage": "https://github.com/extend-hq/extend-cli",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/extend-hq/extend-cli.git"
+            },
+            "license": "Apache-2.0",
+            "os": ["$node_os"],
+            "cpu": ["$node_cpu"]
+          }
+          EOF
+
+            # Use latest npm to ensure OIDC/provenance support.
+            (cd "$tmp" && npx -y npm@latest publish --access public --provenance)
+          done
+
+      - name: stage and publish wrapper packages
+        env:
+          AUTHORIZED: "1"
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Two wrapper packages are published from the same source: the
+          # unscoped 'extendcli' and the scoped '@extend-ai/cli'. They are
+          # byte-identical except for the "name" field in package.json.
+          for wrapper_name in "extendcli" "@extend-ai/cli"; do
+            tmp=$(mktemp -d)
+            cp -r npm/extendcli/. "$tmp/"
+            (cd "$tmp" && node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              pkg.name = '$wrapper_name';
+              pkg.version = process.env.VERSION;
+              for (const dep of Object.keys(pkg.optionalDependencies)) {
+                pkg.optionalDependencies[dep] = process.env.VERSION;
+              }
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            ")
+            (cd "$tmp" && npx -y npm@latest publish --access public --provenance)
+          done

@@ -9,6 +9,9 @@ TODO.md
 *.dll
 *.so
 *.dylib
+# Exception: npm wrapper ships a placeholder bin/extend.exe stub that
+# postinstall replaces with the real native binary.
+!npm/extendcli/bin/extend.exe
 
 # Test binary, built with `go test -c`
 *.test
