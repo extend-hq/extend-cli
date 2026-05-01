@@ -111,12 +111,14 @@ func TestExtractors(t *testing.T) {
 		listRes := runExtend(t, env, "extractors", "list", "--limit", "20", "-o", "json")
 		listRes.requireOK(t, "extractors", "list")
 
-		var items []struct {
-			ID     string `json:"id"`
-			Object string `json:"object"`
-			Name   string `json:"name"`
+		var page struct {
+			Data []struct {
+				ID     string `json:"id"`
+				Object string `json:"object"`
+				Name   string `json:"name"`
+			} `json:"data"`
 		}
-		if err := json.Unmarshal(listRes.Stdout, &items); err != nil {
+		if err := json.Unmarshal(listRes.Stdout, &page); err != nil {
 			t.Fatalf("decode list: %v\nstdout: %s", err, listRes.Stdout)
 		}
 		var found *struct {
@@ -124,9 +126,9 @@ func TestExtractors(t *testing.T) {
 			Object string `json:"object"`
 			Name   string `json:"name"`
 		}
-		for i := range items {
-			if items[i].ID == created.ID {
-				found = &items[i]
+		for i := range page.Data {
+			if page.Data[i].ID == created.ID {
+				found = &page.Data[i]
 				break
 			}
 		}

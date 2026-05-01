@@ -110,9 +110,7 @@ func TestFilesList(t *testing.T) {
 	res := runExtend(t, env, "files", "list", "--limit", "5", "-o", "json")
 	res.requireOK(t, "files", "list")
 
-	// Files list returns a paginated envelope `{data:[], nextPageToken}`,
-	// not a bare array — distinct from extractors/workflows which return
-	// the bare data array on `-o json`. Verify shape.
+	// List endpoints return a paginated envelope `{data:[], nextPageToken}`.
 	var page struct {
 		Data []map[string]any `json:"data"`
 	}
