@@ -11,7 +11,7 @@ func TestEvaluationsList_HitsExpectedEndpoint(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newEvaluationsListCommand(ta.app)
+	cmd := findCmd(t, ta.app, "evaluations", "list")
 	cmd.SetArgs([]string{"--limit", "5"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list: %v", err)
@@ -26,7 +26,7 @@ func TestEvaluationsCreate_BuildsBodyFromFlags(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "ev_new", "object": "evaluation_set"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newEvaluationsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "evaluations", "create")
 	cmd.SetArgs([]string{"--name", "from-flag", "--description", "test"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("create: %v", err)
@@ -56,7 +56,7 @@ func TestEvaluationItemsUpdate_UsesPOST(t *testing.T) {
 	if err := writeFile(tmp, []byte(`{"expectedOutput":{}}`)); err != nil {
 		t.Fatal(err)
 	}
-	cmd := newEvaluationItemsUpdateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "evaluations", "items", "update")
 	cmd.SetArgs([]string{"ev_a", "it_b", "--from-file", tmp})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("update: %v", err)
@@ -86,7 +86,7 @@ func TestEvaluationItemsCreate_DecodesEvaluationSetItemsEnvelope(t *testing.T) {
 	if err := writeFile(tmp, []byte(`{"items":[{"fileId":"file_1","expectedOutput":{"value":{}}}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	cmd := newEvaluationItemsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "evaluations", "items", "create")
 	cmd.SetArgs([]string{"ev_a", "--from-file", tmp})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("create: %v", err)
@@ -105,8 +105,8 @@ func TestEvaluationRunsGet_UsesEvaluationSetRunsRoute(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "esr_x", "object": "evaluation_set_run"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newEvaluationRunsCommand(ta.app)
-	cmd.SetArgs([]string{"get", "esr_x"})
+	cmd := findCmd(t, ta.app, "evaluations", "runs", "get")
+	cmd.SetArgs([]string{"esr_x"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("get: %v", err)
 	}

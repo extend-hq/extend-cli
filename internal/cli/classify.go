@@ -11,7 +11,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newClassifyCommand(app *App) *cobra.Command {
+// newClassifyDoc returns the typed documentation for `extend classify`
+// and its `extend classify batch` subcommand.
+func newClassifyDoc(app *App) *CommandDoc {
 	var (
 		classifierID       string
 		version            string
@@ -23,10 +25,21 @@ func newClassifyCommand(app *App) *cobra.Command {
 		meta               metaFlags
 	)
 
-	cmd := &cobra.Command{
-		Use:   "classify <input>",
-		Short: "Classify a document into a configured category",
-		Long: `Run a classifier against a document and return the predicted class
+	return &CommandDoc{
+		Use:     "classify <input>",
+		Summary: "Classify a document into a configured category",
+		Group:   "Actions",
+		Triggers: []string{
+			"classify a document into a category",
+			"detect document type with a classifier",
+			"label an invoice or receipt automatically",
+			"identify which kind of form a pdf is",
+			"run a classifier on a document",
+		},
+		WhenToUse: `Use when you only need a category label (e.g. "invoice", "receipt",
+"contract") for a document. Prefer 'extract' when you need typed fields
+back; prefer 'parse' when you need raw text or markdown.`,
+		Details: `Run a classifier against a document and return the predicted class
 with a confidence score.
 
 <input> can be:
@@ -36,17 +49,24 @@ with a confidence score.
 
 Pass --override-config as inline JSON, a plain file path, or an absolute
 file:// URI to vary the classifier's config for this one run without modifying
-the persisted classifier.
-
-By default, the command waits until the run reaches a terminal state and
-prints the result. Pass --wait=false to print only the run ID and exit
-immediately.`,
-		Example: `  extend classify invoice.pdf --using cl_abc
-  extend classify https://example.com/x.pdf --using cl_abc -o json
-  extend classify invoice.pdf --using cl_abc --override-config override.json
-  extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'
-  extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw`,
-		Args: cobra.ExactArgs(1),
+the persisted classifier.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend classify invoice.pdf --using cl_abc"},
+			{Label: "URL with JSON output", Cmd: "extend classify https://example.com/x.pdf --using cl_abc -o json"},
+			{Label: "Override config", Cmd: "extend classify invoice.pdf --using cl_abc --override-config override.json"},
+			{Label: "Inline override", Cmd: `extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Filter via jq", Cmd: "extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw"},
+		},
+		Gotchas: []string{
+			"--using is required (no inline-config option for classify).",
+			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
+			"On TTY, output is a one-line summary; pipe or pass -o json for the full run object.",
+		},
+		SeeAlso:  []string{"extract", "parse", "classify batch", "runs watch", "runs get"},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -64,24 +84,19 @@ immediately.`,
 				metadata:           md,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
+			cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
+			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
+			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			meta.attach(cmd)
+			_ = cmd.MarkFlagRequired("using")
+		},
+		Subcommands: []*CommandDoc{newClassifyBatchDoc(app)},
 	}
-
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
-
-	cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
-	cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
-	meta.attach(cmd)
-	_ = cmd.MarkFlagRequired("using")
-
-	cmd.AddCommand(newClassifyBatchCommand(app))
-	return cmd
 }
 
 type classifyParams struct {

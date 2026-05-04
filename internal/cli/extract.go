@@ -12,7 +12,12 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newExtractCommand(app *App) *cobra.Command {
+// newExtractDoc returns the typed documentation for `extend extract` and
+// its `extend extract batch` subcommand. This is the source of truth for
+// the command's surface; the cobra.Command produced by Build() (via
+// RootDoc) is one projection. The future SKILL.md generator and any other
+// consumer reads from this CommandDoc directly via Walk.
+func newExtractDoc(app *App) *CommandDoc {
 	var (
 		extractorID        string
 		version            string
@@ -25,12 +30,21 @@ func newExtractCommand(app *App) *cobra.Command {
 		meta               metaFlags
 	)
 
-	cmd := &cobra.Command{
-		Use:   "extract <input>",
-		Short: "Run extraction on a document",
-		Long: `Extract structured data from a document using a configured extractor.
-
-<input> can be:
+	return &CommandDoc{
+		Use:     "extract <input>",
+		Summary: "Run extraction on a document",
+		Group:   "Actions",
+		Triggers: []string{
+			"extract structured data from a document",
+			"pull fields from an invoice or receipt",
+			"schema-driven document extraction",
+			"ocr a contract with a defined schema",
+			"run an extractor against a pdf",
+		},
+		WhenToUse: `Use when you have a configured extractor (or inline JSON config) and need
+typed structured fields back. Prefer 'parse' for raw text or markdown,
+'classify' for a single category label, and 'edit' for filling form fields.`,
+		Details: `<input> can be:
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
@@ -38,22 +52,26 @@ func newExtractCommand(app *App) *cobra.Command {
 The extraction config can come from one of two sources:
   --using <id>       use an existing extractor (and optionally
                      --override-config to vary it for this one run)
-  --config <json>    config without an extractor (inline JSON, path, or file:// URI)
-
-The two are mutually exclusive; the server requires exactly one.
-
-By default, the command waits until the run reaches a terminal state and
-prints the result. Pass --wait=false to print only the run ID and exit
-immediately, then poll with 'extend runs watch <id>' or fetch with
-'extend runs get <id>'.`,
-		Example: `  extend extract invoice.pdf --using ex_abc
-  extend extract https://example.com/doc.pdf --using ex_abc
-  extend extract file_xK9mLPq --using ex_abc --wait=false
-  extend extract invoice.pdf --using ex_abc --override-config override.json
-  extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'
-  extend extract invoice.pdf --config inline-config.json
-  extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw`,
-		Args: cobra.ExactArgs(1),
+  --config <json>    config without an extractor (inline JSON, path, or file:// URI)`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
+			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},
+			{Label: "Async", Cmd: "extend extract file_xK9mLPq --using ex_abc --wait=false", Note: "Returns the run ID immediately; poll with `extend runs watch`."},
+			{Label: "Override config", Cmd: "extend extract invoice.pdf --using ex_abc --override-config override.json"},
+			{Label: "Inline override", Cmd: `extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Config without extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
+			{Label: "Filter output with jq", Cmd: "extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw"},
+		},
+		Gotchas: []string{
+			"Exactly one of --using or --config is required (server schema rejects both or neither).",
+			"--override-config requires --using; it has no effect on inline --config.",
+			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
+		},
+		SeeAlso:  []string{"parse", "classify", "extract batch", "runs watch", "runs get"},
+		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -78,24 +96,19 @@ immediately, then poll with 'extend runs watch <id>' or fetch with
 				metadata:           md,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&extractorID, "using", "", "Extractor ID (mutually exclusive with --config)")
+			cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
+			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")
+			cmd.Flags().StringVar(&configPath, "config", "", "JSON object, path, or file:// URI for extract config (skips the extractor; mutually exclusive with --using)")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
+			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			meta.attach(cmd)
+		},
+		Subcommands: []*CommandDoc{newExtractBatchDoc(app)},
 	}
-
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
-
-	cmd.Flags().StringVar(&extractorID, "using", "", "Extractor ID (mutually exclusive with --config)")
-	cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")
-	cmd.Flags().StringVar(&configPath, "config", "", "JSON object, path, or file:// URI for extract config (skips the extractor; mutually exclusive with --using)")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
-	meta.attach(cmd)
-
-	cmd.AddCommand(newExtractBatchCommand(app))
-	return cmd
 }
 
 type extractParams struct {

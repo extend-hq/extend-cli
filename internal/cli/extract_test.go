@@ -226,7 +226,7 @@ func TestExtract_RequiresUsingOrConfig(t *testing.T) {
 		t.Fatal("server should not be hit when validation fails")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newExtractCommand(ta.app)
+	cmd := findCmd(t, ta.app, "extract")
 	cmd.SetArgs([]string{"file_xK9"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "--using or --config") {
@@ -243,7 +243,7 @@ func TestExtract_RejectsBothUsingAndConfig(t *testing.T) {
 		t.Fatal("server should not be hit when both flags are set")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newExtractCommand(ta.app)
+	cmd := findCmd(t, ta.app, "extract")
 	cmd.SetArgs([]string{"file_xK9", "--using", "ex_abc", "--config", tmp})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "--using or --config") {

@@ -14,7 +14,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newEditCommand(app *App) *cobra.Command {
+// newEditDoc returns the typed documentation for `extend edit`, its
+// `extend edit schema` group, and the `extend edit schema generate` leaf.
+func newEditDoc(app *App) *CommandDoc {
 	var (
 		schemaPath            string
 		instructions          string
@@ -27,10 +29,21 @@ func newEditCommand(app *App) *cobra.Command {
 		timeout               time.Duration
 	)
 
-	cmd := &cobra.Command{
-		Use:   "edit <input>",
-		Short: "Fill a PDF form using a schema with values",
-		Long: `Fill PDF form fields using a schema (with values) and produce a filled PDF.
+	return &CommandDoc{
+		Use:     "edit <input>",
+		Summary: "Fill a PDF form using a schema with values",
+		Group:   "Actions",
+		Triggers: []string{
+			"fill a pdf form with values",
+			"populate form fields in a pdf",
+			"auto-fill a fillable pdf",
+			"flatten a filled-out pdf form",
+			"run an edit operation against a pdf form",
+		},
+		WhenToUse: `Use when you have a fillable PDF and a schema (or want to scaffold one)
+to populate its form fields and emit a filled PDF. For schema scaffolding
+only, use the 'extend edit schema generate' subcommand.`,
+		Details: `Fill PDF form fields using a schema (with values) and produce a filled PDF.
 
 Use 'extend edit schema generate <input>' first to detect form fields and
 scaffold a schema; populate the values inline (as 'default' on each field);
@@ -40,10 +53,21 @@ By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
 files download'.`,
-		Example: `  extend edit schema generate form.pdf > schema.json
-  # populate default values inline in schema.json, then:
-  extend edit form.pdf --schema schema.json --output-file filled.pdf`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate default values inline, then run the next example."},
+			{Label: "Fill and download", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
+			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
+		},
+		Gotchas: []string{
+			"Values are taken from the 'default' field on each schema entry; populate them before running.",
+			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
+			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
+		},
+		SeeAlso:  []string{"edit schema generate", "runs watch", "runs get", "files download"},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEdit(cmd.Context(), app, editParams{
 				input:                 args[0],
@@ -58,24 +82,19 @@ files download'.`,
 				timeout:               timeout,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&schemaPath, "schema", "", "Path to schema JSON (with values inline as 'default'); omit to auto-generate")
+			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide field filling")
+			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Instructions used only when auto-generating the schema (no --schema)")
+			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
+			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
+			cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+		},
+		Subcommands: []*CommandDoc{newEditSchemaDoc(app)},
 	}
-
-	cmd.Flags().StringVar(&schemaPath, "schema", "", "Path to schema JSON (with values inline as 'default'); omit to auto-generate")
-	cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide field filling")
-	cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Instructions used only when auto-generating the schema (no --schema)")
-	cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-	cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
-	cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
-
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed)
-
-	cmd.AddCommand(newEditSchemaCommand(app))
-	return cmd
 }
 
 type editParams struct {
@@ -233,37 +252,60 @@ func renderEditResult(app *App, run *client.EditRun) error {
 	return nil
 }
 
-func newEditSchemaCommand(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "schema",
-		Short: "Generate or operate on edit schemas",
+// newEditSchemaDoc returns the typed documentation for the
+// `extend edit schema` group (a pure umbrella; only generate is meaningful).
+func newEditSchemaDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:       "schema",
+		Summary:   "Generate or operate on edit schemas",
+		WhenToUse: `Use this group's 'generate' subcommand to scaffold a schema from a fillable PDF. There is currently only one operation in the group.`,
+		Details:   `Schema operations are synchronous; there is no async variant.`,
+		Subcommands: []*CommandDoc{
+			newEditSchemaGenerateDoc(app),
+		},
 	}
-	cmd.AddCommand(newEditSchemaGenerateCommand(app))
-	return cmd
 }
 
-func newEditSchemaGenerateCommand(app *App) *cobra.Command {
+// newEditSchemaGenerateDoc returns the typed documentation for
+// `extend edit schema generate`.
+func newEditSchemaGenerateDoc(app *App) *CommandDoc {
 	var (
 		nativeOnly      bool
 		instructions    string
 		inputSchemaPath string
 		password        string
 	)
-	cmd := &cobra.Command{
-		Use:   "generate <input>",
-		Short: "Detect form fields and scaffold an edit schema (sync)",
-		Long: `Detect form fields in a PDF and emit a starting-point schema that can be
-passed directly to 'extend edit --schema'. This is the one synchronous endpoint
-in the edit family; there is no async variant.
+	return &CommandDoc{
+		Use:     "generate <input>",
+		Summary: "Detect form fields and scaffold an edit schema (sync)",
+		Triggers: []string{
+			"detect form fields in a pdf",
+			"scaffold a schema for an extend edit run",
+			"generate the json schema for a fillable pdf",
+			"derive an edit schema from a form",
+		},
+		WhenToUse: `Use to scaffold a schema you can hand-edit (populate 'default' values)
+and pass to 'extend edit --schema'. This is the one synchronous endpoint
+in the edit family; there is no async variant.`,
+		Details: `Detect form fields in a PDF and emit a starting-point schema that can be
+passed directly to 'extend edit --schema'.
 
 Use --instructions to guide the schema generator about which fields to
 include or how to interpret ambiguous form layouts. Use --input-schema to
 seed the generator with an existing schema, in which case detected fields
 are overlaid onto your starting point.`,
-		Example: `  extend edit schema generate form.pdf > schema.json
-  extend edit schema generate form.pdf --instructions "skip the signature block"
-  extend edit schema generate form.pdf --input-schema base.json > merged.json`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit schema generate form.pdf > schema.json"},
+			{Label: "With instructions", Cmd: `extend edit schema generate form.pdf --instructions "skip the signature block"`},
+			{Label: "Seed from existing", Cmd: "extend edit schema generate form.pdf --input-schema base.json > merged.json"},
+		},
+		Gotchas: []string{
+			"This is the only synchronous endpoint in the edit family; do not pass --wait flags.",
+			"--input-schema entries are merged with detection; detected fields can override seeded ones.",
+		},
+		SeeAlso: []string{"edit"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -304,11 +346,11 @@ are overlaid onto your starting point.`,
 			}
 			return renderWithDefault(app, pretty, output.FormatJSON)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only detect native PDF form fields (set false to detect via vision)")
+			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
+			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Path to a starting-point JSON Schema (overlaid by detection)")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+		},
 	}
-	cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only detect native PDF form fields (set false to detect via vision)")
-	cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
-	cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Path to a starting-point JSON Schema (overlaid by detection)")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }

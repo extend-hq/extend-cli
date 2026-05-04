@@ -24,16 +24,26 @@ type App struct {
 	Region    string
 }
 
-func NewRoot() *cobra.Command {
-	io := iostreams.System()
-	app := &App{IO: io}
-
-	root := &cobra.Command{
-		Use:   "extend",
-		Short: "CLI for the Extend document AI platform",
-		Long: `CLI for the Extend document AI platform.
-
-Authenticate by setting EXTEND_API_KEY in your environment:
+// RootDoc returns the typed documentation tree rooted at the `extend`
+// command. The CommandDoc tree is the source of truth for command
+// documentation; the cobra command tree (built by NewRoot during the
+// migration and progressively replaced in later phases) is one of N
+// projections.
+//
+// As commands migrate from cobra-direct constructors to *CommandDoc
+// literals, they are added to Subcommands here. The strict validation
+// contract applies to every entry in this tree from day 1.
+func RootDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "extend",
+		Summary: "CLI for the Extend document AI platform",
+		WhenToUse: `Use this CLI when working with the Extend document AI platform: extracting
+structured data from PDFs and images, parsing documents to text or
+markdown, classifying or splitting multi-document bundles, filling PDF
+forms, and running multi-step workflows. The CLI is the agent-native
+surface for these operations and integrates with the same Extend
+extractors/classifiers/splitters/workflows you configure in the dashboard.`,
+		Details: `Authenticate by setting EXTEND_API_KEY in your environment:
 
     export EXTEND_API_KEY=sk_xxx
 
@@ -46,16 +56,49 @@ Environment variables:
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
 
 The --workspace and --region flags override their respective env vars.`,
-		Version:       versionShort(),
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Subcommands: []*CommandDoc{
+			// Actions
+			newExtractDoc(app),
+			newParseDoc(app),
+			newClassifyDoc(app),
+			newSplitDoc(app),
+			newRunDoc(app),
+			newEditDoc(app),
+			// Inspection
+			newRunsDoc(app),
+			newBatchesDoc(app),
+			newFilesDoc(app),
+			// Resources
+			extractorAccessor().doc(app),
+			classifierAccessor().doc(app),
+			splitterAccessor().doc(app),
+			workflowAccessor().doc(app),
+			newWebhooksDoc(app),
+			newEvaluationsDoc(app),
+			// Help topics
+			newAuthTopicDoc(),
+			newOutputTopicDoc(),
+			newLifecycleTopicDoc(),
+			newErrorsTopicDoc(),
+		},
 	}
+}
 
-	root.AddGroup(
-		&cobra.Group{ID: "actions", Title: "Actions:"},
-		&cobra.Group{ID: "inspection", Title: "Inspection:"},
-		&cobra.Group{ID: "resources", Title: "Resources:"},
-	)
+// NewRoot builds the production cobra command tree by projecting RootDoc
+// via Build(). All command documentation, group structure, and operational
+// metadata flow from the typed CommandDoc tree; this function only adds
+// the cobra-only behaviour that has no documentation analog: persistent
+// flags, version metadata, the NewClient closure on App, the help template,
+// and the version subcommand.
+func NewRoot() *cobra.Command {
+	io := iostreams.System()
+	app := &App{IO: io}
+
+	root := RootDoc(app).Build()
+
+	root.Version = versionShort()
+	root.SilenceUsage = true
+	root.SilenceErrors = true
 
 	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (default: command-specific)")
 	root.PersistentFlags().StringVar(&app.JQ, "jq", "", "Filter output with a jq expression")
@@ -96,37 +139,9 @@ The --workspace and --region flags override their respective env vars.`,
 		return c, nil
 	}
 
-	addInGroup(root, "actions",
-		newExtractCommand(app),
-		newParseCommand(app),
-		newClassifyCommand(app),
-		newSplitCommand(app),
-		newRunCommand(app),
-		newEditCommand(app),
-	)
-	addInGroup(root, "inspection",
-		newRunsCommand(app),
-		newBatchesCommand(app),
-		newFilesCommand(app),
-	)
-	addInGroup(root, "resources",
-		extractorAccessor().cmd(app),
-		classifierAccessor().cmd(app),
-		splitterAccessor().cmd(app),
-		workflowAccessor().cmd(app),
-		newWebhooksCommand(app),
-		newEvaluationsCommand(app),
-	)
 	root.AddCommand(newVersionCommand(app))
-	installHelpTopics(root)
+	installHelpTemplate(root)
 	return root
-}
-
-func addInGroup(parent *cobra.Command, groupID string, cmds ...*cobra.Command) {
-	for _, c := range cmds {
-		c.GroupID = groupID
-		parent.AddCommand(c)
-	}
 }
 
 func Execute() int {

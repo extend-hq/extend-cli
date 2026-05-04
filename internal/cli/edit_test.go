@@ -173,7 +173,7 @@ func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
 		})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newEditSchemaGenerateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "edit", "schema", "generate")
 	cmd.SetArgs([]string{"file_xK9"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("schema generate: %v", err)

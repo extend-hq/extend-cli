@@ -12,7 +12,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newRunCommand(app *App) *cobra.Command {
+// newRunDoc returns the typed documentation for `extend run` (the
+// workflow-run launcher) and its `extend run batch` subcommand.
+func newRunDoc(app *App) *CommandDoc {
 	var (
 		workflowID  string
 		version     string
@@ -25,12 +27,21 @@ func newRunCommand(app *App) *cobra.Command {
 		meta        metaFlags
 	)
 
-	cmd := &cobra.Command{
-		Use:   "run <input>",
-		Short: "Start a workflow run on a document",
-		Long: `Start a workflow run on a document.
-
-<input> can be:
+	return &CommandDoc{
+		Use:     "run <input>",
+		Summary: "Start a workflow run on a document",
+		Group:   "Actions",
+		Triggers: []string{
+			"start a workflow run on a document",
+			"trigger an extend workflow on a pdf",
+			"submit a multi-step pipeline run",
+			"kick off a custom processing workflow",
+			"run an extend workflow against a file",
+		},
+		WhenToUse: `Use when you have a configured Extend workflow (multi-step pipeline) and
+want to run it on a document. Prefer the single-purpose verbs (extract,
+classify, split, parse) when you only need one processor.`,
+		Details: `<input> can be:
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
@@ -50,13 +61,25 @@ same shape that processor would normally return (extract: {value}, classify:
 
 --secret key=value provides per-run secrets that step actions can reference.
 Repeatable.`,
-		Example: `  extend run invoice.pdf --workflow workflow_abc
-  extend run invoice.pdf --workflow workflow_abc --wait
-  extend run invoice.pdf --workflow workflow_abc --version 3 --priority 10
-  extend run invoice.pdf --workflow workflow_abc --outputs seeded.json
-  extend run invoice.pdf --workflow workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]'
-  extend run invoice.pdf --workflow workflow_abc --secret API_KEY=$KEY`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend run invoice.pdf --workflow workflow_abc"},
+			{Label: "Block until terminal", Cmd: "extend run invoice.pdf --workflow workflow_abc --wait"},
+			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --workflow workflow_abc --version 3 --priority 10"},
+			{Label: "Seed processor outputs", Cmd: "extend run invoice.pdf --workflow workflow_abc --outputs seeded.json"},
+			{Label: "Inline seeded outputs", Cmd: `extend run invoice.pdf --workflow workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
+			{Label: "Pass a secret", Cmd: "extend run invoice.pdf --workflow workflow_abc --secret API_KEY=$KEY"},
+		},
+		Gotchas: []string{
+			"Workflow runs are async by default (unlike extract/classify/split). Pass --wait to block.",
+			"NEEDS_REVIEW is treated as terminal — review and approve at the dashboard URL.",
+			"--outputs entries must match the shape of the processor they replace (extract/classify/split).",
+			"--secret values are not echoed back; use them for per-run API keys, not as run metadata.",
+		},
+		SeeAlso:  []string{"extract", "run batch", "runs watch", "runs get", "webhooks subscriptions create"},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileLong, DefaultsToWait: false},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled, client.StatusRejected},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -75,25 +98,20 @@ Repeatable.`,
 				metadata:    md,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow ID (required)")
+			cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or specific (e.g. 3)")
+			cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
+			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait when --wait is set")
+			cmd.Flags().StringVar(&outputsPath, "outputs", "", "JSON array, path, or file:// URI for pre-computed [{processorId, output}] entries")
+			cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			meta.attach(cmd)
+			_ = cmd.MarkFlagRequired("workflow")
+		},
+		Subcommands: []*CommandDoc{newWorkflowBatchDoc(app)},
 	}
-
-	cmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow ID (required)")
-	cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or specific (e.g. 3)")
-	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait when --wait is set")
-	cmd.Flags().StringVar(&outputsPath, "outputs", "", "JSON array, path, or file:// URI for pre-computed [{processorId, output}] entries")
-	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	meta.attach(cmd)
-	_ = cmd.MarkFlagRequired("workflow")
-
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileLong, false)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled, client.StatusRejected)
-
-	cmd.AddCommand(newWorkflowBatchCommand(app))
-	return cmd
 }
 
 type workflowParams struct {

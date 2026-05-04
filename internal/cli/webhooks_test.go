@@ -28,7 +28,7 @@ func TestWebhooksVerify_ValidSignature(t *testing.T) {
 		t.Fatal("verify should not hit the API")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhooksVerifyCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "verify")
 	cmd.SetArgs([]string{
 		"--secret", secret,
 		"--signature", sig,
@@ -57,7 +57,7 @@ func TestWebhooksVerify_TamperedBodyFails(t *testing.T) {
 
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {})
 	ta := newTestApp(t, srv)
-	cmd := newWebhooksVerifyCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "verify")
 	cmd.SetArgs([]string{
 		"--secret", secret,
 		"--signature", sig,
@@ -78,7 +78,7 @@ func TestWebhooksEndpointsCreate_ParsesCSVAndRepeatedEvents(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "whe_test", "object": "webhook_endpoint"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
 	cmd.SetArgs([]string{
 		"--url", "https://x.com/hook",
 		"--name", "test",
@@ -106,7 +106,7 @@ func TestWebhooksEndpointsCreate_DisabledFlagSendsStatus(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "whe_test"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
 	cmd.SetArgs([]string{
 		"--url", "https://x.com/hook",
 		"--name", "test",
@@ -127,7 +127,7 @@ func TestWebhooksEndpointsCreate_AdvancedHeadersAndPayloadFormat(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "wh_test"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
 	cmd.SetArgs([]string{
 		"--url", "https://x.com/hook",
 		"--name", "test",
@@ -157,7 +157,7 @@ func TestWebhooksEndpointsCreate_RejectsInvalidPayloadFormat(t *testing.T) {
 		t.Fatal("server should not be hit when validation fails")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
 	cmd.SetArgs([]string{
 		"--url", "https://x.com/h",
 		"--name", "t",
@@ -175,7 +175,7 @@ func TestWebhooksEndpointsCreate_RejectsThresholdWithoutUrlFormat(t *testing.T) 
 		t.Fatal("server should not be hit when validation fails")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
 	cmd.SetArgs([]string{
 		"--url", "https://x.com/h",
 		"--name", "t",
@@ -193,7 +193,7 @@ func TestWebhooksEndpointsUpdate_OnlyChangedFieldsSent(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "whe_test"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsUpdateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "update")
 	cmd.SetArgs([]string{"whe_test", "--name", "renamed"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("update: %v", err)
@@ -214,7 +214,7 @@ func TestWebhooksSubscriptionsCreate_ScopesToResource(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "whs_test"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookSubscriptionsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "subscriptions", "create")
 	cmd.SetArgs([]string{
 		"--endpoint", "whe_xyz",
 		"--resource", "workflow_abc",
@@ -254,7 +254,7 @@ func TestWebhooksSubscriptionsCreate_AutoInferenceByPrefix(t *testing.T) {
 				writeJSON(w, 200, map[string]any{"id": "whs_test"})
 			})
 			ta := newTestApp(t, srv)
-			cmd := newWebhookSubscriptionsCreateCommand(ta.app)
+			cmd := findCmd(t, ta.app, "webhooks", "subscriptions", "create")
 			cmd.SetArgs([]string{
 				"--endpoint", "whe_xyz",
 				"--resource", tc.resource,
@@ -277,7 +277,7 @@ func TestWebhooksSubscriptionsCreate_RejectsUnknownPrefix(t *testing.T) {
 		t.Fatal("server should not be hit when validation fails")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookSubscriptionsCreateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "subscriptions", "create")
 	cmd.SetArgs([]string{
 		"--endpoint", "whe_xyz",
 		"--resource", "weird_abc",
@@ -294,7 +294,7 @@ func TestWebhooksSubscriptionsUpdate_OnlyEnabledEvents(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "whs_test"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookSubscriptionsUpdateCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "subscriptions", "update")
 	cmd.SetArgs([]string{"whs_test", "--events", "extract_run.failed"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("update: %v", err)
@@ -310,7 +310,7 @@ func TestWebhooksEndpointsList_Empty(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWebhookEndpointsListCommand(ta.app)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "list")
 	cmd.SetArgs([]string{})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list: %v", err)

@@ -15,39 +15,63 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newRunsCommand(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "runs",
-		Short: "Inspect and follow runs across all processor types",
-		Long: `Operations on runs identified by their opaque ID. The run type is
-auto-detected from the ID prefix (exr_, pr_, clr_, splr_, workflow_run_, edr_).`,
+// newRunsDoc returns the typed documentation for `extend runs` (the
+// inspect-and-follow group across all processor types) and its 6 leaves.
+func newRunsDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "runs",
+		Summary: "Inspect and follow runs across all processor types",
+		Group:   "Inspection",
+		WhenToUse: `Use these commands to inspect, watch, list, update, cancel, or delete
+runs by their opaque ID. The run type (extract/parse/classify/split/
+workflow/edit) is auto-detected from the ID prefix, so a single
+'extend runs get' or 'extend runs watch' works across all kinds.`,
+		Details: `Operations on runs identified by their opaque ID. The run type is
+auto-detected from the ID prefix (exr_, pr_, clr_, splr_,
+workflow_run_, edr_).`,
+		Subcommands: []*CommandDoc{
+			newRunsGetDoc(app),
+			newRunsWatchDoc(app),
+			newRunsListDoc(app),
+			newRunsCancelDoc(app),
+			newRunsDeleteDoc(app),
+			newRunsUpdateDoc(app),
+		},
 	}
-	cmd.AddCommand(newRunsGetCommand(app))
-	cmd.AddCommand(newRunsWatchCommand(app))
-	cmd.AddCommand(newRunsListCommand(app))
-	cmd.AddCommand(newRunsCancelCommand(app))
-	cmd.AddCommand(newRunsDeleteCommand(app))
-	cmd.AddCommand(newRunsUpdateCommand(app))
-	return cmd
 }
 
-func newRunsUpdateCommand(app *App) *cobra.Command {
+func newRunsUpdateDoc(app *App) *CommandDoc {
 	var (
 		fromFile string
 		meta     metaFlags
 	)
-	cmd := &cobra.Command{
-		Use:   "update <workflow-run-id>",
-		Short: "Update workflow run metadata (workflow runs only)",
-		Long: `Update the metadata on an in-flight or completed workflow run. Only workflow
-runs (workflow_run_...) support this; other run types do not.
-
-Provide a JSON body with --from-file (inline JSON, path, file:// URI, or - for
-stdin; overrides everything), or use --metadata and --tag to set keys individually.`,
-		Example: `  extend runs update workflow_run_abc --metadata customer=acme --tag prod
-  extend runs update workflow_run_abc --from-file patch.json
-  extend runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`,
-		Args: cobra.ExactArgs(1),
+	return &CommandDoc{
+		Use:     "update <workflow-run-id>",
+		Summary: "Update workflow run metadata (workflow runs only)",
+		Triggers: []string{
+			"update metadata on a workflow run",
+			"tag a completed workflow run",
+			"patch a workflow run's metadata",
+		},
+		WhenToUse: `Use to attach or modify metadata on an in-flight or completed
+workflow run. Only workflow runs (workflow_run_...) support this; other
+run types do not.`,
+		Details: `Provide a JSON body with --from-file (inline JSON, path, file:// URI, or
+- for stdin; overrides everything), or use --metadata and --tag to set
+keys individually.`,
+		Examples: []Example{
+			{Label: "Add metadata + tag", Cmd: "extend runs update workflow_run_abc --metadata customer=acme --tag prod"},
+			{Label: "From patch file", Cmd: "extend runs update workflow_run_abc --from-file patch.json"},
+			{Label: "Inline patch", Cmd: `extend runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`},
+		},
+		Gotchas: []string{
+			"Only workflow runs support metadata updates; the command rejects other run types.",
+			"--from-file overrides --metadata/--tag if both are passed.",
+			"Pass at least one of --from-file, --metadata, or --tag; otherwise the command rejects with 'nothing to update'.",
+		},
+		SeeAlso: []string{"runs get", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			kind, ok := client.RunKindFromID(id)
@@ -85,78 +109,107 @@ stdin; overrides everything), or use --metadata and --tag to set keys individual
 			}
 			return renderWorkflowResult(app, run)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
+			meta.attach(cmd)
+		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
-	meta.attach(cmd)
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
 func jsonMarshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-func newRunsGetCommand(app *App) *cobra.Command {
+func newRunsGetDoc(app *App) *CommandDoc {
 	var responseType string
-	cmd := &cobra.Command{
-		Use:   "get <run-id>",
-		Short: "Fetch a single run by ID",
-		Long: `Fetch one run by ID. The run type is auto-detected from the ID prefix
-(exr_ extract, pr_ parse, clr_ classify, splr_ split, workflow_run_, edr_
-edit), so a single 'extend runs get' call works across all kinds.
+	return &CommandDoc{
+		Use:     "get <run-id>",
+		Summary: "Fetch a single run by ID",
+		Triggers: []string{
+			"fetch a run by id",
+			"get the current status of a run",
+			"inspect an extract or workflow run",
+			"check whether a run completed",
+		},
+		WhenToUse: `Use to retrieve the current state of a run by its ID. Unlike action
+commands, this never waits or polls; it returns whatever state the run
+is currently in. To wait for a terminal state, use 'extend runs watch'.`,
+		Details: `The run type is auto-detected from the ID prefix (exr_ extract, pr_
+parse, clr_ classify, splr_ split, workflow_run_, edr_ edit), so a
+single 'extend runs get' call works across all kinds.
 
-Unlike action commands (extract/classify/etc.), this never waits or polls;
-it returns whatever state the run is currently in. To wait for a terminal
-state, use 'extend runs watch'.
-
-For parse runs, --response-type url returns a presigned URL to the parsed
-output instead of the inline payload (useful for large documents).`,
-		Example: `  extend runs get exr_xK9mLPq
-  extend runs get pr_pJDa8iX -o yaml
-  extend runs get pr_pJDa8iX --response-type url -o json
-  extend runs get clr_kMXk --jq '.output.confidence' -o raw`,
-		Args: cobra.ExactArgs(1),
+For parse runs, --response-type url returns a presigned URL to the
+parsed output instead of the inline payload (useful for large documents).`,
+		Examples: []Example{
+			{Label: "Extract run", Cmd: "extend runs get exr_xK9mLPq"},
+			{Label: "Parse run as YAML", Cmd: "extend runs get pr_pJDa8iX -o yaml"},
+			{Label: "Parse run, URL response", Cmd: "extend runs get pr_pJDa8iX --response-type url -o json"},
+			{Label: "Just classify confidence", Cmd: "extend runs get clr_kMXk --jq '.output.confidence' -o raw"},
+		},
+		Gotchas: []string{
+			"--response-type only applies to parse runs; the command rejects it for other types.",
+			"This command never waits; use 'extend runs watch' for live polling.",
+		},
+		SeeAlso: []string{"runs watch", "runs list", "runs cancel", "runs delete"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsGet(cmd.Context(), app, args[0], responseType)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&responseType, "response-type", "", "Parse runs only: json|url output payload shape")
+		},
 	}
-	cmd.Flags().StringVar(&responseType, "response-type", "", "Parse runs only: json|url output payload shape")
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
-func newRunsWatchCommand(app *App) *cobra.Command {
+func newRunsWatchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
 		exitStatus bool
 	)
-	cmd := &cobra.Command{
-		Use:   "watch <run-id>",
-		Short: "Poll a run until it reaches a terminal state",
-		Long: `Block until the run reaches a terminal state, showing a spinner
-with status transitions. The final result is rendered using the same per-type
+	return &CommandDoc{
+		Use:     "watch <run-id>",
+		Summary: "Poll a run until it reaches a terminal state",
+		Triggers: []string{
+			"watch a run until it finishes",
+			"poll a run for terminal state",
+			"block until extract or workflow run completes",
+			"follow run progress live",
+		},
+		WhenToUse: `Use to block until a run reaches a terminal state. Combine with
+--exit-status to gate downstream scripts on success.`,
+		Details: `Block until the run reaches a terminal state, showing a spinner with
+status transitions. The final result is rendered using the same per-type
 natural format as the originating command.
 
-Use --exit-status for shell composition: the command exits non-zero if the
-run terminates in FAILED or CANCELLED state, so:
+Use --exit-status for shell composition: the command exits non-zero if
+the run terminates in FAILED or CANCELLED state, so:
 
     extend runs watch <id> --exit-status && downstream-script.sh
 
 works as expected.`,
-		Example: `  extend runs watch exr_xK9mLPq
-  extend runs watch pr_pJDa8iX --timeout 5m
-  extend runs watch clr_kMXk --exit-status && deploy.sh`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend runs watch exr_xK9mLPq"},
+			{Label: "Custom timeout", Cmd: "extend runs watch pr_pJDa8iX --timeout 5m"},
+			{Label: "Gate downstream script", Cmd: "extend runs watch clr_kMXk --exit-status && deploy.sh"},
+		},
+		Gotchas: []string{
+			"Without --exit-status, the command exits 0 on any successful poll regardless of run status.",
+			"Watching uses the short polling profile uniformly, even for workflow runs (live progress is the explicit ask).",
+		},
+		SeeAlso:  []string{"runs get", "runs list", "batches watch"},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsWatch(cmd.Context(), app, args[0], timeout, exitStatus)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait")
+			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
+		},
 	}
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait")
-	cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
-	return cmd
 }
 
 func runRunsGet(ctx context.Context, app *App, id, responseType string) error {
@@ -314,7 +367,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	return nil
 }
 
-func newRunsListCommand(app *App) *cobra.Command {
+func newRunsListDoc(app *App) *CommandDoc {
 	var (
 		runType   string
 		status    string
@@ -329,22 +382,42 @@ func newRunsListCommand(app *App) *cobra.Command {
 		sortBy    string
 		sortDir   string
 	)
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List runs of a given processor type",
-		Long: `List runs for a given processor type. Most filter flags map directly to
-documented query parameters on the run-list endpoints; the wire shape varies
-slightly by type (e.g. parse runs ignore --using, --sort-by, and --sort;
-workflow runs ignore --source and --source-id).
+	return &CommandDoc{
+		Use:     "list",
+		Summary: "List runs of a given processor type",
+		Triggers: []string{
+			"list runs by processor type",
+			"find recent runs of a workflow",
+			"page through extract runs",
+			"see runs in a batch",
+			"filter runs by status or processor",
+		},
+		WhenToUse: `Use to enumerate runs of a single type with rich filtering. Pass
+--type extract|parse|classify|split|workflow (edit is not listable; use
+'extend runs get' for individual edit runs).`,
+		Details: `Most filter flags map directly to documented query parameters on the
+run-list endpoints; the wire shape varies slightly by type (e.g. parse
+runs ignore --using, --sort-by, and --sort; workflow runs ignore
+--source and --source-id).
 
 ` + paginationGuidance,
-		Example: `  extend runs list --type extract
-  extend runs list --type extract --using ex_abc --status PROCESSED
-  extend runs list --type workflow --using workflow_abc --file-name invoice
-  extend runs list --type extract --source WORKFLOW_RUN --source-id workflow_run_x
-  extend runs list --type extract --batch bpr_xK9mLPq
-  extend runs list --type extract --page-token <token-from-previous-response>
-  extend runs list --type extract --sort-by updatedAt --sort asc`,
+		Examples: []Example{
+			{Label: "All extract runs", Cmd: "extend runs list --type extract"},
+			{Label: "Filter by status + processor", Cmd: "extend runs list --type extract --using ex_abc --status PROCESSED"},
+			{Label: "Workflow runs by file name", Cmd: "extend runs list --type workflow --using workflow_abc --file-name invoice"},
+			{Label: "Runs spawned by a workflow", Cmd: "extend runs list --type extract --source WORKFLOW_RUN --source-id workflow_run_x"},
+			{Label: "Runs in a batch", Cmd: "extend runs list --type extract --batch bpr_xK9mLPq"},
+			{Label: "Next page", Cmd: "extend runs list --type extract --page-token <token-from-previous-response>"},
+			{Label: "Custom sort", Cmd: "extend runs list --type extract --sort-by updatedAt --sort asc"},
+		},
+		Gotchas: []string{
+			"--type is required.",
+			"Edit runs are not listable; use 'extend runs get edr_...' for individual edit runs.",
+			"Parse runs ignore --using, --sort-by, and --sort; workflow runs ignore --source and --source-id.",
+			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
+		},
+		SeeAlso: []string{"runs get", "runs watch", "batches get"},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsList(cmd, app, runsListParams{
 				runType:   runType,
@@ -361,22 +434,22 @@ workflow runs ignore --source and --source-id).
 				sortDir:   sortDir,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (edit is not listable; use 'extend runs get')")
+			cmd.Flags().StringVar(&status, "status", "", "Filter by status (varies by type; workflow also supports NEEDS_REVIEW|REJECTED|CANCELLING; parse excludes CANCELLED)")
+			cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
+			cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_..., or bpar_... for parse)")
+			cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
+			cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
+			cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to return per page")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
+			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
+			_ = cmd.MarkFlagRequired("type")
+		},
 	}
-	cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (edit is not listable; use 'extend runs get')")
-	cmd.Flags().StringVar(&status, "status", "", "Filter by status (varies by type; workflow also supports NEEDS_REVIEW|REJECTED|CANCELLING; parse excludes CANCELLED)")
-	cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
-	cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_..., or bpar_... for parse)")
-	cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
-	cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
-	cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
-	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to return per page")
-	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
-	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
-	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
-	_ = cmd.MarkFlagRequired("type")
-	SetIOAnnotations(cmd, OutputTable, OutputJSON)
-	return cmd
 }
 
 type runsListParams struct {
@@ -594,14 +667,19 @@ func relTime(iso string) string {
 	return t.Format("2006-01-02")
 }
 
-func newRunsCancelCommand(app *App) *cobra.Command {
+func newRunsCancelDoc(app *App) *CommandDoc {
 	var yes bool
-	cmd := &cobra.Command{
-		Use:   "cancel <run-id>",
-		Short: "Cancel a run by ID",
-		Long: `Cancel a non-terminal run by ID. The run type is determined from
-the ID prefix. Parse runs cannot be cancelled (the API rejects the
-attempt).
+	return &CommandDoc{
+		Use:     "cancel <run-id>",
+		Summary: "Cancel a run by ID",
+		Triggers: []string{
+			"cancel an in-flight run",
+			"stop a running extract or workflow run",
+			"abort a non-terminal run",
+		},
+		WhenToUse: `Use to attempt to cancel a non-terminal run. The run type is determined
+from the ID prefix.`,
+		Details: `Parse runs cannot be cancelled (the API rejects the attempt).
 
 Cancellation is best-effort: an in-flight run may still complete before
 the cancellation takes effect. The terminal status will be CANCELLED if
@@ -610,40 +688,62 @@ if the run finished first.
 
 Cancel stops a running operation; it does not remove the historical
 record. Use 'extend runs delete' for that.`,
-		Example: `  extend runs cancel exr_xK9
-  extend runs cancel workflow_run_abc --yes`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "With prompt", Cmd: "extend runs cancel exr_xK9"},
+			{Label: "Skip confirmation", Cmd: "extend runs cancel workflow_run_abc --yes"},
+		},
+		Gotchas: []string{
+			"Parse runs cannot be cancelled (API rejects).",
+			"Cancellation is best-effort; an in-flight run may complete first.",
+			"Cancel does not delete the run record; use 'extend runs delete' to remove the history.",
+		},
+		SeeAlso: []string{"runs get", "runs delete", "runs watch"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsCancel(cmd.Context(), app, args[0], yes)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
-func newRunsDeleteCommand(app *App) *cobra.Command {
+func newRunsDeleteDoc(app *App) *CommandDoc {
 	var yes bool
-	cmd := &cobra.Command{
-		Use:   "delete <run-id>",
-		Short: "Delete a run record (any run type)",
-		Long: `Delete a run record by ID. Cancel stops a running operation; delete
-removes the historical record once it has reached a terminal state.
-
-The run type is auto-detected from the ID prefix
+	return &CommandDoc{
+		Use:     "delete <run-id>",
+		Summary: "Delete a run record (any run type)",
+		Triggers: []string{
+			"delete a run record",
+			"remove a run from workspace history",
+			"clean up old runs",
+		},
+		WhenToUse: `Use to permanently remove a run's historical record once it has
+reached a terminal state. To stop a still-running operation, use
+'extend runs cancel' instead.`,
+		Details: `The run type is auto-detected from the ID prefix
 (exr_/pr_/clr_/splr_/edr_/workflow_run_). Deletion is permanent and the
 record cannot be recovered. Use this to clean up runs from the workspace
 inventory; it does not affect billing.`,
-		Example: `  extend runs delete exr_xK9
-  extend runs delete pr_abc --yes`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "With prompt", Cmd: "extend runs delete exr_xK9"},
+			{Label: "Skip confirmation", Cmd: "extend runs delete pr_abc --yes"},
+		},
+		Gotchas: []string{
+			"Deletion is permanent; the record cannot be recovered.",
+			"Deletion does not affect billing or already-emitted webhook events.",
+		},
+		SeeAlso: []string{"runs get", "runs cancel", "runs list"},
+		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsDelete(cmd.Context(), app, args[0], yes)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
-	SetIOAnnotations(cmd, OutputNone, OutputNone)
-	return cmd
 }
 
 func runRunsDelete(ctx context.Context, app *App, id string, yes bool) error {

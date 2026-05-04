@@ -13,7 +13,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newParseCommand(app *App) *cobra.Command {
+// newParseDoc returns the typed documentation for `extend parse` and its
+// `extend parse batch` subcommand.
+func newParseDoc(app *App) *CommandDoc {
 	var (
 		target              string
 		engine              string
@@ -29,12 +31,22 @@ func newParseCommand(app *App) *cobra.Command {
 		meta                metaFlags
 	)
 
-	cmd := &cobra.Command{
-		Use:   "parse <input>",
-		Short: "Parse a document into structured text",
-		Long: `Convert a document into LLM-ready text or spatial layout.
-
-<input> can be:
+	return &CommandDoc{
+		Use:     "parse <input>",
+		Summary: "Parse a document into structured text",
+		Group:   "Actions",
+		Triggers: []string{
+			"convert a pdf to llm-ready markdown",
+			"parse a document into structured text",
+			"extract raw text or layout from a document",
+			"chunk a document for retrieval",
+			"render a pdf as markdown",
+		},
+		WhenToUse: `Use when you need raw text, markdown, or spatial layout from a document
+without a predefined schema. Prefer 'extract' when you have a configured
+extractor and need typed fields back; prefer 'classify' when all you need
+is a category label.`,
+		Details: `<input> can be:
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
@@ -48,21 +60,27 @@ Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
 --block-options as inline JSON, a plain file path, or an absolute file:// URI.
 --advanced-options accepts the remaining tuning knobs verbatim (return-OCR,
-page ranges, parallelism, etc.) in the same forms.
-
-Caveats:
-  --target spatial does not support --chunk-strategy section.
-  --jq cannot be combined with -o markdown (markdown is not JSON; use
-  -o json --jq instead and select the markdown chunk paths).`,
-		Example: `  extend parse contract.pdf
-  extend parse contract.pdf -o markdown > contract.md
-  extend parse contract.pdf -o json | jq '.output.chunks | length'
-  extend parse contract.pdf --engine parse_performance --engine-version 1.0.1
-  extend parse contract.pdf --chunk-strategy section --chunk-max-chars 4000
-  extend parse contract.pdf --advanced-options '{"pageRanges":"1-3"}'
-  extend parse contract.pdf --block-options block-opts.json
-  extend parse contract.pdf --advanced-options file:///absolute/path/advanced.json`,
-		Args: cobra.ExactArgs(1),
+page ranges, parallelism, etc.) in the same forms.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend parse contract.pdf"},
+			{Label: "Save raw markdown", Cmd: "extend parse contract.pdf -o markdown > contract.md"},
+			{Label: "Count chunks via jq", Cmd: "extend parse contract.pdf -o json | jq '.output.chunks | length'"},
+			{Label: "Specific engine", Cmd: "extend parse contract.pdf --engine parse_performance --engine-version 1.0.1"},
+			{Label: "Section chunking", Cmd: "extend parse contract.pdf --chunk-strategy section --chunk-max-chars 4000"},
+			{Label: "Inline advanced options", Cmd: `extend parse contract.pdf --advanced-options '{"pageRanges":"1-3"}'`},
+			{Label: "Block options from file", Cmd: "extend parse contract.pdf --block-options block-opts.json"},
+			{Label: "Absolute file URI", Cmd: "extend parse contract.pdf --advanced-options file:///absolute/path/advanced.json"},
+		},
+		Gotchas: []string{
+			"--target spatial does not support --chunk-strategy section.",
+			"--jq cannot be combined with -o markdown; use -o json --jq and select the markdown chunk paths.",
+			"Parse runs cannot be cancelled once submitted (unlike extract/classify/split).",
+		},
+		SeeAlso:  []string{"extract", "classify", "parse batch", "runs watch", "runs get"},
+		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -84,27 +102,22 @@ Caveats:
 				metadata:            md,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
+			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
+			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
+			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
+			cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
+			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "JSON object, path, or file:// URI for blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "JSON object, path, or file:// URI for advancedOptions (returnOcr, pageRanges, etc.)")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			meta.attach(cmd)
+		},
+		Subcommands: []*CommandDoc{newParseBatchDoc(app)},
 	}
-
-	cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
-	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
-	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
-	cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
-	cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
-	cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
-	cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "JSON object, path, or file:// URI for blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
-	cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "JSON object, path, or file:// URI for advancedOptions (returnOcr, pageRanges, etc.)")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
-	meta.attach(cmd)
-
-	SetIOAnnotations(cmd, OutputMarkdown, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed)
-
-	cmd.AddCommand(newParseBatchCommand(app))
-	return cmd
 }
 
 type parseParams struct {

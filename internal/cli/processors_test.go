@@ -12,7 +12,7 @@ func TestExtractorsList_HitsExpectedEndpoint(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	cmd := extractorAccessor().listCmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors", "list")
 	cmd.SetArgs([]string{"--limit", "7", "--sort", "asc"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list: %v", err)
@@ -38,7 +38,7 @@ func TestExtractorsList_JSONJQSeesAPIEnvelope(t *testing.T) {
 	ta := newTestApp(t, srv)
 	ta.app.Format = "raw"
 	ta.app.JQ = ".data[].id"
-	cmd := extractorAccessor().listCmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors", "list")
 	cmd.SetArgs([]string{"--limit", "1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list: %v", err)
@@ -53,7 +53,7 @@ func TestExtractorsCreate_OverlaysNameOntoFromFile(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "ex_new", "object": "extractor"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := extractorAccessor().createCmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors", "create")
 
 	tmp := t.TempDir() + "/body.json"
 	if err := os.WriteFile(tmp, []byte(`{"description":"from file","schema":{"type":"object"}}`), 0o600); err != nil {
@@ -78,7 +78,7 @@ func TestExtractorVersionCreateRequiresReleaseType(t *testing.T) {
 		t.Fatal("server should not be called without releaseType")
 	})
 	ta := newTestApp(t, srv)
-	cmd := extractorAccessor().versionsCreateCmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors", "versions", "create")
 	cmd.SetArgs([]string{"ex_abc", "--description", "notes"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "releaseType is required") {
@@ -94,7 +94,7 @@ func TestExtractorVersionCreateSendsReleaseType(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "exv_abc", "version": "1.0"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := extractorAccessor().versionsCreateCmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors", "versions", "create")
 	cmd.SetArgs([]string{"ex_abc", "--release-type", "minor", "--description", "notes"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("versions create: %v", err)
@@ -115,7 +115,7 @@ func TestWorkflowVersionCreateUsesName(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "workflow_version_abc", "version": "1"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := workflowAccessor().versionsCreateCmd(ta.app)
+	cmd := findCmd(t, ta.app, "workflows", "versions", "create")
 	cmd.SetArgs([]string{"workflow_abc", "--name", "prod"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("versions create: %v", err)
@@ -129,7 +129,7 @@ func TestWorkflowVersionCreateUsesName(t *testing.T) {
 func TestWorkflowsAccessor_HasUpdateCommand(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {})
 	ta := newTestApp(t, srv)
-	cmd := workflowAccessor().cmd(ta.app)
+	cmd := findCmd(t, ta.app, "workflows")
 	found := false
 	for _, sub := range cmd.Commands() {
 		if sub.Name() == "update" {
@@ -144,7 +144,7 @@ func TestWorkflowsAccessor_HasUpdateCommand(t *testing.T) {
 func TestExtractorsAccessor_NoDeleteCommand(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {})
 	ta := newTestApp(t, srv)
-	cmd := extractorAccessor().cmd(ta.app)
+	cmd := findCmd(t, ta.app, "extractors")
 	for _, sub := range cmd.Commands() {
 		if sub.Name() == "delete" {
 			t.Errorf("extractors command should not have 'delete' (API does not support it); found: %s", sub.Use)
