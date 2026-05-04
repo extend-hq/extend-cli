@@ -18,9 +18,14 @@ import (
 )
 
 type processorAccessor[T any, V any] struct {
-	noun        string
-	pluralNoun  string
-	exampleID   string
+	noun       string
+	pluralNoun string
+	exampleID  string
+	// runVerb is the top-level action verb that uses this resource. For
+	// extractors it's "extract"; for classifiers, "classify"; for
+	// splitters, "split"; for workflows, "run". Used to populate SeeAlso
+	// references back to the action verb in the list doc.
+	runVerb     string
 	rowFields   func(T) []string
 	listFn      func(context.Context, *client.Client, client.ListProcessorsOptions) (any, []T, string, error)
 	getFn       func(context.Context, *client.Client, string) (T, error)
@@ -32,24 +37,37 @@ type processorAccessor[T any, V any] struct {
 	createVerFn func(context.Context, *client.Client, string, json.RawMessage) (V, error)
 }
 
-func (a processorAccessor[T, V]) cmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   a.pluralNoun,
-		Short: fmt.Sprintf("List, inspect, and manage %s", a.pluralNoun),
+// doc returns the typed CommandDoc tree for one resource family
+// (extractors / classifiers / splitters / workflows). The same structure —
+// list, get, create, update, versions [list/get/create] — is generated for
+// each, parameterised by noun.
+func (a processorAccessor[T, V]) doc(app *App) *CommandDoc {
+	subs := []*CommandDoc{
+		a.listDoc(app),
+		a.getDoc(app),
 	}
-	cmd.AddCommand(a.listCmd(app))
-	cmd.AddCommand(a.getCmd(app))
 	if a.createFn != nil {
-		cmd.AddCommand(a.createCmd(app))
+		subs = append(subs, a.createDoc(app))
 	}
 	if a.updateFn != nil {
-		cmd.AddCommand(a.updateCmd(app))
+		subs = append(subs, a.updateDoc(app))
 	}
-	cmd.AddCommand(a.versionsCmd(app))
-	return cmd
+	subs = append(subs, a.versionsDoc(app))
+	return &CommandDoc{
+		Use:     a.pluralNoun,
+		Summary: fmt.Sprintf("List, inspect, and manage %s", a.pluralNoun),
+		Group:   "Resources",
+		WhenToUse: fmt.Sprintf(`Use these commands to discover, inspect, create, update, and version
+%s in the workspace.`, a.pluralNoun),
+		Details: fmt.Sprintf(`%s %s has a draft (the editable working copy) plus zero or more
+published versions (immutable snapshots). The draft is what 'update'
+changes; 'versions create' publishes the draft as a new immutable
+version.`, capitalize(articleFor(a.noun)), a.noun),
+		Subcommands: subs,
+	}
 }
 
-func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
+func (a processorAccessor[T, V]) listDoc(app *App) *CommandDoc {
 	var (
 		sortBy    string
 		sortDir   string
@@ -57,26 +75,43 @@ func (a processorAccessor[T, V]) listCmd(app *App) *cobra.Command {
 		all       bool
 		pageToken string
 	)
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: fmt.Sprintf("List %s", a.pluralNoun),
-		Long: fmt.Sprintf(`List %s in the current workspace.
-
-Sorted by updatedAt descending by default. By default, returns the first
-page (--limit, default 20). When more pages exist, the response's
-nextPageToken (and a stderr hint on TTYs) tells you the token to pass to
---page-token to fetch the next page.
+	return &CommandDoc{
+		Use:     "list",
+		Summary: fmt.Sprintf("List %s", a.pluralNoun),
+		Triggers: []string{
+			fmt.Sprintf("list %s in the workspace", a.pluralNoun),
+			fmt.Sprintf("page through %s", a.pluralNoun),
+			fmt.Sprintf("find %s ids", a.pluralNoun),
+			fmt.Sprintf("discover available %s", a.pluralNoun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to discover %s by ID, optionally sorted by createdAt or updatedAt.
+The ID column feeds 'extend %s get <id>'.`, a.pluralNoun, a.pluralNoun),
+		Details: fmt.Sprintf(`Sorted by updatedAt descending by default. By default, returns the
+first page (--limit, default 20). When more pages exist, the response's
+nextPageToken (and a stderr hint on TTYs) tells you the token to pass
+to --page-token to fetch the next page.
 
 %s
 
 The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
-			a.pluralNoun, paginationGuidance, a.noun, a.pluralNoun),
-		Example: fmt.Sprintf(`  extend %s list
-  extend %s list --sort-by createdAt
-  extend %s list --page-token <token-from-previous-response>
-  extend %s list -o id | head -5
-  extend %s list --jq '.data[].id' -o raw`,
-			a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun, a.pluralNoun),
+			paginationGuidance, a.noun, a.pluralNoun),
+		Examples: []Example{
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s list", a.pluralNoun)},
+			{Label: "Sort by createdAt", Cmd: fmt.Sprintf("extend %s list --sort-by createdAt", a.pluralNoun)},
+			{Label: "Next page", Cmd: fmt.Sprintf("extend %s list --page-token <token-from-previous-response>", a.pluralNoun)},
+			{Label: "First five IDs", Cmd: fmt.Sprintf("extend %s list -o id | head -5", a.pluralNoun)},
+			{Label: "Just IDs via jq", Cmd: fmt.Sprintf("extend %s list --jq '.data[].id' -o raw", a.pluralNoun)},
+		},
+		Gotchas: []string{
+			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
+			"--all auto-paginates and can exceed agent context budgets; prefer --page-token in scripts.",
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s get", a.pluralNoun),
+			fmt.Sprintf("%s create", a.pluralNoun),
+			a.runVerb,
+		},
+		Output: OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -107,28 +142,41 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows,
 				fmt.Sprintf("No %s.", a.pluralNoun))
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+		},
 	}
-	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
-	cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-	cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-	cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
-	SetIOAnnotations(cmd, OutputTable, OutputJSON)
-	return cmd
 }
 
-func (a processorAccessor[T, V]) getCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   fmt.Sprintf("get <%s-id>", a.noun),
-		Short: fmt.Sprintf("Show one %s by ID", a.noun),
-		Long: fmt.Sprintf(`Show full details for one %s, including its current draft and
-deployed-version metadata. Use `+"`extend %s versions list <id>`"+` to enumerate
-historical versions, or `+"`extend %s versions get <id> <version>`"+` to inspect
-a specific one.`, a.noun, a.pluralNoun, a.pluralNoun),
-		Example: fmt.Sprintf(`  extend %s get %s
-  extend %s get %s --jq '.name' -o raw`,
-			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
-		Args: cobra.ExactArgs(1),
+func (a processorAccessor[T, V]) getDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     fmt.Sprintf("get <%s-id>", a.noun),
+		Summary: fmt.Sprintf("Show one %s by ID", a.noun),
+		Triggers: []string{
+			fmt.Sprintf("show one %s by id", a.noun),
+			fmt.Sprintf("inspect a %s configuration", a.noun),
+			fmt.Sprintf("get %s name and metadata", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to retrieve full details for one %s, including its current
+draft and deployed-version metadata.`, a.noun),
+		Details: fmt.Sprintf(`Use `+"`extend %s versions list <id>`"+` to enumerate historical versions, or
+`+"`extend %s versions get <id> <version>`"+` to inspect a specific one.`,
+			a.pluralNoun, a.pluralNoun),
+		Examples: []Example{
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s get %s", a.pluralNoun, a.exampleID)},
+			{Label: "Just the name", Cmd: fmt.Sprintf("extend %s get %s --jq '.name' -o raw", a.pluralNoun, a.exampleID)},
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s list", a.pluralNoun),
+			fmt.Sprintf("%s versions list", a.pluralNoun),
+			fmt.Sprintf("%s update", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -141,36 +189,57 @@ a specific one.`, a.noun, a.pluralNoun, a.pluralNoun),
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
 	}
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
-func (a processorAccessor[T, V]) versionsCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "versions",
-		Short: fmt.Sprintf("List or inspect versions of %s %s", articleFor(a.noun), a.noun),
+func (a processorAccessor[T, V]) versionsDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "versions",
+		Summary: fmt.Sprintf("List or inspect versions of %s %s", articleFor(a.noun), a.noun),
+		WhenToUse: fmt.Sprintf(`Use this group to enumerate published versions of %s %s, inspect a
+specific version's config, or publish a new version from the current
+draft.`, articleFor(a.noun), a.noun),
+		Details: fmt.Sprintf(`Versions are immutable snapshots of %s %s's config. The draft is the
+editable working copy and is not a version.`, articleFor(a.noun), a.noun),
+		Subcommands: []*CommandDoc{
+			a.versionsListDoc(app),
+			a.versionsGetDoc(app),
+			a.versionsCreateDoc(app),
+		},
 	}
+}
+
+func (a processorAccessor[T, V]) versionsListDoc(app *App) *CommandDoc {
 	var (
 		verSortDir   string
 		verLimit     int
 		verAll       bool
 		verPageToken string
 	)
-	listCmd := &cobra.Command{
-		Use:   fmt.Sprintf("list <%s-id>", a.noun),
-		Short: fmt.Sprintf("List versions of %s %s", articleFor(a.noun), a.noun),
-		Long: fmt.Sprintf(`List every published version of %s %s.
+	return &CommandDoc{
+		Use:     fmt.Sprintf("list <%s-id>", a.noun),
+		Summary: fmt.Sprintf("List versions of %s %s", articleFor(a.noun), a.noun),
+		Triggers: []string{
+			fmt.Sprintf("list versions of a %s", a.noun),
+			fmt.Sprintf("see published %s versions", a.noun),
+			fmt.Sprintf("page through historical %s versions", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to enumerate every published version of %s %s. Sort defaults to
+descending by createdAt (newest first).`, articleFor(a.noun), a.noun),
+		Details: fmt.Sprintf(`Versions are immutable snapshots of a %s's config; the row labeled "draft"
+is the editable working copy.
 
-Versions are immutable snapshots of a %s's config; the row labeled "draft"
-is the editable working copy. Sort defaults to descending by createdAt
-(newest first).
-
-%s`, articleFor(a.noun), a.noun, a.noun, paginationGuidance),
-		Example: fmt.Sprintf(`  extend %s versions list %s
-  extend %s versions list %s --page-token <token-from-previous-response>
-  extend %s versions list %s --jq '.data[].version' -o raw`,
-			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
-		Args: cobra.ExactArgs(1),
+%s`, a.noun, paginationGuidance),
+		Examples: []Example{
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s versions list %s", a.pluralNoun, a.exampleID)},
+			{Label: "Next page", Cmd: fmt.Sprintf("extend %s versions list %s --page-token <token-from-previous-response>", a.pluralNoun, a.exampleID)},
+			{Label: "Just version numbers", Cmd: fmt.Sprintf("extend %s versions list %s --jq '.data[].version' -o raw", a.pluralNoun, a.exampleID)},
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s get", a.pluralNoun),
+			fmt.Sprintf("%s versions get", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -201,26 +270,40 @@ is the editable working copy. Sort defaults to descending by createdAt
 			}
 			return renderListForCmd(cmd, app, pages, []string{"version", "id", "created"}, rows, "No versions.")
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
+			cmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
+			cmd.Flags().StringVar(&verPageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
+			cmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+		},
 	}
-	listCmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
-	listCmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
-	listCmd.Flags().StringVar(&verPageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-	listCmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
-	SetIOAnnotations(listCmd, OutputTable, OutputJSON)
-	cmd.AddCommand(listCmd)
-	getVerCmd := &cobra.Command{
-		Use:   fmt.Sprintf("get <%s-id> <version>", a.noun),
-		Short: fmt.Sprintf("Show one %s version", a.noun),
-		Long: fmt.Sprintf(`Show the full config for one published %s version. Pass
-"draft" as <version> to inspect the working copy. The output is the
-canonical JSON shape used by `+"`extend %s versions create --from-file`"+`,
+}
+
+func (a processorAccessor[T, V]) versionsGetDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     fmt.Sprintf("get <%s-id> <version>", a.noun),
+		Summary: fmt.Sprintf("Show one %s version", a.noun),
+		Triggers: []string{
+			fmt.Sprintf("show one %s version config", a.noun),
+			fmt.Sprintf("inspect a specific %s version", a.noun),
+			fmt.Sprintf("clone a %s version into a snapshot", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to retrieve the full config for a published %s version, or pass
+"draft" as the version to inspect the working copy.`, a.noun),
+		Details: fmt.Sprintf(`The output is the canonical JSON shape used by `+"`extend %s versions create --from-file`"+`,
 so this command is also useful for cloning a known-good version into a
-new one.`, a.noun, a.pluralNoun),
-		Example: fmt.Sprintf(`  extend %s versions get %s 1.0
-  extend %s versions get %s draft
-  extend %s versions get %s 1.0 > snapshot.json`,
-			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
-		Args: cobra.ExactArgs(2),
+new one.`, a.pluralNoun),
+		Examples: []Example{
+			{Label: "Specific version", Cmd: fmt.Sprintf("extend %s versions get %s 1.0", a.pluralNoun, a.exampleID)},
+			{Label: "Draft", Cmd: fmt.Sprintf("extend %s versions get %s draft", a.pluralNoun, a.exampleID)},
+			{Label: "Snapshot to file", Cmd: fmt.Sprintf("extend %s versions get %s 1.0 > snapshot.json", a.pluralNoun, a.exampleID)},
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s versions list", a.pluralNoun),
+			fmt.Sprintf("%s versions create", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -233,20 +316,30 @@ new one.`, a.noun, a.pluralNoun),
 			return renderWithDefault(app, v, output.FormatJSON)
 		},
 	}
-	SetIOAnnotations(getVerCmd, OutputJSON, OutputJSON)
-	cmd.AddCommand(getVerCmd)
-	cmd.AddCommand(a.versionsCreateCmd(app))
-	return cmd
 }
 
-func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
+func (a processorAccessor[T, V]) versionsCreateDoc(app *App) *CommandDoc {
 	var fromFile, description, releaseType, name string
-	cmd := &cobra.Command{
+	return &CommandDoc{
 		Use:     fmt.Sprintf("create <%s-id>", a.noun),
-		Short:   fmt.Sprintf("Publish a new version of %s %s", articleFor(a.noun), a.noun),
-		Args:    cobra.ExactArgs(1),
-		Long:    versionCreateLong(a.noun),
-		Example: versionCreateExample(a.noun, a.pluralNoun, a.exampleID),
+		Summary: fmt.Sprintf("Publish a new version of %s %s", articleFor(a.noun), a.noun),
+		Triggers: []string{
+			fmt.Sprintf("publish a new %s version", a.noun),
+			fmt.Sprintf("deploy a %s draft as a version", a.noun),
+			fmt.Sprintf("release a %s as major or minor", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to publish the current draft of %s %s as a new immutable version.
+For workflows, this is a named deploy; for processors, a major/minor
+release.`, articleFor(a.noun), a.noun),
+		Details:  versionCreateLong(a.noun),
+		Examples: versionCreateExamples(a.noun, a.pluralNoun, a.exampleID),
+		Gotchas:  versionCreateGotchas(a.noun),
+		SeeAlso: []string{
+			fmt.Sprintf("%s update", a.pluralNoun),
+			fmt.Sprintf("%s versions list", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			overrides := map[string]string{}
 			if a.noun == "workflow" {
@@ -274,16 +367,16 @@ func (a processorAccessor[T, V]) versionsCreateCmd(app *App) *cobra.Command {
 			}
 			return renderWithDefault(app, v, output.FormatJSON)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
+			if a.noun == "workflow" {
+				cmd.Flags().StringVar(&name, "name", "", "Name for the deployed workflow version (overrides body)")
+			} else {
+				cmd.Flags().StringVar(&releaseType, "release-type", "", "Release type: major|minor (required unless provided by --from-file)")
+				cmd.Flags().StringVar(&description, "description", "", "Description for the new version (overrides body)")
+			}
+		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
-	if a.noun == "workflow" {
-		cmd.Flags().StringVar(&name, "name", "", "Name for the deployed workflow version (overrides body)")
-	} else {
-		cmd.Flags().StringVar(&releaseType, "release-type", "", "Release type: major|minor (required unless provided by --from-file)")
-		cmd.Flags().StringVar(&description, "description", "", "Description for the new version (overrides body)")
-	}
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
 func versionCreateLong(noun string) string {
@@ -305,15 +398,30 @@ remain reachable via the version number. Workflow versioning differs (uses
 named deploys instead of major/minor); see ` + "`extend workflows versions create --help`."
 }
 
-func versionCreateExample(noun, plural, exampleID string) string {
+func versionCreateExamples(noun, plural, exampleID string) []Example {
 	if noun == "workflow" {
-		return fmt.Sprintf(`  extend %s versions create %s --name "v2-with-review"
-  extend %s versions create %s --from-file deploy.json`,
-			plural, exampleID, plural, exampleID)
+		return []Example{
+			{Label: "Named deploy", Cmd: fmt.Sprintf(`extend %s versions create %s --name "v2-with-review"`, plural, exampleID)},
+			{Label: "From file", Cmd: fmt.Sprintf("extend %s versions create %s --from-file deploy.json", plural, exampleID)},
+		}
 	}
-	return fmt.Sprintf(`  extend %s versions create %s --release-type minor --description "Added line_items field"
-  extend %s versions create %s --from-file release.json`,
-		plural, exampleID, plural, exampleID)
+	return []Example{
+		{Label: "Minor release", Cmd: fmt.Sprintf(`extend %s versions create %s --release-type minor --description "Added line_items field"`, plural, exampleID)},
+		{Label: "From file", Cmd: fmt.Sprintf("extend %s versions create %s --from-file release.json", plural, exampleID)},
+	}
+}
+
+func versionCreateGotchas(noun string) []string {
+	if noun == "workflow" {
+		return []string{
+			"Workflows use named deploys; do not pass --release-type.",
+			"Once deployed, the name is how 'extend run --version' refers to the deploy.",
+		}
+	}
+	return []string{
+		"--release-type is required unless provided in the JSON body (must be 'major' or 'minor').",
+		"Versions are immutable; future updates create new versions, not edits.",
+	}
 }
 
 func requireJSONEnum(body json.RawMessage, field string, allowed ...string) error {
@@ -344,26 +452,41 @@ func flagName(field string) string {
 	return strings.ToLower(out.String())
 }
 
-func (a processorAccessor[T, V]) createCmd(app *App) *cobra.Command {
+func (a processorAccessor[T, V]) createDoc(app *App) *CommandDoc {
 	var fromFile, name string
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: fmt.Sprintf("Create %s %s", articleFor(a.noun), a.noun),
-		Long: fmt.Sprintf(`Create %s %s in the current workspace.
-
-Pass --from-file with the full API body (inline JSON, path, file:// URI, or
-- for stdin); --name overrides any name in the body. The new %s starts as
-a draft (no published version); use `+"`extend %s versions create`"+` once
-you're ready to deploy.
+	return &CommandDoc{
+		Use:     "create",
+		Summary: fmt.Sprintf("Create %s %s", articleFor(a.noun), a.noun),
+		Triggers: []string{
+			fmt.Sprintf("create a new %s", a.noun),
+			fmt.Sprintf("register a %s in the workspace", a.noun),
+			fmt.Sprintf("set up a fresh %s draft", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to create %s %s in the current workspace. The new %s starts as
+a draft (no published version); use 'extend %s versions create' once
+you're ready to deploy.`, articleFor(a.noun), a.noun, a.noun, a.pluralNoun),
+		Details: fmt.Sprintf(`Pass --from-file with the full API body (inline JSON, path, file:// URI, or
+- for stdin); --name overrides any name in the body.
 
 For the request body shape, copy from an existing %s:
 
     extend %s versions get <existing-id> 1.0 > template.json
 
-Then edit and pass via --from-file.`,
-			articleFor(a.noun), a.noun, a.noun, a.pluralNoun, a.noun, a.pluralNoun),
-		Example: fmt.Sprintf(`  extend %s create --from-file %s.json --name "My %s"
-  cat %s.json | extend %s create --from-file -`, a.pluralNoun, a.noun, a.noun, a.noun, a.pluralNoun),
+Then edit and pass via --from-file.`, a.noun, a.pluralNoun),
+		Examples: []Example{
+			{Label: "From file with name", Cmd: fmt.Sprintf(`extend %s create --from-file %s.json --name "My %s"`, a.pluralNoun, a.noun, a.noun)},
+			{Label: "From stdin", Cmd: fmt.Sprintf("cat %s.json | extend %s create --from-file -", a.noun, a.pluralNoun)},
+		},
+		Gotchas: []string{
+			"--from-file is required to provide the API body.",
+			"The new resource starts as a draft; publish via 'versions create' to deploy.",
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s list", a.pluralNoun),
+			fmt.Sprintf("%s update", a.pluralNoun),
+			fmt.Sprintf("%s versions create", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, map[string]string{"name": name})
 			if err != nil {
@@ -379,29 +502,43 @@ Then edit and pass via --from-file.`,
 			}
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
+			cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
+		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
-	cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
-func (a processorAccessor[T, V]) updateCmd(app *App) *cobra.Command {
+func (a processorAccessor[T, V]) updateDoc(app *App) *CommandDoc {
 	var fromFile, name string
-	cmd := &cobra.Command{
-		Use:   fmt.Sprintf("update <%s-id>", a.noun),
-		Short: fmt.Sprintf("Update an existing %s", a.noun),
-		Long: fmt.Sprintf(`Update an existing %s's draft config. Updates apply to the
+	return &CommandDoc{
+		Use:     fmt.Sprintf("update <%s-id>", a.noun),
+		Summary: fmt.Sprintf("Update an existing %s", a.noun),
+		Triggers: []string{
+			fmt.Sprintf("update a %s draft", a.noun),
+			fmt.Sprintf("change a %s configuration", a.noun),
+			fmt.Sprintf("rename or patch a %s", a.noun),
+		},
+		WhenToUse: fmt.Sprintf(`Use to update an existing %s's draft config. Updates apply to the
 draft version only; they do NOT affect already-deployed versions. Use
-`+"`extend %s versions create`"+` to publish the updated draft as a new
-version.
-
-Pass --from-file with a full or partial JSON body (inline JSON, path, file://
-URI, or - for stdin); --name overrides any name in the body.`, a.noun, a.pluralNoun),
-		Example: fmt.Sprintf(`  extend %s update %s --from-file patch.json
-  extend %s update %s --name "New name"`,
-			a.pluralNoun, a.exampleID, a.pluralNoun, a.exampleID),
-		Args: cobra.ExactArgs(1),
+'extend %s versions create' to publish the updated draft as a new
+version.`, a.noun, a.pluralNoun),
+		Details: `Pass --from-file with a full or partial JSON body (inline JSON, path,
+file:// URI, or - for stdin); --name overrides any name in the body.`,
+		Examples: []Example{
+			{Label: "From patch file", Cmd: fmt.Sprintf("extend %s update %s --from-file patch.json", a.pluralNoun, a.exampleID)},
+			{Label: "Rename only", Cmd: fmt.Sprintf(`extend %s update %s --name "New name"`, a.pluralNoun, a.exampleID)},
+		},
+		Gotchas: []string{
+			"Updates apply only to the draft; deployed versions are immutable.",
+			"To deploy the updated draft, use 'versions create' afterward.",
+		},
+		SeeAlso: []string{
+			fmt.Sprintf("%s get", a.pluralNoun),
+			fmt.Sprintf("%s versions create", a.pluralNoun),
+		},
+		Output: OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := mergeBody(fromFile, map[string]string{"name": name})
 			if err != nil {
@@ -417,11 +554,11 @@ URI, or - for stdin); --name overrides any name in the body.`, a.noun, a.pluralN
 			}
 			return renderWithDefault(app, p, output.FormatJSON)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
+			cmd.Flags().StringVar(&name, "name", "", "New name (overrides body)")
+		},
 	}
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
-	cmd.Flags().StringVar(&name, "name", "", "New name (overrides body)")
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
 // articleFor picks "a" or "an" based on the first letter only. Phonetic
@@ -437,6 +574,18 @@ func articleFor(noun string) string {
 		return "an"
 	}
 	return "a"
+}
+
+// capitalize uppercases the first byte; safe for the ASCII outputs of
+// articleFor ("a" → "A", "an" → "An").
+func capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
 }
 
 func mergeBody(fromFile string, overrides map[string]string) (json.RawMessage, error) {
@@ -567,6 +716,8 @@ func extractorAccessor() processorAccessor[*client.Extractor, *client.ProcessorV
 	return processorAccessor[*client.Extractor, *client.ProcessorVersion]{
 		noun:       "extractor",
 		pluralNoun: "extractors",
+		exampleID:  "ex_abc",
+		runVerb:    "extract",
 		rowFields:  func(e *client.Extractor) []string { return []string{e.ID, e.Name, relTime(e.CreatedAt)} },
 		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Extractor, string, error) {
 			r, err := c.ListExtractors(ctx, opts)
@@ -605,6 +756,8 @@ func classifierAccessor() processorAccessor[*client.Classifier, *client.Processo
 	return processorAccessor[*client.Classifier, *client.ProcessorVersion]{
 		noun:       "classifier",
 		pluralNoun: "classifiers",
+		exampleID:  "cl_abc",
+		runVerb:    "classify",
 		rowFields:  func(c *client.Classifier) []string { return []string{c.ID, c.Name, relTime(c.CreatedAt)} },
 		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Classifier, string, error) {
 			r, err := c.ListClassifiers(ctx, opts)
@@ -643,6 +796,8 @@ func splitterAccessor() processorAccessor[*client.Splitter, *client.ProcessorVer
 	return processorAccessor[*client.Splitter, *client.ProcessorVersion]{
 		noun:       "splitter",
 		pluralNoun: "splitters",
+		exampleID:  "spl_abc",
+		runVerb:    "split",
 		rowFields:  func(s *client.Splitter) []string { return []string{s.ID, s.Name, relTime(s.CreatedAt)} },
 		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Splitter, string, error) {
 			r, err := c.ListSplitters(ctx, opts)
@@ -681,6 +836,8 @@ func workflowAccessor() processorAccessor[*client.Workflow, *client.ProcessorVer
 	return processorAccessor[*client.Workflow, *client.ProcessorVersion]{
 		noun:       "workflow",
 		pluralNoun: "workflows",
+		exampleID:  "workflow_abc",
+		runVerb:    "run",
 		rowFields:  func(w *client.Workflow) []string { return []string{w.ID, w.Name, relTime(w.CreatedAt)} },
 		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Workflow, string, error) {
 			r, err := c.ListWorkflows(ctx, opts)

@@ -147,17 +147,42 @@ func collectBatchInputs(args []string, filesFrom string) ([]string, error) {
 	return inputs, nil
 }
 
-func newExtractBatchCommand(app *App) *cobra.Command {
+// newExtractBatchDoc returns the typed documentation for the
+// `extend extract batch` subcommand. Composed under newExtractDoc via
+// CommandDoc.Subcommands.
+func newExtractBatchDoc(app *App) *CommandDoc {
 	var f batchFlags
-	cmd := &cobra.Command{
-		Use:   "batch <input>...",
-		Short: "Run extraction on up to 1,000 files in one batch",
-		Long: `Run extraction on up to 1,000 files in one batch. Per-input metadata may be
-attached via --metadata/--tag (applied to every input identically); the server
-schema does not accept top-level metadata.`,
-		Example: `  extend extract batch invoice1.pdf invoice2.pdf --using ex_abc
-  extend extract batch --files-from list.txt --using ex_abc
-  ls *.pdf | extend extract batch --files-from - --using ex_abc`,
+	return &CommandDoc{
+		Use:     "batch <input>...",
+		Summary: "Run extraction on up to 1,000 files in one batch",
+		Triggers: []string{
+			"extract from many documents at once",
+			"bulk extract a folder of pdfs",
+			"submit an extract batch run",
+			"process up to 1000 files in one extract batch",
+		},
+		WhenToUse: `Use when you have many inputs to extract against the same extractor and
+want a single batch run to track. Prefer single-document 'extract' for
+one-off requests; prefer 'run batch' if you need a multi-step workflow.`,
+		Details: `Per-input metadata may be attached via --metadata/--tag (applied to
+every input identically); the server schema does not accept top-level
+metadata for processor batches. After submission, the command prints the
+batch ID and a hint for following progress.
+
+Track progress with ` + "`extend batches watch <id>`" + ` or list contained
+runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
+		Examples: []Example{
+			{Label: "From positional args", Cmd: "extend extract batch invoice1.pdf invoice2.pdf --using ex_abc"},
+			{Label: "From a list file", Cmd: "extend extract batch --files-from list.txt --using ex_abc"},
+			{Label: "From stdin", Cmd: "ls *.pdf | extend extract batch --files-from - --using ex_abc"},
+		},
+		Gotchas: []string{
+			"Maximum 1,000 inputs per batch; submit multiple batches for larger sets.",
+			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
+			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+		},
+		SeeAlso: []string{"extract", "batches watch", "batches get", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, f.filesFrom)
 			if err != nil {
@@ -192,29 +217,47 @@ schema does not accept top-level metadata.`,
 			}
 			return renderBatchSubmitted(app, br)
 		},
+		Configure: func(cmd *cobra.Command) {
+			f.attach(cmd, "using")
+		},
 	}
-	f.attach(cmd, "using")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
-func newClassifyBatchCommand(app *App) *cobra.Command {
+// newClassifyBatchDoc returns the typed documentation for `extend classify
+// batch`. Composed under newClassifyDoc via CommandDoc.Subcommands.
+func newClassifyBatchDoc(app *App) *CommandDoc {
 	var f batchFlags
-	cmd := &cobra.Command{
-		Use:   "batch <input>...",
-		Short: "Run classification on up to 1,000 files in one batch",
-		Long: `Run classification on up to 1,000 files in one batch.
-
-Per-input metadata is set via --metadata/--tag and applied to every input
+	return &CommandDoc{
+		Use:     "batch <input>...",
+		Summary: "Run classification on up to 1,000 files in one batch",
+		Triggers: []string{
+			"classify many documents at once",
+			"bulk label a folder of pdfs",
+			"submit a classify batch run",
+			"classify up to 1000 files in one batch",
+		},
+		WhenToUse: `Use when you have many inputs to classify against the same classifier
+and want a single batch run to track. Prefer single-document 'classify'
+for one-off requests.`,
+		Details: `Per-input metadata is set via --metadata/--tag and applied to every input
 identically; the server schema does not accept top-level metadata for
 processor batches. After submission, the command prints the batch ID and a
 hint for following progress.
 
 Track progress with ` + "`extend batches watch <id>`" + ` or list contained
 runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
-		Example: `  extend classify batch invoice1.pdf invoice2.pdf --using cl_abc
-  extend classify batch --files-from list.txt --using cl_abc
-  ls *.pdf | extend classify batch --files-from - --using cl_abc`,
+		Examples: []Example{
+			{Label: "From positional args", Cmd: "extend classify batch invoice1.pdf invoice2.pdf --using cl_abc"},
+			{Label: "From a list file", Cmd: "extend classify batch --files-from list.txt --using cl_abc"},
+			{Label: "From stdin", Cmd: "ls *.pdf | extend classify batch --files-from - --using cl_abc"},
+		},
+		Gotchas: []string{
+			"Maximum 1,000 inputs per batch.",
+			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
+			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+		},
+		SeeAlso: []string{"classify", "batches watch", "batches get", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, f.filesFrom)
 			if err != nil {
@@ -249,27 +292,45 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 			}
 			return renderBatchSubmitted(app, br)
 		},
+		Configure: func(cmd *cobra.Command) {
+			f.attach(cmd, "using")
+		},
 	}
-	f.attach(cmd, "using")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
-func newSplitBatchCommand(app *App) *cobra.Command {
+// newSplitBatchDoc returns the typed documentation for `extend split batch`.
+// Composed under newSplitDoc via CommandDoc.Subcommands.
+func newSplitBatchDoc(app *App) *CommandDoc {
 	var f batchFlags
-	cmd := &cobra.Command{
-		Use:   "batch <input>...",
-		Short: "Run splitting on up to 1,000 files in one batch",
-		Long: `Run splitting on up to 1,000 multi-document files in one batch.
-
-Per-input metadata is set via --metadata/--tag and applied to every input
+	return &CommandDoc{
+		Use:     "batch <input>...",
+		Summary: "Run splitting on up to 1,000 files in one batch",
+		Triggers: []string{
+			"split many multi-document pdfs at once",
+			"bulk split a folder of bundles",
+			"submit a split batch run",
+			"split up to 1000 files in one batch",
+		},
+		WhenToUse: `Use when you have many bundle PDFs to split against the same splitter and
+want a single batch run to track. Prefer single-document 'split' for
+one-off requests.`,
+		Details: `Per-input metadata is set via --metadata/--tag and applied to every input
 identically; the server schema does not accept top-level metadata for
 processor batches.
 
 Track progress with ` + "`extend batches watch <id>`" + ` or list contained
 runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
-		Example: `  extend split batch bundle1.pdf bundle2.pdf --using spl_abc
-  extend split batch --files-from list.txt --using spl_abc`,
+		Examples: []Example{
+			{Label: "From positional args", Cmd: "extend split batch bundle1.pdf bundle2.pdf --using spl_abc"},
+			{Label: "From a list file", Cmd: "extend split batch --files-from list.txt --using spl_abc"},
+		},
+		Gotchas: []string{
+			"Maximum 1,000 inputs per batch.",
+			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
+			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+		},
+		SeeAlso: []string{"split", "batches watch", "batches get", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, f.filesFrom)
 			if err != nil {
@@ -304,13 +365,15 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 			}
 			return renderBatchSubmitted(app, br)
 		},
+		Configure: func(cmd *cobra.Command) {
+			f.attach(cmd, "using")
+		},
 	}
-	f.attach(cmd, "using")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
-func newParseBatchCommand(app *App) *cobra.Command {
+// newParseBatchDoc returns the typed documentation for `extend parse batch`.
+// Composed under newParseDoc via CommandDoc.Subcommands.
+func newParseBatchDoc(app *App) *CommandDoc {
 	var (
 		filesFrom         string
 		target            string
@@ -320,20 +383,35 @@ func newParseBatchCommand(app *App) *cobra.Command {
 		uploadConcurrency int
 		meta              metaFlags
 	)
-	cmd := &cobra.Command{
-		Use:   "batch <input>...",
-		Short: "Parse up to 1,000 files in one batch",
-		Long: `Parse up to 1,000 files in one batch using the specified engine.
-
-Unlike processor batches (extract/classify/split), parse batches do not
+	return &CommandDoc{
+		Use:     "batch <input>...",
+		Summary: "Parse up to 1,000 files in one batch",
+		Triggers: []string{
+			"parse many documents at once",
+			"bulk convert pdfs to markdown",
+			"submit a parse batch run",
+			"parse up to 1000 files in one batch",
+		},
+		WhenToUse: `Use when you have many inputs to parse and want a single batch run to
+track. Prefer single-document 'parse' for one-off requests.`,
+		Details: `Unlike processor batches (extract/classify/split), parse batches do not
 take a processor reference; the engine is selected via --engine and
 --engine-version. Per-input metadata is set via --metadata/--tag.
 
 Track progress with ` + "`extend batches watch <id>`" + ` or list contained
 runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
-		Example: `  extend parse batch file_a file_b
-  extend parse batch --engine parse_performance --engine-version 1.0.1 file_a file_b
-  extend parse batch --target spatial --files-from list.txt`,
+		Examples: []Example{
+			{Label: "From positional args", Cmd: "extend parse batch file_a file_b"},
+			{Label: "Specific engine", Cmd: "extend parse batch --engine parse_performance --engine-version 1.0.1 file_a file_b"},
+			{Label: "Spatial target from list", Cmd: "extend parse batch --target spatial --files-from list.txt"},
+		},
+		Gotchas: []string{
+			"Maximum 1,000 inputs per batch.",
+			"No processor reference is required; engine is selected via --engine/--engine-version.",
+			"Parse runs cannot be cancelled once submitted.",
+		},
+		SeeAlso: []string{"parse", "batches watch", "batches get", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, filesFrom)
 			if err != nil {
@@ -372,31 +450,50 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			}
 			return renderBatchSubmitted(app, br)
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&filesFrom, "files-from", "", "Path to a file with one input per line (- for stdin)")
+			cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
+			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
+			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+			cmd.Flags().IntVar(&uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
+			meta.attach(cmd)
+		},
 	}
-	cmd.Flags().StringVar(&filesFrom, "files-from", "", "Path to a file with one input per line (- for stdin)")
-	cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
-	cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
-	cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-	cmd.Flags().IntVar(&uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
-	meta.attach(cmd)
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
-func newWorkflowBatchCommand(app *App) *cobra.Command {
+// newWorkflowBatchDoc returns the typed documentation for `extend run
+// batch`. Composed under newRunDoc via CommandDoc.Subcommands.
+func newWorkflowBatchDoc(app *App) *CommandDoc {
 	var f batchFlags
-	cmd := &cobra.Command{
-		Use:   "batch <input>...",
-		Short: "Run a workflow on up to 1,000 files in one batch",
-		Long: `Run a workflow on up to 1,000 files in one batch. Workflow batches return
-only a batch_id; unlike processor batches there is no GET /batch_runs/{id}
-endpoint for workflow batches and 'extend batches watch' will not work on
-them. Track progress with:
+	return &CommandDoc{
+		Use:     "batch <input>...",
+		Summary: "Run a workflow on up to 1,000 files in one batch",
+		Triggers: []string{
+			"start a workflow run on many documents",
+			"bulk submit a workflow batch",
+			"run an extend workflow on a folder of files",
+			"trigger up to 1000 workflow runs at once",
+		},
+		WhenToUse: `Use when you have many inputs to feed through the same workflow and want
+to fan them out as a single batch. Prefer single-input 'run' for one-off
+runs.`,
+		Details: `Workflow batches return only a batch_id; unlike processor batches there
+is no GET /batch_runs/{id} endpoint for workflow batches and
+'extend batches watch' will not work on them. Track progress with:
 
     extend runs list --type workflow --batch <batch-id>`,
-		Example: `  extend run batch doc1.pdf doc2.pdf --workflow workflow_abc
-  extend run batch --files-from inputs.txt --workflow workflow_abc`,
+		Examples: []Example{
+			{Label: "From positional args", Cmd: "extend run batch doc1.pdf doc2.pdf --workflow workflow_abc"},
+			{Label: "From a list file", Cmd: "extend run batch --files-from inputs.txt --workflow workflow_abc"},
+		},
+		Gotchas: []string{
+			"Workflow batch does not accept --priority (server schema omits it).",
+			"Workflow batch does not accept top-level --metadata/--tag (only per-input metadata is allowed; the CLI rejects top-level use).",
+			"'extend batches watch' does not work on workflow batches; use 'extend runs list --type workflow --batch <id>' to follow progress.",
+		},
+		SeeAlso: []string{"run", "runs list"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			inputs, err := collectBatchInputs(args, f.filesFrom)
 			if err != nil {
@@ -434,10 +531,10 @@ them. Track progress with:
 			}
 			return renderWorkflowBatchSubmitted(app, resp, len(items))
 		},
+		Configure: func(cmd *cobra.Command) {
+			f.attach(cmd, "workflow")
+		},
 	}
-	f.attach(cmd, "workflow")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	return cmd
 }
 
 // renderWorkflowBatchSubmitted formats the workflow-batch submit response,
@@ -467,26 +564,52 @@ func renderBatchSubmitted(app *App, br *client.BatchRun) error {
 	return nil
 }
 
-func newBatchesCommand(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "batches",
-		Short: "Inspect and follow batch runs",
+// newBatchesDoc returns the typed documentation for `extend batches` (the
+// inspect-and-follow group for batch runs) and its 2 leaves: get, watch.
+func newBatchesDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "batches",
+		Summary: "Inspect and follow batch runs",
+		Group:   "Inspection",
+		WhenToUse: `Use these commands to inspect or watch a processor or parse batch run
+by its batch ID. Workflow batches do not have a get/watch endpoint; use
+'extend runs list --type workflow --batch <id>' for those.`,
+		Details: `Operations on batch runs identified by their bpr_/bpar_ ID. Workflow
+batches (returned by 'extend run batch') do NOT have a get endpoint;
+list their member runs with 'extend runs list --type workflow --batch
+<id>' instead.`,
+		Subcommands: []*CommandDoc{
+			newBatchesGetDoc(app),
+			newBatchesWatchDoc(app),
+		},
 	}
-	cmd.AddCommand(newBatchesGetCommand(app))
-	cmd.AddCommand(newBatchesWatchCommand(app))
-	return cmd
 }
 
-func newBatchesGetCommand(app *App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "get <batch-id>",
-		Short: "Show one batch run by ID",
-		Long: `Show one processor or parse batch run, including its overall status,
+func newBatchesGetDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "get <batch-id>",
+		Summary: "Show one batch run by ID",
+		Triggers: []string{
+			"show one batch run",
+			"inspect a processor or parse batch",
+			"check batch status by id",
+		},
+		WhenToUse: `Use to retrieve the current status, member-run count, and timestamps
+for a single batch run. Does not poll; for live progress use
+'extend batches watch'.`,
+		Details: `Show one processor or parse batch run, including its overall status,
 member-run count, and timestamps. Workflow batches do NOT have a get
 endpoint; for those, use 'extend runs list --type workflow --batch <id>'.`,
-		Example: `  extend batches get bpr_abc123
-  extend batches get bpar_xyz`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Processor batch", Cmd: "extend batches get bpr_abc123"},
+			{Label: "Parse batch", Cmd: "extend batches get bpar_xyz"},
+		},
+		Gotchas: []string{
+			"Workflow batches do not have a get endpoint; use 'extend runs list --type workflow --batch <id>' instead.",
+		},
+		SeeAlso: []string{"batches watch", "runs list"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -499,19 +622,25 @@ endpoint; for those, use 'extend runs list --type workflow --batch <id>'.`,
 			return renderWithDefault(app, br, output.FormatJSON)
 		},
 	}
-	SetIOAnnotations(cmd, OutputJSON, OutputJSON)
-	return cmd
 }
 
-func newBatchesWatchCommand(app *App) *cobra.Command {
+func newBatchesWatchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
 		exitStatus bool
 	)
-	cmd := &cobra.Command{
-		Use:   "watch <batch-id>",
-		Short: "Poll a batch run until it reaches a terminal state",
-		Long: `Poll a processor or parse batch and print the final status when it
+	return &CommandDoc{
+		Use:     "watch <batch-id>",
+		Summary: "Poll a batch run until it reaches a terminal state",
+		Triggers: []string{
+			"watch a batch run until it finishes",
+			"poll a processor or parse batch",
+			"block until extract batch completes",
+			"follow batch progress live",
+		},
+		WhenToUse: `Use to block until a processor or parse batch reaches a terminal
+state. Combine with --exit-status to gate downstream scripts on success.`,
+		Details: `Poll a processor or parse batch and print the final status when it
 reaches a terminal state. Workflow batches do not have a get endpoint and
 cannot be watched here; use 'extend runs list --type workflow --batch <id>'
 to monitor them instead.
@@ -522,10 +651,20 @@ finishes in FAILED or CANCELLED status, suitable for shell composition:
     extend batches watch bpr_abc --exit-status && downstream-script.sh
 
 Polls every 2s, backing off to 30s.`,
-		Example: `  extend batches watch bpr_abc123
-  extend batches watch bpr_abc123 --timeout 2h
-  extend batches watch bpr_abc123 --exit-status`,
-		Args: cobra.ExactArgs(1),
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend batches watch bpr_abc123"},
+			{Label: "Custom timeout", Cmd: "extend batches watch bpr_abc123 --timeout 2h"},
+			{Label: "Gate downstream script", Cmd: "extend batches watch bpr_abc123 --exit-status"},
+		},
+		Gotchas: []string{
+			"Workflow batches cannot be watched here; use 'extend runs list --type workflow --batch <id>'.",
+			"Without --exit-status, the command exits 0 on terminal regardless of FAILED/CANCELLED.",
+		},
+		SeeAlso:  []string{"batches get", "runs list", "runs watch"},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileLong, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -553,11 +692,9 @@ Polls every 2s, backing off to 30s.`,
 			}
 			return nil
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait")
+			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
+		},
 	}
-	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait")
-	cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
-	SetIOAnnotations(cmd, OutputPretty, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileLong, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
-	return cmd
 }

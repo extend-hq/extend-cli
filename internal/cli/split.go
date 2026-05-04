@@ -11,7 +11,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-func newSplitCommand(app *App) *cobra.Command {
+// newSplitDoc returns the typed documentation for `extend split` and its
+// `extend split batch` subcommand.
+func newSplitDoc(app *App) *CommandDoc {
 	var (
 		splitterID         string
 		version            string
@@ -23,10 +25,21 @@ func newSplitCommand(app *App) *cobra.Command {
 		meta               metaFlags
 	)
 
-	cmd := &cobra.Command{
-		Use:   "split <input>",
-		Short: "Split a multi-document PDF into segments",
-		Long: `Run a splitter against a multi-document PDF and return the segments
+	return &CommandDoc{
+		Use:     "split <input>",
+		Summary: "Split a multi-document PDF into segments",
+		Group:   "Actions",
+		Triggers: []string{
+			"split a multi-document pdf into segments",
+			"separate concatenated pdfs into individual documents",
+			"detect document boundaries in a bundle",
+			"break a combined pdf into per-document pieces",
+			"run a splitter on a pdf",
+		},
+		WhenToUse: `Use when you have a single PDF that contains multiple distinct documents
+and need to identify the page ranges and types of each. Prefer 'classify'
+when the input is a single document and you only need its category.`,
+		Details: `Run a splitter against a multi-document PDF and return the segments
 (page ranges + classification per segment).
 
 <input> can be:
@@ -36,17 +49,24 @@ func newSplitCommand(app *App) *cobra.Command {
 
 Pass --override-config as inline JSON, a plain file path, or an absolute
 file:// URI to vary the splitter's config for this one run without modifying
-the persisted splitter.
-
-By default, the command waits until the run reaches a terminal state and
-prints the segments table. Pass --wait=false to print only the run ID and
-exit immediately.`,
-		Example: `  extend split combined.pdf --using spl_abc
-  extend split combined.pdf --using spl_abc -o json
-  extend split combined.pdf --using spl_abc --override-config override.json
-  extend split combined.pdf --using spl_abc --override-config '{"foo":"bar"}'
-  extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw`,
-		Args: cobra.ExactArgs(1),
+the persisted splitter.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend split combined.pdf --using spl_abc"},
+			{Label: "JSON output", Cmd: "extend split combined.pdf --using spl_abc -o json"},
+			{Label: "Override config", Cmd: "extend split combined.pdf --using spl_abc --override-config override.json"},
+			{Label: "Inline override", Cmd: `extend split combined.pdf --using spl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Count segments via jq", Cmd: "extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw"},
+		},
+		Gotchas: []string{
+			"--using is required (no inline-config option for split).",
+			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
+			"On TTY, output is a segments table; pipe or pass -o json for the full run object.",
+		},
+		SeeAlso:  []string{"parse", "split batch", "runs watch", "runs get"},
+		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
+		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -64,24 +84,19 @@ exit immediately.`,
 				metadata:           md,
 			})
 		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
+			cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
+			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the splitter's config for this run only")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
+			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			meta.attach(cmd)
+			_ = cmd.MarkFlagRequired("using")
+		},
+		Subcommands: []*CommandDoc{newSplitBatchDoc(app)},
 	}
-
-	SetIOAnnotations(cmd, OutputTable, OutputJSON)
-	SetWaitAnnotations(cmd, client.ProfileShort, true)
-	SetLifecycleFailureCodes(cmd, client.StatusFailed, client.StatusCancelled)
-
-	cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
-	cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
-	cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the splitter's config for this run only")
-	cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
-	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-	cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
-	meta.attach(cmd)
-	_ = cmd.MarkFlagRequired("using")
-
-	cmd.AddCommand(newSplitBatchCommand(app))
-	return cmd
 }
 
 type splitParams struct {

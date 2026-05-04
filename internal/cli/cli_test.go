@@ -99,6 +99,37 @@ func newTestApp(t *testing.T, srv *fakeServer) *testApp {
 	return &testApp{app: app, out: out, errOut: errOut, in: in}
 }
 
+// findCmd builds the full RootDoc tree for the given app, validates it
+// (via Build), finds the cobra.Command at the requested path, and detaches
+// it from its parent before returning. This is the canonical test entry
+// point for tests that exercise a single command:
+//
+//   - The full RootDoc tree is constructed and validated, so SeeAlso
+//     references resolve cross-doc and contract violations anywhere in
+//     the tree are caught before any test runs.
+//   - The returned command is detached from its parent, so cmd.Execute()
+//     runs the leaf in isolation rather than walking up to root and
+//     printing root help when called with no positional args. This
+//     matches the historical behaviour of the per-command wrapper
+//     constructors (newExtractCommand etc.) that this helper replaces.
+//
+// Path elements are space-free: findCmd(t, app, "extract") for a
+// top-level leaf, findCmd(t, app, "extract", "batch") for a subcommand,
+// findCmd(t, app, "extractors", "versions", "create") for nested
+// resource commands.
+func findCmd(t *testing.T, app *App, path ...string) *cobra.Command {
+	t.Helper()
+	root := RootDoc(app).Build()
+	cmd, _, err := root.Find(path)
+	if err != nil {
+		t.Fatalf("findCmd %v: %v", path, err)
+	}
+	if parent := cmd.Parent(); parent != nil {
+		parent.RemoveCommand(cmd)
+	}
+	return cmd
+}
+
 func newTTYStreams(t *testing.T) (*iostreams.IOStreams, *bytes.Buffer, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	ios, in, out, errOut := iostreams.Test()

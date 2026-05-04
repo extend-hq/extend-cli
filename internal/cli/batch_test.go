@@ -79,7 +79,7 @@ func TestExtractBatch_SubmitsBatchEndpoint(t *testing.T) {
 		})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newExtractBatchCommand(ta.app)
+	cmd := findCmd(t, ta.app, "extract", "batch")
 	cmd.SetArgs([]string{"file_a", "file_b", "--using", "ex_abc"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -104,7 +104,7 @@ func TestParseBatch_DefaultsToMarkdownTarget(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "bpar_test", "status": "PENDING", "runCount": 1})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newParseBatchCommand(ta.app)
+	cmd := findCmd(t, ta.app, "parse", "batch")
 	cmd.SetArgs([]string{"file_a"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -120,7 +120,7 @@ func TestParseBatch_EngineVersionRoundTrip(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "bpar_test", "status": "PENDING", "runCount": 1})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newParseBatchCommand(ta.app)
+	cmd := findCmd(t, ta.app, "parse", "batch")
 	cmd.SetArgs([]string{"file_a", "--engine", "parse_light", "--engine-version", "0.2.0-beta"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -142,7 +142,7 @@ func TestWorkflowBatch_ReturnsBatchIDOnly(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"batchId": "batch_abc"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWorkflowBatchCommand(ta.app)
+	cmd := findCmd(t, ta.app, "run", "batch")
 	cmd.SetArgs([]string{"file_a", "file_b", "--workflow", "workflow_xK9"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -164,7 +164,7 @@ func TestWorkflowBatch_RejectsTopLevelPriority(t *testing.T) {
 		t.Fatal("server should not be hit when client validates")
 	})
 	ta := newTestApp(t, srv)
-	cmd := newWorkflowBatchCommand(ta.app)
+	cmd := findCmd(t, ta.app, "run", "batch")
 	cmd.SetArgs([]string{"file_a", "--workflow", "workflow_xK9", "--priority", "5"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "priority") {
