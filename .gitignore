@@ -35,6 +35,12 @@ go.work.sum
 # mise local override (may contain secrets)
 mise.local.toml
 
+# Skill-evals workspace lives next to the repo (sibling) but if a user
+# overrides --workspace to a path inside the repo, ignore it. Per-run
+# artifacts (events.jsonl, extend-calls.jsonl, etc.) are not source.
+extend-cli-evals-workspace/
+evals/workspace/
+
 # Editor/IDE
 # .idea/
 # .vscode/
