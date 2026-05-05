@@ -85,12 +85,6 @@ Run `extend <command> --help` for flags.
 `id` formatting. Data goes to stdout, status to stderr. Honors `NO_COLOR` and
 `CLICOLOR_FORCE`.
 
-## Async transport
-
-The CLI always uses the asynchronous endpoints (`/extract_runs` etc.)
-and polls. Short actions wait for terminal status by default; workflow
-runs are async by default and require `--wait` to block.
-
 ## Use with coding agents
 
 The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
