@@ -101,7 +101,7 @@
       "id": "T+4",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "Look at this contract and tell me whether it's an MSA, SOW, or NDA.",
+      "prompt": "I have contract.pdf in this directory. Categorize it as MSA, SOW, or NDA.",
       "files": ["contract.pdf"],
       "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one.",
       "modes": ["outcome"],
