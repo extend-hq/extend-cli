@@ -61,6 +61,8 @@ func run() error {
 		concurrency = flag.Int("concurrency", 4, "max harness invocations to run in parallel")
 		effort      = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
 		fastMode    = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
+		noJudge     = flag.Bool("no-judge", false, "skip LLM-judge expectations (no Anthropic API calls); judge expectations report Skipped")
+		judgeModel  = flag.String("judge-model", "claude-opus-4-5", "model used by the LLM judge for `judge` expectations")
 	)
 	flag.Parse()
 
@@ -128,8 +130,21 @@ func run() error {
 		FastMode: *fastMode,
 	}
 
-	fmt.Printf("running %d tasks (%d cases × %d harness × configs × runs) at concurrency=%d\n",
-		len(tasks), len(cases), len(drivers), *concurrency)
+	judgeCfg := grade.JudgeFromEnv()
+	judgeCfg.Model = *judgeModel
+	if *noJudge {
+		judgeCfg.Disabled = true
+	}
+
+	judgeNote := "judge=" + judgeCfg.Model
+	switch {
+	case judgeCfg.Disabled:
+		judgeNote = "judge=disabled"
+	case judgeCfg.APIKey == "":
+		judgeNote = "judge=skipped (ANTHROPIC_API_KEY not set)"
+	}
+	fmt.Printf("running %d tasks (%d cases × %d harness × configs × runs) at concurrency=%d  [%s]\n",
+		len(tasks), len(cases), len(drivers), *concurrency, judgeNote)
 
 	// printedCases keeps console output legible: as soon as we have any
 	// result for a case, print its header once.
@@ -145,7 +160,7 @@ func run() error {
 		go func() {
 			defer wg.Done()
 			for t := range taskCh {
-				r, gr, err := runOne(t.driver, t.eval, t.mode, t.config, t.runN, ws, stubBin, *timeout, tuneOpts)
+				r, gr, err := runOne(t.driver, t.eval, t.mode, t.config, t.runN, ws, stubBin, *timeout, tuneOpts, judgeCfg)
 				mu.Lock()
 				if !printedCases[t.eval.ID] {
 					fmt.Printf("\n=== %s [%s] %s ===\n", t.eval.ID, t.eval.Category, summarizePrompt(t.eval.Prompt))
@@ -186,6 +201,7 @@ func runOne(
 	stubBin string,
 	timeout time.Duration,
 	tune harness.TuneOptions,
+	judgeCfg grade.JudgeConfig,
 ) (*harness.Result, []grade.Result, error) {
 	dir, err := ws.RunDir(e.ID, d.Name(), mode, configName, runN)
 	if err != nil {
@@ -245,7 +261,7 @@ func runOne(
 	}
 
 	calls, _ := grade.LoadCalls(recordPath)
-	results := grade.Grade(grade.Inputs{Eval: e, Harness: res, Calls: calls})
+	results := grade.Grade(grade.Inputs{Eval: e, Harness: res, Calls: calls, Judge: judgeCfg})
 
 	if err := grade.WriteGradingJSON(gradingPath, results); err != nil {
 		return nil, nil, fmt.Errorf("write grading: %w", err)

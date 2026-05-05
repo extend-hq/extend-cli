@@ -49,6 +49,7 @@ type Inputs struct {
 	Eval    spec.Eval
 	Harness *harness.Result
 	Calls   []CallRecord // parsed extend-calls.jsonl
+	Judge   JudgeConfig  // populated for judge expectations; zero-value/Disabled keeps them Skipped
 }
 
 // Grade evaluates every expectation in inputs.Eval and returns a
@@ -72,11 +73,10 @@ func Grade(in Inputs) []Result {
 		case spec.TypeMustNotFabricateIDs:
 			r.Passed, r.Evidence = checkFabrication(exp, in)
 		case spec.TypeJudge:
-			// Skipped until the LLM-judge is wired (Phase 3). Skipped
-			// expectations don't count toward pass-rate but are
-			// preserved in grading.json so authors see what's pending.
-			r.Skipped = true
-			r.Evidence = "judge not wired (Phase 3)"
+			passed, skipped, evidence := checkJudge(exp, in, in.Judge)
+			r.Passed = passed
+			r.Skipped = skipped
+			r.Evidence = evidence
 		default:
 			r.Evidence = fmt.Sprintf("unknown type %q", exp.Type)
 		}
