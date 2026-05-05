@@ -6,3 +6,20 @@ go = { version = "latest", postinstall = "go install golang.org/x/tools/gopls@la
 # does not depend on either of these.
 claude = "latest"
 codex = "latest"
+
+# Skill evals: run the full eval suite against both harnesses by default.
+# Use `mise run evals -- -cases T+1,S-1` etc. to pass through extra flags.
+[tasks.evals]
+description = "Run skill evals against both Claude Code and Codex"
+dir = "evals/runner"
+run = "go run ./cmd/runner -harnesses claude_code,codex"
+
+[tasks."evals:claude"]
+description = "Run skill evals against Claude Code only"
+dir = "evals/runner"
+run = "go run ./cmd/runner -harnesses claude_code"
+
+[tasks."evals:codex"]
+description = "Run skill evals against Codex only"
+dir = "evals/runner"
+run = "go run ./cmd/runner -harnesses codex"
