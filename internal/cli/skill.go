@@ -205,7 +205,8 @@ func writeSkillActiveBehaviour(b *strings.Builder) {
 	b.WriteString("## When this skill is active\n\n")
 	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
 	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
-	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n\n")
+	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n")
+	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
 }
 
 func writeSkillFrontmatter(b *strings.Builder) {
