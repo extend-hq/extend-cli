@@ -597,9 +597,9 @@ func applyAnnotations(cmd *cobra.Command, d *CommandDoc) {
 }
 
 // groupIDForLabel maps a human-readable Group label ("Actions", "Help
-// topics") to the cobra group ID registered on root. Unknown labels map
-// to "" so the cobra command is left ungrouped (sorted under "Additional
-// Commands").
+// topics", etc.) to the cobra group ID registered on root. Unknown labels
+// map to "" so the cobra command is left ungrouped (sorted under
+// "Additional Commands").
 func groupIDForLabel(label string) string {
 	switch label {
 	case "Actions":
@@ -608,6 +608,8 @@ func groupIDForLabel(label string) string {
 		return "inspection"
 	case "Resources":
 		return "resources"
+	case "Agent surface":
+		return "agent"
 	case "Help topics":
 		return HelpTopicGroupID
 	}
@@ -615,7 +617,7 @@ func groupIDForLabel(label string) string {
 }
 
 // groupTitleForID returns the cobra-group display title for a given group
-// ID. Mirrors the legacy NewRoot AddGroup calls so output stays identical.
+// ID.
 func groupTitleForID(id string) string {
 	switch id {
 	case "actions":
@@ -624,6 +626,8 @@ func groupTitleForID(id string) string {
 		return "Inspection:"
 	case "resources":
 		return "Resources:"
+	case "agent":
+		return "Agent surface:"
 	case HelpTopicGroupID:
 		return "Help topics:"
 	}
