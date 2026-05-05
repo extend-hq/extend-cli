@@ -1,0 +1,145 @@
+name: skill-evals
+
+# Skill evals drive Claude Code and Codex through the runner against
+# our `extend` SKILL.md, then grade the recorded behaviour. Each full
+# sweep costs real LLM tokens (and Codex consumes them aggressively),
+# so this workflow is `workflow_dispatch`-only — never on PR/push.
+#
+# Required repository secrets:
+#   ANTHROPIC_API_KEY — used by Claude Code (the harness) AND by the
+#                       LLM judge (Opus 4.7 by default).
+#   OPENAI_API_KEY    — used by Codex (no ChatGPT login in CI; the
+#                       CLI falls back to API-key auth when this env
+#                       var is set).
+#
+# Cost estimate (default settings, single iteration):
+#   • ~5 minutes wall-clock at concurrency=8.
+#   • Claude Code: ~15-30k tokens total across 66 invocations.
+#   • Codex: ~3-7M tokens total across 66 invocations (much chattier).
+#   • Judge: ~5-10 calls per sweep at low effort.
+on:
+  workflow_dispatch:
+    inputs:
+      harnesses:
+        description: "Harnesses to run (comma-separated: claude_code, codex)"
+        required: false
+        default: "claude_code,codex"
+      cases:
+        description: "Case IDs to run (comma-separated, e.g. T+1,S-1; empty = all 33)"
+        required: false
+        default: ""
+      runs:
+        description: "Runs per (case × harness × config) tuple"
+        required: false
+        default: "1"
+      concurrency:
+        description: "Max parallel harness invocations"
+        required: false
+        default: "8"
+      timeout:
+        description: "Per-run timeout (Go duration, e.g. 180s, 5m)"
+        required: false
+        default: "180s"
+      judge_model:
+        description: "LLM judge model (Anthropic)"
+        required: false
+        default: "claude-opus-4-7"
+      judge_effort:
+        description: "Judge effort level (low|medium|high|xhigh|max)"
+        required: false
+        default: "low"
+      no_judge:
+        description: "Skip judge expectations (no Anthropic API calls for grading)"
+        type: boolean
+        required: false
+        default: false
+      iteration_label:
+        description: "Optional label appended to artifact name for trend tracking"
+        required: false
+        default: ""
+
+jobs:
+  evals:
+    name: skill evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Pin the workspace inside the runner so artifact upload is
+      # straightforward; the runner accepts any path via -workspace.
+      EVAL_WORKSPACE: ${{ github.workspace }}/skill-evals-workspace
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: verify secrets present
+        run: |
+          missing=""
+          [ -z "$ANTHROPIC_API_KEY" ] && missing="$missing ANTHROPIC_API_KEY"
+          [ -z "$OPENAI_API_KEY" ]    && missing="$missing OPENAI_API_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repo secret(s):$missing"
+            exit 1
+          fi
+
+      - name: setup mise (provisions go, claude, codex)
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: print harness versions
+        run: |
+          go version
+          claude --version || true
+          codex --version || true
+
+      - name: run skill evals
+        working-directory: evals/runner
+        run: |
+          set -euo pipefail
+          ARGS=(
+            -workspace "$EVAL_WORKSPACE"
+            -harnesses "${{ inputs.harnesses }}"
+            -runs "${{ inputs.runs }}"
+            -concurrency "${{ inputs.concurrency }}"
+            -timeout "${{ inputs.timeout }}"
+            -judge-model "${{ inputs.judge_model }}"
+            -judge-effort "${{ inputs.judge_effort }}"
+          )
+          if [ -n "${{ inputs.cases }}" ]; then
+            ARGS+=(-cases "${{ inputs.cases }}")
+          fi
+          if [ "${{ inputs.no_judge }}" = "true" ]; then
+            ARGS+=(-no-judge)
+          fi
+          go run ./cmd/runner "${ARGS[@]}" | tee eval-output.txt
+
+      - name: write job summary
+        if: always()
+        working-directory: evals/runner
+        run: |
+          set -euo pipefail
+          {
+            echo "## Skill evals"
+            echo
+            echo "**Harnesses:** \`${{ inputs.harnesses }}\`  "
+            echo "**Cases:** \`${{ inputs.cases || 'all' }}\`  "
+            echo "**Runs/tuple:** \`${{ inputs.runs }}\`  "
+            echo "**Judge:** \`${{ inputs.judge_model }}\` (effort=\`${{ inputs.judge_effort }}\`, no-judge=\`${{ inputs.no_judge }}\`)"
+            echo
+            echo "### Summary"
+            echo
+            echo '```'
+            tail -n 20 eval-output.txt 2>/dev/null || echo "(no eval-output.txt — runner failed before producing output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload workspace artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-evals${{ inputs.iteration_label && format('-{0}', inputs.iteration_label) || '' }}
+          path: ${{ env.EVAL_WORKSPACE }}
+          retention-days: 30
+          if-no-files-found: warn
