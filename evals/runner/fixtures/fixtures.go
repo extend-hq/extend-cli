@@ -42,6 +42,8 @@ func generate(name, path string) error {
 		return writeContractPDF(path)
 	case "receipt.pdf":
 		return writeReceiptPDF(path)
+	case "combined.pdf":
+		return writeCombinedPDF(path)
 	case "items.json":
 		return writeJSON(path, sampleEvaluationItems())
 	case "extractor.json":
@@ -102,6 +104,26 @@ func writeContractPDF(path string) error {
 			"between Acme Industries ('Provider') and Wile E. Coyote ('Customer'). "+
 			"Provider agrees to deliver services subject to the terms herein.",
 		"", "", false)
+	return pdf.OutputFileAndClose(path)
+}
+
+// writeCombinedPDF emits a multi-page PDF that simulates several
+// customer statements glued together. The page count gives the agent
+// something plausible to "split"; the stub returns canned splits
+// regardless.
+func writeCombinedPDF(path string) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	for _, name := range []string{"Acme Industries", "Globex Corp", "Initech Inc"} {
+		pdf.AddPage()
+		pdf.SetFont("Helvetica", "B", 18)
+		pdf.Cell(0, 12, "Customer Statement — "+name)
+		pdf.Ln(15)
+		pdf.SetFont("Helvetica", "", 11)
+		pdf.MultiCell(0, 7,
+			"Statement period: 2026-04-01 through 2026-04-30. "+
+				"Outstanding balance: $1,234.56. Please remit by 2026-05-15.",
+			"", "", false)
+	}
 	return pdf.OutputFileAndClose(path)
 }
 
