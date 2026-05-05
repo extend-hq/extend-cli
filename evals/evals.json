@@ -469,8 +469,8 @@
         },
         {
           "type": "extend_call",
-          "text": "agent ran `extend extract` against the new extractor",
-          "must_contain": [{ "argv_prefix": ["extract"], "args": ["invoice.pdf"] }]
+          "text": "agent ran `extend extract` with --using set to a freshly-created extractor",
+          "must_contain": [{ "argv_prefix": ["extract"], "flag": "using" }]
         }
       ]
     },
