@@ -59,8 +59,6 @@ the persisted classifier.`,
 		},
 		Gotchas: []string{
 			"--using is required (no inline-config option for classify).",
-			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
-			"On TTY, output is a one-line summary; pipe or pass -o json for the full run object.",
 		},
 		SeeAlso:  []string{"extract", "parse", "classify batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},

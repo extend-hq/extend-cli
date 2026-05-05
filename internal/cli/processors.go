@@ -102,10 +102,6 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 			{Label: "First five IDs", Cmd: fmt.Sprintf("extend %s list -o id | head -5", a.pluralNoun)},
 			{Label: "Just IDs via jq", Cmd: fmt.Sprintf("extend %s list --jq '.data[].id' -o raw", a.pluralNoun)},
 		},
-		Gotchas: []string{
-			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
-			"--all auto-paginates and can exceed agent context budgets; prefer --page-token in scripts.",
-		},
 		SeeAlso: []string{
 			fmt.Sprintf("%s get", a.pluralNoun),
 			fmt.Sprintf("%s create", a.pluralNoun),
