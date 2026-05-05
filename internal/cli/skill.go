@@ -199,7 +199,7 @@ func writeSkillFrontmatter(b *strings.Builder) {
 func writeSkillAuth(b *strings.Builder) {
 	b.WriteString("## Authentication\n\n")
 	b.WriteString("    export EXTEND_API_KEY=sk_xxx\n\n")
-	b.WriteString("Region defaults to the US production endpoint. Pass `--region us|us2|eu` or set `EXTEND_REGION` to switch. For workspace-scoped API keys, API version pinning, or webhook secrets, see `extend help auth`.\n\n")
+	b.WriteString("For region selection, workspace-scoped keys, or API-version pinning, run `extend help auth`.\n\n")
 }
 
 // writeSkillPickActions renders the "which verb do I run" table dynamically
@@ -229,7 +229,12 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("    extend runs watch <run-id>\n\n")
 	b.WriteString("The run type is auto-detected from the ID prefix (`exr_`, `pr_`, `clr_`, `splr_`, `workflow_run_`, `edr_`). Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
-	b.WriteString("To inspect current state without polling: `extend runs get <id>`. For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
+	b.WriteString("To inspect current state without polling: `extend runs get <id>`.\n\n")
+	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
+	b.WriteString("- **Edit runs** (`edr_*`) are not listable — the API has no `LIST /edit_runs`. Use `extend runs get edr_xxx` for individual edit runs.\n")
+	b.WriteString("- **Parse runs** (`pr_*`) cannot be cancelled; the API rejects the attempt. Other run types support best-effort cancel.\n")
+	b.WriteString("- **Workflow batches** (returned by `extend run batch`) have **no GET endpoint**. `extend batches get`/`watch` work only on processor batches (`bpr_*`). Track workflow batches with `extend runs list --type workflow --batch <id>`.\n\n")
+	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
 
 func writeSkillPagination(b *strings.Builder) {
@@ -348,9 +353,13 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 // writeSkillCatalog renders the per-command reference, dispatching to
 // section-specific emitters. The processor-family section is parametric;
-// the others walk subtrees of the doc tree.
+// the others walk subtrees of the doc tree. Each entry is a single line
+// (invocation + summary); per-command flags, examples, and gotchas are
+// kept in `extend <cmd> --help` to respect the spec's progressive-
+// disclosure principle.
 func writeSkillCatalog(b *strings.Builder, root *CommandDoc) {
 	b.WriteString("## Command reference\n\n")
+	b.WriteString("One line per command — invocation plus a summary. **Run `extend <command> --help` for flags, examples, and per-command gotchas.** The processor-resource block is parametric (the four families share an identical seven-command shape).\n\n")
 	writeCatalogSection(b, root, "Action verbs", "Actions", nil)
 	writeCatalogSection(b, root, "Inspection", "Inspection", nil)
 	writeCatalogProcessorFamilies(b)
@@ -389,6 +398,7 @@ func writeCatalogSection(b *strings.Builder, root *CommandDoc, heading, group st
 	for _, e := range entries {
 		writeCatalogEntry(b, e.invocation, e.doc)
 	}
+	b.WriteString("\n")
 }
 
 // writeCatalogSubtree emits all command leaves under a specific top-level
@@ -418,6 +428,7 @@ func writeCatalogSubtree(b *strings.Builder, root *CommandDoc, heading, topName 
 	for _, e := range entries {
 		writeCatalogEntry(b, e.invocation, e.doc)
 	}
+	b.WriteString("\n")
 }
 
 // writeCatalogProcessorFamilies emits the parametric block for the four
@@ -449,28 +460,20 @@ func writeCatalogProcessorFamilies(b *strings.Builder) {
 	b.WriteString("**Workflows differ:** `versions create` uses `--name <deploy-name>` instead of `--release-type`. The deployed name is what `extend run --version` references.\n\n")
 }
 
-// writeCatalogEntry renders one command's indented block in the catalog.
-// Header bullet has the invocation + summary; nested bullets have the
-// first labeled example (if any) and every Gotcha.
+// writeCatalogEntry renders one command in the catalog as a single line:
+// invocation + summary. Per-command examples and gotchas live in
+// `extend <cmd> --help` (where they're already projected from
+// CommandDoc.Examples and CommandDoc.Gotchas via the cobra command's
+// Long); the catalog's job is to expose the *shape* of the surface so
+// the agent knows what verbs exist, not to duplicate per-command depth
+// in the body.
+//
+// The dig-deeper section ("When this skill isn't enough") elevates
+// `extend <cmd> --help` as the first-class path to per-command flags,
+// examples, and gotchas. Tests assert the dig-deeper section names this
+// path explicitly.
 func writeCatalogEntry(b *strings.Builder, invocation string, d *CommandDoc) {
 	fmt.Fprintf(b, "- `extend %s` — %s.\n", invocation, strings.TrimRight(d.Summary, "."))
-	if ex := firstExampleCmd(d); ex != "" {
-		fmt.Fprintf(b, "    - Example: `%s`\n", ex)
-	}
-	for _, g := range d.Gotchas {
-		fmt.Fprintf(b, "    - %s\n", strings.TrimSpace(g))
-	}
-	b.WriteString("\n")
-}
-
-// firstExampleCmd returns the Cmd of the first example, or "" if none.
-func firstExampleCmd(d *CommandDoc) string {
-	for _, ex := range d.Examples {
-		if strings.TrimSpace(ex.Cmd) != "" {
-			return strings.TrimSpace(ex.Cmd)
-		}
-	}
-	return ""
 }
 
 // leafInvocation returns the full invocation string for a leaf:
@@ -507,16 +510,42 @@ func topGroupForName(root *CommandDoc, name string) string {
 	return ""
 }
 
+// writeSkillTopics emits the dig-deeper section. The body of this skill
+// shows the CLI's *shape* — verbs, decision rules, high-leverage
+// gotchas, and end-to-end recipes. Per the agentskills.io progressive-
+// disclosure principle, depth lives behind `extend help <topic>` and
+// `extend <command> --help`. This section names each, says explicitly
+// when to reach for it, and elevates `extend <command> --help` to the
+// same prominence as the four reference topics.
 func writeSkillTopics(b *strings.Builder, root *CommandDoc) {
-	b.WriteString("## Reference topics\n\n")
-	b.WriteString("Load when you hit specific issues:\n\n")
+	b.WriteString("## When this skill isn't enough\n\n")
+	b.WriteString("The body above shows the CLI's *shape*. For depth, use the help system before guessing:\n\n")
+	b.WriteString("- `extend <command> --help` — every flag, multiple worked examples, and the full per-command gotcha list. Reach for this whenever a flag isn't obvious or the catalog example doesn't cover your case.\n")
 	for _, sub := range root.Subcommands {
 		if !sub.IsTopic() {
 			continue
 		}
-		fmt.Fprintf(b, "- `extend help %s` — %s\n", sub.Name(), sub.Summary)
+		fmt.Fprintf(b, "- `extend help %s` — %s. %s\n", sub.Name(), sub.Summary, topicLoadHint(sub.Name()))
 	}
-	b.WriteString("\nFor per-command help: `extend <command> --help`.\n")
+	b.WriteString("\nThese commands run offline and never contact the Extend API.\n")
+}
+
+// topicLoadHint returns a short directive sentence explaining when an
+// agent should reach for the named topic. Hand-curated; tested by
+// TestSkillTopicLoadHintsCoverAllTopics, which fails if a new topic is
+// added without a hint.
+func topicLoadHint(name string) string {
+	switch name {
+	case "auth":
+		return "Use on auth errors, when working with org-scoped API keys, or when picking a region."
+	case "output":
+		return "Use when an output format is unexpected or when writing a non-trivial pagination loop."
+	case "lifecycle":
+		return "Use when reasoning about run states, polling profiles, or when `--exit-status` should fail."
+	case "errors":
+		return "Use when interpreting an error envelope, picking up a `request_id`, or filing a support ticket."
+	}
+	return ""
 }
 
 // newSkillDoc registers `extend skill` as a top-level command in the
