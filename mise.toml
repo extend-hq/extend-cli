@@ -1,2 +1,8 @@
 [tools]
 go = { version = "latest", postinstall = "go install golang.org/x/tools/gopls@latest" }
+
+# Harness CLIs used by `evals/runner` to drive skill evaluation against
+# real coding-agent harnesses. These are dev-only tooling: the CLI itself
+# does not depend on either of these.
+claude = "latest"
+codex = "latest"
