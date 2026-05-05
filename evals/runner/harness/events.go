@@ -50,10 +50,6 @@ type RunOptions struct {
 	// SkillEnabled controls whether SKILL.md is installed in HomeDir.
 	SkillEnabled bool
 
-	// Mode is "trigger" or "outcome". Phase 1: same runtime; Phase 2
-	// adds early termination for trigger.
-	Mode string
-
 	// EventsPath is where to stream the harness's raw JSONL output.
 	EventsPath string
 

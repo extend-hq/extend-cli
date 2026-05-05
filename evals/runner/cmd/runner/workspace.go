@@ -7,17 +7,16 @@ package main
 //	<root>/iteration-<N>/
 //	  eval-<id>/
 //	    <harness>/                            (claude_code | codex)
-//	      <mode>/                             (trigger | outcome)
-//	        <config>/                         (with_skill | without_skill)
-//	          run-<n>/
-//	            events.jsonl                  raw harness JSONL
-//	            extend-calls.jsonl            stub recording
-//	            timing.json                   tokens + duration
-//	            grading.json                  expectation results
-//	            final.txt                     agent's final message
-//	            scratch/                      agent's working dir
-//	            home/                         agent's HOME (skill installed here)
-//	            stub-bin/                     compiled stub on PATH
+//	      <config>/                           (with_skill | without_skill)
+//	        run-<n>/
+//	          events.jsonl                    raw harness JSONL
+//	          extend-calls.jsonl              stub recording
+//	          timing.json                     tokens + duration
+//	          grading.json                    expectation results
+//	          final.txt                       agent's final message
+//	          scratch/                        agent's working dir
+//	          home/                           agent's HOME (skill installed here)
+//	          stub-bin/                       compiled stub on PATH
 //	  benchmark.json                          aggregated rollup
 
 import (
@@ -59,13 +58,13 @@ func (w *workspace) iterationDir() string {
 	return filepath.Join(w.Root, fmt.Sprintf("iteration-%d", w.Iteration))
 }
 
-// runDir returns the leaf dir for one harness × mode × config × run-n
+// runDir returns the leaf dir for one harness × config × run-n
 // invocation. Creates the dir and its scratch/home/stub-bin children.
-func (w *workspace) runDir(evalID, harnessName, mode, configName string, runN int) (string, error) {
+func (w *workspace) runDir(evalID, harnessName, configName string, runN int) (string, error) {
 	dir := filepath.Join(
 		w.iterationDir(),
 		"eval-"+evalID,
-		harnessName, mode, configName,
+		harnessName, configName,
 		fmt.Sprintf("run-%d", runN),
 	)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -31,13 +31,12 @@ type caseAggregate struct {
 
 type runAggregate struct {
 	Harness   string  `json:"harness"`
-	Mode      string  `json:"mode"`
 	Config    string  `json:"config"`
 	Runs      int     `json:"runs"`
 	PassedAvg float64 `json:"passed_avg"`  // passed / (passed+failed), excludes skipped
 	Passed    int     `json:"passed"`      // total expectations passed across runs
 	Failed    int     `json:"failed"`      // total expectations failed across runs
-	Skipped   int     `json:"skipped"`     // judge expectations awaiting Phase 3
+	Skipped   int     `json:"skipped"`     // judge expectations not graded (e.g. -no-judge)
 	Total     int     `json:"total"`       // passed + failed + skipped
 	Tokens    int     `json:"tokens"`      // total tokens across runs (sum)
 	Duration  int64   `json:"duration_ms"` // total wall-clock across runs
@@ -59,7 +58,7 @@ type groupSummary struct {
 }
 
 type benchKey struct {
-	caseID, harness, mode, config string
+	caseID, harness, config string
 }
 
 func newBenchmark() *benchmark {
@@ -69,7 +68,7 @@ func newBenchmark() *benchmark {
 	}
 }
 
-func (b *benchmark) add(e spec.Eval, harnessName, mode, configName string, r *harness.Result, gr []grade.Result) {
+func (b *benchmark) add(e spec.Eval, harnessName, configName string, r *harness.Result, gr []grade.Result) {
 	if _, ok := b.cases[e.ID]; !ok {
 		c := &caseAggregate{ID: e.ID, Category: e.Category, Path: string(e.Path)}
 		b.cases[e.ID] = c
@@ -77,10 +76,10 @@ func (b *benchmark) add(e spec.Eval, harnessName, mode, configName string, r *ha
 	}
 	caseAgg := b.cases[e.ID]
 
-	key := benchKey{e.ID, harnessName, mode, configName}
+	key := benchKey{e.ID, harnessName, configName}
 	agg, ok := b.byKey[key]
 	if !ok {
-		agg = &runAggregate{Harness: harnessName, Mode: mode, Config: configName}
+		agg = &runAggregate{Harness: harnessName, Config: configName}
 		b.byKey[key] = agg
 		caseAgg.Runs = append(caseAgg.Runs, agg)
 	}

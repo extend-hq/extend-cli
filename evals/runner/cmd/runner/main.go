@@ -103,23 +103,20 @@ func run() error {
 	bench := newBenchmark()
 
 	// Build the full task list once. Each task is one (case × harness ×
-	// mode × config × run-n) tuple — these are independent and can run
-	// in parallel up to -concurrency.
+	// config × run-n) tuple — these are independent and can run in
+	// parallel up to -concurrency.
 	type task struct {
 		eval   spec.Eval
 		driver harness.Driver
-		mode   string
 		config string
 		runN   int
 	}
 	var tasks []task
 	for _, e := range cases {
 		for _, d := range drivers {
-			for _, mode := range e.Modes {
-				for _, cfgName := range []string{"with_skill", "without_skill"} {
-					for n := 1; n <= *runs; n++ {
-						tasks = append(tasks, task{e, d, string(mode), cfgName, n})
-					}
+			for _, cfgName := range []string{"with_skill", "without_skill"} {
+				for n := 1; n <= *runs; n++ {
+					tasks = append(tasks, task{e, d, cfgName, n})
 				}
 			}
 		}
@@ -161,17 +158,17 @@ func run() error {
 		go func() {
 			defer wg.Done()
 			for t := range taskCh {
-				r, gr, err := runOne(t.driver, t.eval, t.mode, t.config, t.runN, ws, stubBin, *timeout, tuneOpts, judgeCfg)
+				r, gr, err := runOne(t.driver, t.eval, t.config, t.runN, ws, stubBin, *timeout, tuneOpts, judgeCfg)
 				mu.Lock()
 				if !printedCases[t.eval.ID] {
 					fmt.Printf("\n=== %s [%s] %s ===\n", t.eval.ID, t.eval.Category, summarizePrompt(t.eval.Prompt))
 					printedCases[t.eval.ID] = true
 				}
 				if err != nil {
-					log.Printf("  %s %s %s run-%d: ERROR %v", t.driver.Name(), t.mode, t.config, t.runN, err)
+					log.Printf("  %s %s run-%d: ERROR %v", t.driver.Name(), t.config, t.runN, err)
 				} else {
-					bench.add(t.eval, t.driver.Name(), t.mode, t.config, r, gr)
-					printRun(t.driver.Name(), t.mode, t.config, t.runN, r, gr)
+					bench.add(t.eval, t.driver.Name(), t.config, r, gr)
+					printRun(t.driver.Name(), t.config, t.runN, r, gr)
 				}
 				mu.Unlock()
 			}
@@ -193,18 +190,18 @@ func run() error {
 }
 
 // runOne handles the workspace setup, harness invocation, and grading
-// for one (case, harness, mode, config, run) tuple.
+// for one (case, harness, config, run) tuple.
 func runOne(
 	d harness.Driver,
 	e spec.Eval,
-	mode, configName string, runN int,
+	configName string, runN int,
 	ws *workspace,
 	stubBin string,
 	timeout time.Duration,
 	tune harness.TuneOptions,
 	judgeCfg grade.JudgeConfig,
 ) (*harness.Result, []grade.Result, error) {
-	dir, err := ws.runDir(e.ID, d.Name(), mode, configName, runN)
+	dir, err := ws.runDir(e.ID, d.Name(), configName, runN)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -246,7 +243,6 @@ func runOne(
 		HomeDir:          home,
 		StubDir:          stubDir,
 		SkillEnabled:     configName == "with_skill",
-		Mode:             mode,
 		EventsPath:       eventsPath,
 		FinalMessagePath: finalPath,
 		RecordPath:       recordPath,
@@ -382,7 +378,7 @@ func repoRoot() string {
 	}
 }
 
-func printRun(harnessName, mode, cfgName string, runN int, r *harness.Result, gr []grade.Result) {
+func printRun(harnessName, cfgName string, runN int, r *harness.Result, gr []grade.Result) {
 	pass, fail, skip := 0, 0, 0
 	for _, x := range gr {
 		switch {
@@ -405,6 +401,6 @@ func printRun(harnessName, mode, cfgName string, runN int, r *harness.Result, gr
 	if skip > 0 {
 		skipNote = fmt.Sprintf(" (+%d skip)", skip)
 	}
-	fmt.Printf("  %-12s %-8s %-13s run-%d  %d/%d%s  %dms  %dt%s\n",
-		harnessName, mode, cfgName, runN, pass, graded, skipNote, r.DurationMS, r.Tokens, abortMark)
+	fmt.Printf("  %-12s %-13s run-%d  %d/%d%s  %dms  %dt%s\n",
+		harnessName, cfgName, runN, pass, graded, skipNote, r.DurationMS, r.Tokens, abortMark)
 }

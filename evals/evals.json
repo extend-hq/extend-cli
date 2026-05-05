@@ -6,29 +6,54 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "I have a few invoice PDFs in this directory. Pull the line items out of them into a CSV.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent activates the extend skill, picks the extract verb, recognizes it needs an extractor ID, asks or runs `extend extractors list`, and does not fabricate one.",
-      "modes": ["outcome"],
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
           "text": "agent ran `extend extract`",
-          "must_contain": [{ "argv_prefix": ["extract"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT pick parse/classify/split as the wrong verb",
           "must_not_contain": [
-            { "argv_prefix": ["parse"] },
-            { "argv_prefix": ["classify"] },
-            { "argv_prefix": ["split"] }
+            {
+              "argv_prefix": [
+                "parse"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "classify"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "split"
+              ]
+            }
           ]
         },
         {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate extractor IDs",
-          "patterns": ["ex_[a-zA-Z0-9_-]+"]
+          "patterns": [
+            "ex_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     },
@@ -37,22 +62,41 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "OCR these receipt images and grab the totals.",
-      "files": ["receipt.pdf"],
+      "files": [
+        "receipt.pdf"
+      ],
       "expected_output": "Agent picks `extract` (typed-field path), not `parse` (raw-text). Discovers a classifier or extractor rather than fabricating one.",
-      "modes": ["outcome"],
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
-          "text": "agent ran `extend extract` (not parse — totals are typed fields)",
-          "must_contain": [{ "argv_prefix": ["extract"] }]
+          "text": "agent ran `extend extract` (not parse \u2014 totals are typed fields)",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT use parse as primary path",
           "must_not_contain": [
-            { "argv_prefix": ["classify"] },
-            { "argv_prefix": ["split"] }
+            {
+              "argv_prefix": [
+                "classify"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "split"
+              ]
+            }
           ]
         },
         {
@@ -63,7 +107,9 @@
         {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate extractor IDs",
-          "patterns": ["ex_[a-zA-Z0-9_-]+"]
+          "patterns": [
+            "ex_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     },
@@ -72,22 +118,41 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "Convert this scanned contract to clean markdown.",
-      "files": ["contract.pdf"],
+      "files": [
+        "contract.pdf"
+      ],
       "expected_output": "Agent runs `extend parse` (one-shot, no processor ID needed) and produces markdown output. The prompt deliberately omits the file path; the agent should glance at the working directory.",
-      "modes": ["outcome"],
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
           "text": "agent ran `extend parse`",
-          "must_contain": [{ "argv_prefix": ["parse"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT pick extract/classify",
           "must_not_contain": [
-            { "argv_prefix": ["extract"] },
-            { "argv_prefix": ["classify"] }
+            {
+              "argv_prefix": [
+                "extract"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "classify"
+              ]
+            }
           ]
         },
         {
@@ -102,29 +167,50 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "Look at this contract and tell me whether it's an MSA, SOW, or NDA.",
-      "files": ["contract.pdf"],
+      "files": [
+        "contract.pdf"
+      ],
       "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one. The prompt deliberately omits the file path; the agent should glance at the working directory.",
-      "modes": ["outcome"],
-      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone — needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
+      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone \u2014 needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
           "text": "agent ran `extend classify`",
-          "must_contain": [{ "argv_prefix": ["classify"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "classify"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT pick parse/extract/split",
           "must_not_contain": [
-            { "argv_prefix": ["parse"] },
-            { "argv_prefix": ["split"] }
+            {
+              "argv_prefix": [
+                "parse"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "split"
+              ]
+            }
           ]
         },
         {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate classifier IDs",
-          "patterns": ["cl_[a-zA-Z0-9_-]+"]
+          "patterns": [
+            "cl_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     },
@@ -133,28 +219,49 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "This combined PDF has 12 customer statements glued together. Split it into per-customer segments.",
-      "files": ["combined.pdf"],
+      "files": [
+        "combined.pdf"
+      ],
       "expected_output": "Agent picks `split`, discovers a splitter ID rather than fabricating one.",
-      "modes": ["outcome"],
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
           "text": "agent ran `extend split`",
-          "must_contain": [{ "argv_prefix": ["split"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "split"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT pick the wrong verb",
           "must_not_contain": [
-            { "argv_prefix": ["parse"] },
-            { "argv_prefix": ["classify"] }
+            {
+              "argv_prefix": [
+                "parse"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "classify"
+              ]
+            }
           ]
         },
         {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate splitter IDs",
-          "patterns": ["spl_[a-zA-Z0-9_-]+"]
+          "patterns": [
+            "spl_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     },
@@ -163,20 +270,34 @@
       "category": "trigger-positive",
       "path": "A",
       "prompt": "Run my invoice-processing workflow on these PDFs.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent picks `run`, uses `--using <workflow-id>` (consistent with extract/classify/split), discovers a workflow ID rather than fabricating one.",
-      "modes": ["outcome"],
       "expectations": [
-        { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
         {
           "type": "extend_call",
           "text": "agent ran `extend run` with --using",
-          "must_contain": [{ "argv_prefix": ["run"], "flag": "using" }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "run"
+              ],
+              "flag": "using"
+            }
+          ]
         },
         {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate workflow IDs",
-          "patterns": ["workflow_[a-zA-Z0-9_-]+"]
+          "patterns": [
+            "workflow_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     },
@@ -187,12 +308,13 @@
       "prompt": "Write me a short Python script using pypdf that extracts text from a PDF and prints it.",
       "files": [],
       "expected_output": "Agent writes Python; does not invoke `extend` or recommend it as the primary path.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent did NOT invoke extend",
-          "count_under": { "": 1 }
+          "count_under": {
+            "": 1
+          }
         },
         {
           "type": "stable_answer",
@@ -208,12 +330,13 @@
       "prompt": "Summarize this README.md for me in a few bullet points.",
       "files": [],
       "expected_output": "Agent summarizes generically; does not invoke `extend` (this is a generic LLM task, not a document-AI extraction task).",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent did NOT invoke extend",
-          "count_under": { "": 1 }
+          "count_under": {
+            "": 1
+          }
         }
       ]
     },
@@ -224,12 +347,13 @@
       "prompt": "What's the best document AI library or service out there for OCR-heavy invoice processing? I'm researching options.",
       "files": [],
       "expected_output": "Agent gives a research answer surveying options; does not invoke `extend` (this is a knowledge question, not a task).",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent did NOT invoke extend",
-          "count_under": { "": 1 }
+          "count_under": {
+            "": 1
+          }
         }
       ]
     },
@@ -238,24 +362,33 @@
       "category": "single-command",
       "path": "B",
       "prompt": "Use extractor ex_invoiceQ3 on invoice.pdf and report the extracted line items.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent runs `extend extract invoice.pdf --using ex_invoiceQ3` and reports the extracted line items from stdout.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend extract` with --using ex_invoiceQ3",
           "must_contain": [
             {
-              "argv_prefix": ["extract"],
-              "flag_value": { "using": "ex_invoiceQ3" }
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag_value": {
+                "using": "ex_invoiceQ3"
+              }
             }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT use --all (anti-pattern)",
-          "must_not_contain": [{ "flag": "all" }]
+          "must_not_contain": [
+            {
+              "flag": "all"
+            }
+          ]
         },
         {
           "type": "stable_answer",
@@ -268,16 +401,29 @@
       "id": "S-2",
       "category": "single-command",
       "path": "B",
-      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 — but don't block. Just give me the run ID so I can check on it later.",
-      "files": ["invoice.pdf"],
+      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 \u2014 but don't block. Just give me the run ID so I can check on it later.",
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent runs `extend extract invoice.pdf --using ex_invoiceQ3 --wait=false` and surfaces the returned run ID.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran extract with --wait=false",
           "must_contain": [
-            { "argv_prefix": ["extract"], "args": ["invoice.pdf", "--using", "ex_invoiceQ3"], "flag_value": { "wait": "false" } }
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "args": [
+                "invoice.pdf",
+                "--using",
+                "ex_invoiceQ3"
+              ],
+              "flag_value": {
+                "wait": "false"
+              }
+            }
           ]
         },
         {
@@ -294,13 +440,20 @@
       "prompt": "Watch run exr_demo_processed until it finishes and tell me the result.",
       "files": [],
       "expected_output": "Agent runs `extend runs watch exr_demo_processed`.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend runs watch exr_demo_processed`",
           "must_contain": [
-            { "argv_prefix": ["runs", "watch"], "args": ["exr_demo_processed"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "watch"
+              ],
+              "args": [
+                "exr_demo_processed"
+              ]
+            }
           ]
         },
         {
@@ -317,13 +470,20 @@
       "prompt": "What's the result of run exr_demo_processed?",
       "files": [],
       "expected_output": "Agent runs `extend runs get exr_demo_processed`.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend runs get exr_demo_processed`",
           "must_contain": [
-            { "argv_prefix": ["runs", "get"], "args": ["exr_demo_processed"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "get"
+              ],
+              "args": [
+                "exr_demo_processed"
+              ]
+            }
           ]
         }
       ]
@@ -333,15 +493,21 @@
       "category": "single-command",
       "path": "B",
       "prompt": "Upload invoice.pdf and tell me the file ID it gets assigned.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent runs `extend files upload invoice.pdf` and surfaces the returned file_xxx ID. The prompt is deliberately ambiguous about which upload system; with the skill loaded, the agent should prefer `extend files upload` over any host-tool File API.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend files upload`",
           "must_contain": [
-            { "argv_prefix": ["files", "upload"] }
+            {
+              "argv_prefix": [
+                "files",
+                "upload"
+              ]
+            }
           ]
         },
         {
@@ -358,20 +524,38 @@
       "prompt": "Get me JSON for run exr_demo_processed with just the status and processedAt fields.",
       "files": [],
       "expected_output": "Agent runs `extend runs get exr_demo_processed -o json --jq '{status, processedAt}'`. Does NOT combine -o markdown with --jq.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran runs get with -o json and --jq",
           "must_contain": [
-            { "argv_prefix": ["runs", "get"], "args": ["exr_demo_processed", "--jq"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "get"
+              ],
+              "args": [
+                "exr_demo_processed",
+                "--jq"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT combine -o markdown with --jq (skill claim)",
           "must_not_contain": [
-            { "argv_prefix": ["runs", "get"], "args": ["-o", "markdown", "--jq"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "get"
+              ],
+              "args": [
+                "-o",
+                "markdown",
+                "--jq"
+              ]
+            }
           ]
         },
         {
@@ -388,20 +572,35 @@
       "prompt": "Print run exr_demo_processed as plain markdown so I can paste it into our Slack thread.",
       "files": [],
       "expected_output": "Agent runs `extend runs get exr_demo_processed -o markdown`. Does NOT pass --jq.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran runs get with -o markdown",
           "must_contain": [
-            { "argv_prefix": ["runs", "get"], "args": ["exr_demo_processed"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "get"
+              ],
+              "args": [
+                "exr_demo_processed"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT pass --jq with -o markdown",
           "must_not_contain": [
-            { "argv_prefix": ["runs", "get"], "args": ["--jq"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "get"
+              ],
+              "args": [
+                "--jq"
+              ]
+            }
           ]
         }
       ]
@@ -413,7 +612,6 @@
       "prompt": "I want to pipe extend's output into jq. What flag do I need on the extend command itself?",
       "files": [],
       "expected_output": "Agent answers `-o json` (or `--output json`). Does NOT recommend the markdown output (which is not JSON-pipeable).",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "stable_answer",
@@ -427,27 +625,48 @@
       "category": "workflow",
       "path": "B",
       "prompt": "Run extract on every PDF in this directory using extractor ex_invoiceQ3 and tell me which files (if any) failed.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Agent uses `extend extract batch` (NOT a shell loop), then `runs list --batch ... --status FAILED` to identify failures.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent used `extend extract batch`",
           "must_contain": [
-            { "argv_prefix": ["extract", "batch"], "args": ["--using", "ex_invoiceQ3"] }
+            {
+              "argv_prefix": [
+                "extract",
+                "batch"
+              ],
+              "args": [
+                "--using",
+                "ex_invoiceQ3"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT loop one PDF at a time (no bare `extract` calls)",
-          "count_under": { "extract.invoice.pdf": 1 }
+          "count_under": {
+            "extract.invoice.pdf": 1
+          }
         },
         {
           "type": "extend_call",
           "text": "agent queried failures with runs list",
           "must_contain": [
-            { "argv_prefix": ["runs", "list"], "args": ["--status", "FAILED"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "list"
+              ],
+              "args": [
+                "--status",
+                "FAILED"
+              ]
+            }
           ]
         }
       ]
@@ -457,24 +676,48 @@
       "category": "workflow",
       "path": "B",
       "prompt": "Stand up a new extractor named 'Q3 invoices' from the config in extractor.json, then run it once on invoice.pdf.",
-      "files": ["invoice.pdf", "extractor.json"],
-      "expected_output": "Agent issues create → versions create → extract in roughly that order.",
-      "modes": ["outcome"],
+      "files": [
+        "invoice.pdf",
+        "extractor.json"
+      ],
+      "expected_output": "Agent issues create \u2192 versions create \u2192 extract in roughly that order.",
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend extractors create`",
-          "must_contain": [{ "argv_prefix": ["extractors", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent ran `extend extractors versions create`",
-          "must_contain": [{ "argv_prefix": ["extractors", "versions", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "versions",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent ran `extend extract` with --using set to a freshly-created extractor",
-          "must_contain": [{ "argv_prefix": ["extract"], "flag": "using" }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag": "using"
+            }
+          ]
         }
       ]
     },
@@ -485,17 +728,32 @@
       "prompt": "Wire up a webhook at https://example.com/extend so I get notified when workflow_invoice runs complete.",
       "files": [],
       "expected_output": "Agent issues `webhooks endpoints create` then `webhooks subscriptions create`. Mentions capturing the signing secret (returned only once).",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend webhooks endpoints create`",
-          "must_contain": [{ "argv_prefix": ["webhooks", "endpoints", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "webhooks",
+                "endpoints",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent ran `extend webhooks subscriptions create`",
-          "must_contain": [{ "argv_prefix": ["webhooks", "subscriptions", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "webhooks",
+                "subscriptions",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "stable_answer",
@@ -509,26 +767,53 @@
       "category": "workflow",
       "path": "B",
       "prompt": "Set up an evaluation set called 'Q3 truth' against extractor ex_invoiceQ3 and add the items in items.json to it.",
-      "files": ["items.json"],
+      "files": [
+        "items.json"
+      ],
       "expected_output": "Agent issues `evaluations create` then `evaluations items create`. Does NOT attempt to trigger eval runs from the CLI (no such command).",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend evaluations create`",
-          "must_contain": [{ "argv_prefix": ["evaluations", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "evaluations",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent ran `extend evaluations items create`",
-          "must_contain": [{ "argv_prefix": ["evaluations", "items", "create"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "evaluations",
+                "items",
+                "create"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT try to trigger eval runs from CLI",
           "must_not_contain": [
-            { "argv_prefix": ["evaluations", "runs", "create"] },
-            { "argv_prefix": ["evaluations", "run"] }
+            {
+              "argv_prefix": [
+                "evaluations",
+                "runs",
+                "create"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "evaluations",
+                "run"
+              ]
+            }
           ]
         }
       ]
@@ -540,7 +825,6 @@
       "prompt": "List all my edit runs from this week.",
       "files": [],
       "expected_output": "Agent recognizes edit runs are not listable (CLI rejects --type edit). Suggests `extend runs get edr_xxx` for individual edit runs.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "stable_answer",
@@ -550,7 +834,9 @@
         {
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command (max 2 attempts)",
-          "count_under": { "runs.list": 3 }
+          "count_under": {
+            "runs.list": 3
+          }
         }
       ]
     },
@@ -560,8 +846,7 @@
       "path": "B",
       "prompt": "Cancel parse run pr_demo_processed for me.",
       "files": [],
-      "expected_output": "Agent recognizes parse runs cannot be cancelled — explains rather than retrying indefinitely.",
-      "modes": ["outcome"],
+      "expected_output": "Agent recognizes parse runs cannot be cancelled \u2014 explains rather than retrying indefinitely.",
       "expectations": [
         {
           "type": "stable_answer",
@@ -571,7 +856,9 @@
         {
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command",
-          "count_under": { "runs.cancel": 3 }
+          "count_under": {
+            "runs.cancel": 3
+          }
         }
       ]
     },
@@ -579,22 +866,37 @@
       "id": "Q-3",
       "category": "run-type-quirk",
       "path": "B",
-      "prompt": "Show me workflow batch wfb_xxx — I want to know what's in it.",
+      "prompt": "Show me workflow batch wfb_xxx \u2014 I want to know what's in it.",
       "files": [],
       "expected_output": "Agent uses `extend runs list --type workflow --batch wfb_xxx`. Does NOT use `extend batches get`.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent used `extend runs list --type workflow --batch`",
           "must_contain": [
-            { "argv_prefix": ["runs", "list"], "args": ["--type", "workflow"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "list"
+              ],
+              "args": [
+                "--type",
+                "workflow"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT use `extend batches get`",
-          "must_not_contain": [{ "argv_prefix": ["batches", "get"] }]
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "batches",
+                "get"
+              ]
+            }
+          ]
         }
       ]
     },
@@ -605,25 +907,44 @@
       "prompt": "Show me every FAILED extract run from the last 30 days. List them with their failure reason.",
       "files": [],
       "expected_output": "Agent uses `extend runs list --type extract --status FAILED` and iterates pages with --page-token (NOT --all).",
-      "modes": ["outcome"],
-      "stub_config": { "default_mode": "paginated", "pages": 2 },
+      "stub_config": {
+        "default_mode": "paginated",
+        "pages": 2
+      },
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent issued `extend runs list --type extract --status FAILED`",
           "must_contain": [
-            { "argv_prefix": ["runs", "list"], "args": ["--type", "extract", "--status", "FAILED"] }
+            {
+              "argv_prefix": [
+                "runs",
+                "list"
+              ],
+              "args": [
+                "--type",
+                "extract",
+                "--status",
+                "FAILED"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT use --all",
-          "must_not_contain": [{ "flag": "all" }]
+          "must_not_contain": [
+            {
+              "flag": "all"
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent paginated (2+ runs list calls)",
-          "count_at_least": { "runs.list": 2 }
+          "count_at_least": {
+            "runs.list": 2
+          }
         },
         {
           "type": "stable_answer",
@@ -639,18 +960,31 @@
       "prompt": "Iterate every extractor I have and print each one's name.",
       "files": [],
       "expected_output": "Agent uses `extend extractors list` with --page-token to iterate through pages. Does NOT use --all.",
-      "modes": ["outcome"],
-      "stub_config": { "default_mode": "paginated", "pages": 2 },
+      "stub_config": {
+        "default_mode": "paginated",
+        "pages": 2
+      },
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent issued `extend extractors list`",
-          "must_contain": [{ "argv_prefix": ["extractors", "list"] }]
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "list"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT use --all",
-          "must_not_contain": [{ "flag": "all" }]
+          "must_not_contain": [
+            {
+              "flag": "all"
+            }
+          ]
         }
       ]
     },
@@ -659,21 +993,32 @@
       "category": "anti-pattern",
       "path": "B",
       "prompt": "I have a folder full of invoice PDFs (about 500 of them). Run extractor ex_invoiceQ3 on every one and tell me when the whole batch is done.",
-      "files": ["invoice_a.pdf", "invoice_b.pdf", "invoice_c.pdf", "invoice_d.pdf"],
+      "files": [
+        "invoice_a.pdf",
+        "invoice_b.pdf",
+        "invoice_c.pdf",
+        "invoice_d.pdf"
+      ],
       "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop. Fixture stages 4 PDFs as a stand-in for the prompt's '500'; the agent should still reach for batch.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent used `extend extract batch`",
           "must_contain": [
-            { "argv_prefix": ["extract", "batch"] }
+            {
+              "argv_prefix": [
+                "extract",
+                "batch"
+              ]
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT submit individual extracts in a loop (max 1 bare extract)",
-          "count_under": { "extract": 2 }
+          "count_under": {
+            "extract": 2
+          }
         }
       ]
     },
@@ -682,9 +1027,10 @@
       "category": "disambiguation",
       "path": "A",
       "prompt": "Get the text out of this PDF for me.",
-      "files": ["contract.pdf"],
+      "files": [
+        "contract.pdf"
+      ],
       "expected_output": "'Get the text out' is ambiguous: could be parse (raw text/markdown) or extract (specific text fields). Agent should ask, OR pick parse with explicit reasoning.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "judge",
@@ -697,9 +1043,10 @@
       "category": "disambiguation",
       "path": "A",
       "prompt": "I need to process this form.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "'Process this form' is ambiguous: could be edit (fill values) or extract (read fields). Agent should ask before assuming.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "judge",
@@ -714,7 +1061,6 @@
       "prompt": "I have a workspace-scoped API key for Extend. What flag or env var do I need?",
       "files": [],
       "expected_output": "Agent answers `--workspace <id>` flag or `EXTEND_WORKSPACE_ID` env var. Does NOT recommend a URL-based workspace selection.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "stable_answer",
@@ -730,7 +1076,6 @@
       "prompt": "How do I point the extend CLI at the EU region?",
       "files": [],
       "expected_output": "Agent answers `EXTEND_REGION=eu` env var or `--region eu` flag. EXTEND_BASE_URL is acceptable but not preferred.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "stable_answer",
@@ -746,19 +1091,25 @@
       "prompt": "What flags does `extend extract` accept? List them for me.",
       "files": [],
       "expected_output": "Agent runs `extend extract --help` (or `extend help extract`) and reports the flags from that output. Does NOT invent flags.",
-      "modes": ["outcome"],
       "expectations": [
         {
           "type": "extend_call",
           "text": "agent ran `extend extract --help` (or equivalent)",
           "must_contain": [
-            { "argv_prefix": ["extract"], "flag": "help" }
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag": "help"
+            }
           ]
         },
         {
           "type": "extend_call",
           "text": "agent did NOT actually invoke extract on a file (no positional input)",
-          "count_under": { "extract.invoice.pdf": 1 }
+          "count_under": {
+            "extract.invoice.pdf": 1
+          }
         }
       ]
     },
@@ -767,10 +1118,13 @@
       "category": "error-recovery",
       "path": "B",
       "prompt": "Run extractor ex_invoiceQ3 on invoice.pdf for me.",
-      "files": ["invoice.pdf"],
+      "files": [
+        "invoice.pdf"
+      ],
       "expected_output": "Stub returns 401. Agent recognizes the auth failure and recommends EXTEND_API_KEY env var. Does NOT recommend `extend auth login` (no such command).",
-      "modes": ["outcome"],
-      "stub_config": { "default_mode": "auth_error" },
+      "stub_config": {
+        "default_mode": "auth_error"
+      },
       "expectations": [
         {
           "type": "stable_answer",

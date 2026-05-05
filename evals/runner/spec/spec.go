@@ -27,7 +27,6 @@ type Eval struct {
 	Prompt         string        `json:"prompt"`
 	Files          []string      `json:"files,omitempty"`
 	ExpectedOutput string        `json:"expected_output,omitempty"`
-	Modes          []Mode        `json:"modes"`
 	StubConfig     StubConfig    `json:"stub_config,omitempty"`
 	Expectations   []Expectation `json:"expectations"`
 	Notes          string        `json:"notes,omitempty"`
@@ -40,20 +39,6 @@ type Path string
 const (
 	PathA Path = "A"
 	PathB Path = "B"
-)
-
-// Mode is "trigger" or "outcome". A case can opt into either or both.
-//
-//	trigger — early-terminate as soon as the agent uses any extend-related
-//	          tool; cheaper, used for trigger-discrimination cases.
-//	outcome — let the agent run the task to completion; capture every
-//	          extend call and the final answer; used for command-shape
-//	          and workflow cases.
-type Mode string
-
-const (
-	ModeTrigger Mode = "trigger"
-	ModeOutcome Mode = "outcome"
 )
 
 // StubConfig configures the fake `extend` binary's behaviour for one
@@ -171,14 +156,6 @@ func (f *File) Validate() error {
 		}
 		if e.Prompt == "" {
 			return fmt.Errorf("eval %s: prompt is required", e.ID)
-		}
-		if len(e.Modes) == 0 {
-			return fmt.Errorf("eval %s: at least one mode required", e.ID)
-		}
-		for _, m := range e.Modes {
-			if m != ModeTrigger && m != ModeOutcome {
-				return fmt.Errorf("eval %s: invalid mode %q", e.ID, m)
-			}
 		}
 		if len(e.Expectations) == 0 {
 			return fmt.Errorf("eval %s: at least one expectation required", e.ID)
