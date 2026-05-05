@@ -43,7 +43,7 @@ Optional:
     extend parse contract.pdf > contract.md
 
     # run a workflow async; poll later
-    RUN=$(extend run doc.pdf --workflow workflow_abc -o id)
+    RUN=$(extend run doc.pdf --using workflow_abc -o id)
     extend runs watch "$RUN"
 
     # filter JSON with jq
@@ -57,8 +57,9 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
 
 ## Commands
 
-    extract | classify | split | parse | edit  <input> [flags]
-    run <input> --workflow <id>                # workflow runs
+    extract | classify | split | run  <input> --using <id>
+    parse <input>
+    edit <input> --schema schema.json
     <action> batch <inputs>... [--files-from list.txt]
 
     runs    get | list | watch | cancel | delete | update
@@ -89,6 +90,30 @@ Run `extend <command> --help` for flags.
 The CLI always uses the asynchronous endpoints (`/extract_runs` etc.)
 and polls. Short actions wait for terminal status by default; workflow
 runs are async by default and require `--wait` to block.
+
+## Use with coding agents
+
+The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
+agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, …) to
+use `extend` correctly without you having to spell out every command.
+
+Install to the cross-client default path:
+
+    extend skill install
+
+This writes `~/.agents/skills/extend/SKILL.md` — the path Codex,
+OpenCode, Cursor, and most other harnesses look at. Claude Code reads
+from `~/.claude/skills/` instead, so point `--target` at it:
+
+    extend skill install --target ~/.claude/skills/extend/SKILL.md
+
+Or print the body to stdout and redirect wherever you want:
+
+    extend skill > /path/to/SKILL.md
+
+The skill is a pure function of the CLI's doc tree — re-run
+`extend skill install` after upgrading to pick up new commands and
+flag changes.
 
 ## Develop
 
