@@ -75,6 +75,8 @@ The --workspace and --region flags override their respective env vars.`,
 			workflowAccessor().doc(app),
 			newWebhooksDoc(app),
 			newEvaluationsDoc(app),
+			// Agent surface
+			newSkillDoc(app),
 			// Help topics
 			newAuthTopicDoc(),
 			newOutputTopicDoc(),
