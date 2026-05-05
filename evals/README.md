@@ -33,31 +33,6 @@ Per-run artifacts land in `extend-cli-evals-workspace/iteration-N/`
 summary at the end and writes `iteration-N/benchmark.json` for trend
 analysis.
 
-## Layout
-
-```
-evals/
-├── AGENTS.md            # eval-authoring contract
-├── README.md            # this file
-├── evals.json           # all cases (canonical source of truth)
-├── stub/                # the recording fake `extend` binary
-└── runner/              # sibling Go module that drives harnesses
-
-../extend-cli-evals-workspace/   # gitignored, per-run artifacts
-└── iteration-N/
-    ├── stub                            # compiled stub binary
-    ├── eval-<id>/<harness>/<mode>/<config>/run-<n>/
-    │   ├── events.jsonl                # raw harness JSONL
-    │   ├── extend-calls.jsonl          # stub recording
-    │   ├── final.txt                   # agent's final message
-    │   ├── timing.json                 # tokens + duration
-    │   ├── grading.json                # per-expectation results
-    │   ├── scratch/                    # agent's working dir
-    │   ├── home/                       # agent's HOME (skill installed here for with_skill)
-    │   └── stub-bin/                   # contains `extend` symlink to stub
-    └── benchmark.json                  # rollup
-```
-
 ## How it stays deterministic
 
 The agent's `extend` invocations hit a stub binary (`evals/stub`) that
