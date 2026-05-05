@@ -68,16 +68,17 @@ var descriptionVerbs = []descriptionVerb{
 // most useful negative-failure case is the user describing the task
 // without the brand name.
 //
-// Include at least one ID-bearing phrasing so the agent recognizes
-// `exr_`/`pr_`/`clr_`/`splr_`/`edr_` as Extend run IDs and doesn't
-// mistake them for Claude Code Task IDs or other tool-specific tokens.
+// IMPORTANT: do not paste eval-set prompts (or paraphrases of them) in
+// here. Doing so overfits the description to the test set. The
+// `descriptionVerbs` table already covers run inspection by enumerating
+// the ID prefixes; the agent gets the run-watching coverage from there
+// without seeing a near-verbatim copy of the S-3 prompt.
 var disambiguationExamples = []string{
 	`pull line items from these invoices`,
 	`OCR these receipts`,
 	`categorize this contract`,
 	`fill out this PDF form`,
 	`split this combined PDF into individual statements`,
-	`watch run exr_xxx until it finishes`,
 }
 
 // resourceFamily captures one of the four processor families (extractors,
