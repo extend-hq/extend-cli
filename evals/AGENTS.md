@@ -28,8 +28,9 @@ agent had no way to know that ID. Path B prompts carry every ID;
 
 `evals.json` evals carry an `expectations` array. Each element is one of:
 
-- **`skill_activates`** — trigger-mode only. Records that the agent
-  reached for the skill (read `SKILL.md`, invoked the stub, or both).
+- **`skill_activates`** — records that the agent reached for the skill
+  (read `SKILL.md`, invoked the stub, or both). Used by trigger-positive
+  cases to confirm the skill activated at all.
 - **`extend_call`** — mechanical. Walks `extend-calls.jsonl` for argv
   predicates: `must_contain`, `must_not_contain`, `count_under`,
   `count_at_least`. Both flags and positional args are matchable.
@@ -103,10 +104,9 @@ means adding the prefix pattern to the default `patterns` list in
 
 1. Decide Path A or B; write the prompt accordingly.
 2. List inputs in `files`. Stage them in `evals/files/`.
-3. Pick `modes` — `["trigger"]`, `["outcome"]`, or both.
-4. Write expectations in priority order (most-specific first).
-5. Run the discriminating-assertion test on each expectation.
-6. Run the case locally against at least one harness; iterate until the
+3. Write expectations in priority order (most-specific first).
+4. Run the discriminating-assertion test on each expectation.
+5. Run the case locally against at least one harness; iterate until the
    expectations stabilise around the agent's actual behaviour rather
    than your imagined behaviour.
 
