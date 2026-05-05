@@ -11,12 +11,6 @@ name: skill-evals
 #   OPENAI_API_KEY    — used by Codex (no ChatGPT login in CI; the
 #                       CLI falls back to API-key auth when this env
 #                       var is set).
-#
-# Cost estimate (default settings, single iteration):
-#   • ~5 minutes wall-clock at concurrency=8.
-#   • Claude Code: ~15-30k tokens total across 66 invocations.
-#   • Codex: ~3-7M tokens total across 66 invocations (much chattier).
-#   • Judge: ~5-10 calls per sweep at low effort.
 on:
   workflow_dispatch:
     inputs:
