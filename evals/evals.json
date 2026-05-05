@@ -71,9 +71,9 @@
       "id": "T+3",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "I have contract.pdf in this directory — convert it to clean markdown.",
+      "prompt": "Convert this scanned contract to clean markdown.",
       "files": ["contract.pdf"],
-      "expected_output": "Agent runs `extend parse` (one-shot, no processor ID needed) and produces markdown output.",
+      "expected_output": "Agent runs `extend parse` (one-shot, no processor ID needed) and produces markdown output. The prompt deliberately omits the file path; the agent should glance at the working directory.",
       "modes": ["outcome"],
       "expectations": [
         { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
@@ -101,9 +101,9 @@
       "id": "T+4",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "I have contract.pdf in this directory. Categorize it as MSA, SOW, or NDA.",
+      "prompt": "Look at this contract and tell me whether it's an MSA, SOW, or NDA.",
       "files": ["contract.pdf"],
-      "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one.",
+      "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one. The prompt deliberately omits the file path; the agent should glance at the working directory.",
       "modes": ["outcome"],
       "expectations": [
         { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
@@ -328,9 +328,9 @@
       "id": "S-5",
       "category": "single-command",
       "path": "B",
-      "prompt": "Upload invoice.pdf to my Extend workspace and tell me the file_xxx ID it gets assigned.",
+      "prompt": "Upload invoice.pdf and tell me the file ID it gets assigned.",
       "files": ["invoice.pdf"],
-      "expected_output": "Agent runs `extend files upload invoice.pdf` and surfaces the returned file_xxx ID.",
+      "expected_output": "Agent runs `extend files upload invoice.pdf` and surfaces the returned file_xxx ID. The prompt is deliberately ambiguous about which upload system; with the skill loaded, the agent should prefer `extend files upload` over any host-tool File API.",
       "modes": ["outcome"],
       "expectations": [
         {
@@ -654,9 +654,9 @@
       "id": "AP-1",
       "category": "anti-pattern",
       "path": "B",
-      "prompt": "I have several invoice PDFs in this directory. Run extractor ex_invoiceQ3 on each one and tell me when they're all done.",
+      "prompt": "I have a folder full of invoice PDFs (about 500 of them). Run extractor ex_invoiceQ3 on every one and tell me when the whole batch is done.",
       "files": ["invoice_a.pdf", "invoice_b.pdf", "invoice_c.pdf", "invoice_d.pdf"],
-      "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop. Optionally watches via `extend batches watch`.",
+      "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop. Fixture stages 4 PDFs as a stand-in for the prompt's '500'; the agent should still reach for batch.",
       "modes": ["outcome"],
       "expectations": [
         {
