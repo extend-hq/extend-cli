@@ -163,19 +163,19 @@
       "path": "A",
       "prompt": "Run my invoice-processing workflow on these PDFs.",
       "files": ["invoice.pdf"],
-      "expected_output": "Agent picks `run`, uses `--workflow` (not `--using`), discovers a workflow ID rather than fabricating one.",
+      "expected_output": "Agent picks `run`, uses `--using <workflow-id>` (consistent with extract/classify/split), discovers a workflow ID rather than fabricating one.",
       "modes": ["outcome"],
       "expectations": [
         { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
         {
           "type": "extend_call",
-          "text": "agent ran `extend run` with --workflow (not --using)",
-          "must_contain": [{ "argv_prefix": ["run"], "flag": "workflow" }]
+          "text": "agent ran `extend run` with --using",
+          "must_contain": [{ "argv_prefix": ["run"], "flag": "using" }]
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT pass --using on the run call (--using is for extract/classify/split)",
-          "must_not_contain": [{ "argv_prefix": ["run"], "flag": "using" }]
+          "text": "agent did NOT use the deprecated --workflow flag",
+          "must_not_contain": [{ "argv_prefix": ["run"], "flag": "workflow" }]
         },
         {
           "type": "must_not_fabricate_ids",

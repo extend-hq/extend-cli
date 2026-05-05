@@ -484,8 +484,8 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 
     extend runs list --type workflow --batch <batch-id>`,
 		Examples: []Example{
-			{Label: "From positional args", Cmd: "extend run batch doc1.pdf doc2.pdf --workflow workflow_abc"},
-			{Label: "From a list file", Cmd: "extend run batch --files-from inputs.txt --workflow workflow_abc"},
+			{Label: "From positional args", Cmd: "extend run batch doc1.pdf doc2.pdf --using workflow_abc"},
+			{Label: "From a list file", Cmd: "extend run batch --files-from inputs.txt --using workflow_abc"},
 		},
 		Gotchas: []string{
 			"Workflow batch does not accept --priority (server schema omits it).",
@@ -532,7 +532,7 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 			return renderWorkflowBatchSubmitted(app, resp, len(items))
 		},
 		Configure: func(cmd *cobra.Command) {
-			f.attach(cmd, "workflow")
+			f.attach(cmd, "using")
 		},
 	}
 }

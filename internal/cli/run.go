@@ -62,12 +62,12 @@ same shape that processor would normally return (extract: {value}, classify:
 --secret key=value provides per-run secrets that step actions can reference.
 Repeatable.`,
 		Examples: []Example{
-			{Label: "Basic", Cmd: "extend run invoice.pdf --workflow workflow_abc"},
-			{Label: "Block until terminal", Cmd: "extend run invoice.pdf --workflow workflow_abc --wait"},
-			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --workflow workflow_abc --version 3 --priority 10"},
-			{Label: "Seed processor outputs", Cmd: "extend run invoice.pdf --workflow workflow_abc --outputs seeded.json"},
-			{Label: "Inline seeded outputs", Cmd: `extend run invoice.pdf --workflow workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
-			{Label: "Pass a secret", Cmd: "extend run invoice.pdf --workflow workflow_abc --secret API_KEY=$KEY"},
+			{Label: "Basic", Cmd: "extend run invoice.pdf --using workflow_abc"},
+			{Label: "Block until terminal", Cmd: "extend run invoice.pdf --using workflow_abc --wait"},
+			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --using workflow_abc --version 3 --priority 10"},
+			{Label: "Seed processor outputs", Cmd: "extend run invoice.pdf --using workflow_abc --outputs seeded.json"},
+			{Label: "Inline seeded outputs", Cmd: `extend run invoice.pdf --using workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
+			{Label: "Pass a secret", Cmd: "extend run invoice.pdf --using workflow_abc --secret API_KEY=$KEY"},
 		},
 		Gotchas: []string{
 			"Workflow runs are async by default (unlike extract/classify/split). Pass --wait to block.",
@@ -99,7 +99,7 @@ Repeatable.`,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow ID (required)")
+			cmd.Flags().StringVar(&workflowID, "using", "", "Workflow ID (required, e.g. workflow_xxx)")
 			cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or specific (e.g. 3)")
 			cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -108,7 +108,7 @@ Repeatable.`,
 			cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			meta.attach(cmd)
-			_ = cmd.MarkFlagRequired("workflow")
+			_ = cmd.MarkFlagRequired("using")
 		},
 		Subcommands: []*CommandDoc{newWorkflowBatchDoc(app)},
 	}

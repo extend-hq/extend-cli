@@ -143,7 +143,7 @@ func TestWorkflowBatch_ReturnsBatchIDOnly(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	cmd := findCmd(t, ta.app, "run", "batch")
-	cmd.SetArgs([]string{"file_a", "file_b", "--workflow", "workflow_xK9"})
+	cmd.SetArgs([]string{"file_a", "file_b", "--using", "workflow_xK9"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestWorkflowBatch_RejectsTopLevelPriority(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	cmd := findCmd(t, ta.app, "run", "batch")
-	cmd.SetArgs([]string{"file_a", "--workflow", "workflow_xK9", "--priority", "5"})
+	cmd.SetArgs([]string{"file_a", "--using", "workflow_xK9", "--priority", "5"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "priority") {
 		t.Errorf("expected priority error, got %v", err)
