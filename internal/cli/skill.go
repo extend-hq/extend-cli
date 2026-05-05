@@ -198,8 +198,10 @@ func writeSkillFrontmatter(b *strings.Builder) {
 
 func writeSkillAuth(b *strings.Builder) {
 	b.WriteString("## Authentication\n\n")
-	b.WriteString("    export EXTEND_API_KEY=sk_xxx\n\n")
-	b.WriteString("For region selection, workspace-scoped keys, or API-version pinning, run `extend help auth`.\n\n")
+	b.WriteString("    export EXTEND_API_KEY=sk_xxx              # required\n")
+	b.WriteString("    export EXTEND_REGION=us|us2|eu            # optional, default us\n")
+	b.WriteString("    export EXTEND_WORKSPACE_ID=ws_xxx         # required only for org-scoped API keys\n\n")
+	b.WriteString("Per-call equivalents: `--region eu`, `--workspace ws_xxx`. For API-version pinning or `EXTEND_BASE_URL`, run `extend help auth`.\n\n")
 }
 
 // writeSkillPickActions renders the "which verb do I run" table dynamically
