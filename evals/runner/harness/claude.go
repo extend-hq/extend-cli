@@ -60,6 +60,11 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		// skills". Used for the without-skill baseline.
 		args = append(args, "--disable-slash-commands")
 	}
+	if opts.Tune.Effort != "" {
+		args = append(args, "--effort", opts.Tune.Effort)
+	}
+	// Anthropic priority tier is gated on a sales contract; no CLI flag
+	// surfaces it. opts.Tune.FastMode is a no-op for claude.
 
 	if opts.Timeout == 0 {
 		opts.Timeout = 5 * time.Minute

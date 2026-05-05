@@ -51,8 +51,20 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		"--ignore-rules",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--cd", opts.ScratchDir,
-		opts.Prompt,
 	}
+	if opts.Tune.Effort != "" {
+		// Codex calls this `model_reasoning_effort`; values: minimal,
+		// low, medium, high, xhigh. "minimal" disables image_gen and
+		// web_search tools — we don't need those, but stick to "low"
+		// for safety unless explicitly set.
+		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Tune.Effort))
+	}
+	if opts.Tune.FastMode {
+		// Maps to OpenAI service_tier="fast"; 1.5x faster, 2.5x credit
+		// rate. Requires ChatGPT login (not API key).
+		args = append(args, "-c", `service_tier="fast"`)
+	}
+	args = append(args, opts.Prompt)
 
 	if opts.Timeout == 0 {
 		opts.Timeout = 5 * time.Minute

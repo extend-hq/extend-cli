@@ -14,6 +14,23 @@ import (
 	"time"
 )
 
+// TuneOptions controls speed/effort tuning that propagates through to
+// each driver. The runner sets these once from CLI flags; drivers
+// translate them to harness-specific args.
+type TuneOptions struct {
+	// Effort is "minimal", "low", "medium", "high", "xhigh", "max".
+	// Empty means harness default. For evals "low" is recommended —
+	// the tasks are simple and benefit greatly from speed.
+	Effort string
+
+	// FastMode enables fast/priority paths where available.
+	//   - Codex: maps to `service_tier = "fast"` (1.5x faster, 2.5x
+	//     credit rate; ChatGPT login required).
+	//   - Claude: no per-request fast-mode flag in the CLI; Anthropic
+	//     priority tier requires a sales contract.
+	FastMode bool
+}
+
 // RunOptions carries everything one driver invocation needs.
 type RunOptions struct {
 	// Prompt is the user-style instruction handed to the agent verbatim.
@@ -56,6 +73,9 @@ type RunOptions struct {
 
 	// ExtraEnv is appended to the harness's environment.
 	ExtraEnv []string
+
+	// Tune controls speed/effort knobs.
+	Tune TuneOptions
 }
 
 // Result is the normalized output of one harness invocation.

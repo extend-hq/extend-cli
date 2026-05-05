@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/extend-hq/extend-cli/evals/runner/fixtures"
@@ -50,13 +51,16 @@ func main() {
 
 func run() error {
 	var (
-		evalsPath = flag.String("evals", "../evals.json", "path to evals.json")
-		wsRoot    = flag.String("workspace", "", "workspace root (default: <repo>/../extend-cli-evals-workspace)")
-		iter      = flag.Int("iteration", 0, "iteration number (default: next free)")
-		caseList  = flag.String("cases", "", "comma-separated case IDs to run (default: all)")
-		harnList  = flag.String("harnesses", "", "comma-separated harness names: claude_code,codex (default: all available)")
-		runs      = flag.Int("runs", 1, "runs per (case, harness, mode, config) tuple")
-		timeout   = flag.Duration("timeout", 5*time.Minute, "per-run timeout")
+		evalsPath   = flag.String("evals", "../evals.json", "path to evals.json")
+		wsRoot      = flag.String("workspace", "", "workspace root (default: <repo>/../extend-cli-evals-workspace)")
+		iter        = flag.Int("iteration", 0, "iteration number (default: next free)")
+		caseList    = flag.String("cases", "", "comma-separated case IDs to run (default: all)")
+		harnList    = flag.String("harnesses", "", "comma-separated harness names: claude_code,codex (default: all available)")
+		runs        = flag.Int("runs", 1, "runs per (case, harness, mode, config) tuple")
+		timeout     = flag.Duration("timeout", 5*time.Minute, "per-run timeout")
+		concurrency = flag.Int("concurrency", 4, "max harness invocations to run in parallel")
+		effort      = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
+		fastMode    = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
 	)
 	flag.Parse()
 
@@ -96,24 +100,72 @@ func run() error {
 
 	bench := newBenchmark()
 
+	// Build the full task list once. Each task is one (case × harness ×
+	// mode × config × run-n) tuple — these are independent and can run
+	// in parallel up to -concurrency.
+	type task struct {
+		eval   spec.Eval
+		driver harness.Driver
+		mode   string
+		config string
+		runN   int
+	}
+	var tasks []task
 	for _, e := range cases {
-		fmt.Printf("\n=== %s [%s] %s ===\n", e.ID, e.Category, summarizePrompt(e.Prompt))
 		for _, d := range drivers {
 			for _, mode := range e.Modes {
 				for _, cfgName := range []string{"with_skill", "without_skill"} {
 					for n := 1; n <= *runs; n++ {
-						r, gr, err := runOne(d, e, string(mode), cfgName, n, ws, stubBin, *timeout)
-						if err != nil {
-							log.Printf("  %s %s %s run-%d: ERROR %v", d.Name(), mode, cfgName, n, err)
-							continue
-						}
-						bench.add(e, d.Name(), string(mode), cfgName, r, gr)
-						printRun(d.Name(), string(mode), cfgName, n, r, gr)
+						tasks = append(tasks, task{e, d, string(mode), cfgName, n})
 					}
 				}
 			}
 		}
 	}
+
+	tuneOpts := harness.TuneOptions{
+		Effort:   *effort,
+		FastMode: *fastMode,
+	}
+
+	fmt.Printf("running %d tasks (%d cases × %d harness × configs × runs) at concurrency=%d\n",
+		len(tasks), len(cases), len(drivers), *concurrency)
+
+	// printedCases keeps console output legible: as soon as we have any
+	// result for a case, print its header once.
+	var (
+		mu           sync.Mutex
+		printedCases = map[string]bool{}
+	)
+
+	taskCh := make(chan task)
+	var wg sync.WaitGroup
+	for w := 0; w < *concurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range taskCh {
+				r, gr, err := runOne(t.driver, t.eval, t.mode, t.config, t.runN, ws, stubBin, *timeout, tuneOpts)
+				mu.Lock()
+				if !printedCases[t.eval.ID] {
+					fmt.Printf("\n=== %s [%s] %s ===\n", t.eval.ID, t.eval.Category, summarizePrompt(t.eval.Prompt))
+					printedCases[t.eval.ID] = true
+				}
+				if err != nil {
+					log.Printf("  %s %s %s run-%d: ERROR %v", t.driver.Name(), t.mode, t.config, t.runN, err)
+				} else {
+					bench.add(t.eval, t.driver.Name(), t.mode, t.config, r, gr)
+					printRun(t.driver.Name(), t.mode, t.config, t.runN, r, gr)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, t := range tasks {
+		taskCh <- t
+	}
+	close(taskCh)
+	wg.Wait()
 
 	if err := bench.write(ws.BenchmarkPath()); err != nil {
 		return fmt.Errorf("write benchmark: %w", err)
@@ -133,6 +185,7 @@ func runOne(
 	ws *workspace.Workspace,
 	stubBin string,
 	timeout time.Duration,
+	tune harness.TuneOptions,
 ) (*harness.Result, []grade.Result, error) {
 	dir, err := ws.RunDir(e.ID, d.Name(), mode, configName, runN)
 	if err != nil {
@@ -182,6 +235,7 @@ func runOne(
 		RecordPath:       recordPath,
 		Timeout:          timeout,
 		StubMode:         stubMode,
+		Tune:             tune,
 	}
 
 	ctx := context.Background()
@@ -312,19 +366,28 @@ func repoRoot() string {
 }
 
 func printRun(harnessName, mode, cfgName string, runN int, r *harness.Result, gr []grade.Result) {
-	pass, total := 0, 0
+	pass, fail, skip := 0, 0, 0
 	for _, x := range gr {
-		total++
-		if x.Passed {
+		switch {
+		case x.Skipped:
+			skip++
+		case x.Passed:
 			pass++
+		default:
+			fail++
 		}
 	}
+	graded := pass + fail
 	abortMark := ""
 	if r.Aborted {
 		abortMark = " [TIMEOUT]"
 	} else if r.ExitCode != 0 {
 		abortMark = fmt.Sprintf(" [exit=%d]", r.ExitCode)
 	}
-	fmt.Printf("  %-12s %-8s %-13s run-%d  %d/%d  %dms  %dt%s\n",
-		harnessName, mode, cfgName, runN, pass, total, r.DurationMS, r.Tokens, abortMark)
+	skipNote := ""
+	if skip > 0 {
+		skipNote = fmt.Sprintf(" (+%d skip)", skip)
+	}
+	fmt.Printf("  %-12s %-8s %-13s run-%d  %d/%d%s  %dms  %dt%s\n",
+		harnessName, mode, cfgName, runN, pass, graded, skipNote, r.DurationMS, r.Tokens, abortMark)
 }

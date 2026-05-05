@@ -34,9 +34,11 @@ type runAggregate struct {
 	Mode      string  `json:"mode"`
 	Config    string  `json:"config"`
 	Runs      int     `json:"runs"`
-	PassedAvg float64 `json:"passed_avg"`  // expectations passed / total, averaged across runs
+	PassedAvg float64 `json:"passed_avg"`  // passed / (passed+failed), excludes skipped
 	Passed    int     `json:"passed"`      // total expectations passed across runs
-	Total     int     `json:"total"`       // total expectations evaluated across runs
+	Failed    int     `json:"failed"`      // total expectations failed across runs
+	Skipped   int     `json:"skipped"`     // judge expectations awaiting Phase 3
+	Total     int     `json:"total"`       // passed + failed + skipped
 	Tokens    int     `json:"tokens"`      // total tokens across runs (sum)
 	Duration  int64   `json:"duration_ms"` // total wall-clock across runs
 	Aborted   int     `json:"aborted"`     // count of aborted runs
@@ -53,6 +55,7 @@ type benchmarkSummary struct {
 type groupSummary struct {
 	PassPct float64 `json:"pass_pct"`
 	Tokens  int     `json:"tokens"`
+	Skipped int     `json:"skipped"` // judge expectations awaiting Phase 3
 }
 
 type benchKey struct {
@@ -84,12 +87,18 @@ func (b *benchmark) add(e spec.Eval, harnessName, mode, configName string, r *ha
 	agg.Runs++
 	for _, x := range gr {
 		agg.Total++
-		if x.Passed {
+		switch {
+		case x.Skipped:
+			agg.Skipped++
+		case x.Passed:
 			agg.Passed++
+		default:
+			agg.Failed++
 		}
 	}
-	if agg.Total > 0 {
-		agg.PassedAvg = float64(agg.Passed) / float64(agg.Total)
+	graded := agg.Passed + agg.Failed
+	if graded > 0 {
+		agg.PassedAvg = float64(agg.Passed) / float64(graded)
 	}
 	if r.Tokens > 0 {
 		agg.Tokens += r.Tokens
@@ -101,26 +110,31 @@ func (b *benchmark) add(e spec.Eval, harnessName, mode, configName string, r *ha
 }
 
 // finalize computes summary fields. Idempotent; safe to call multiple times.
+// Pass-rates exclude skipped (i.e. unwired-judge) expectations: they're
+// reported in the per-case detail but don't deflate the headline number.
 func (b *benchmark) finalize() {
 	stable := append([]*caseAggregate{}, b.Cases...)
 	sort.Slice(stable, func(i, j int) bool { return stable[i].ID < stable[j].ID })
 	b.Cases = stable
 
-	withTotal, withPass, withTokens := 0, 0, 0
-	withoutTotal, withoutPass, withoutTokens := 0, 0, 0
+	withGraded, withPass, withSkipped, withTokens := 0, 0, 0, 0
+	withoutGraded, withoutPass, withoutSkipped, withoutTokens := 0, 0, 0, 0
 	totalRuns := 0
 
 	for _, c := range b.Cases {
 		for _, agg := range c.Runs {
 			totalRuns += agg.Runs
+			graded := agg.Passed + agg.Failed
 			switch agg.Config {
 			case "with_skill":
-				withTotal += agg.Total
+				withGraded += graded
 				withPass += agg.Passed
+				withSkipped += agg.Skipped
 				withTokens += agg.Tokens
 			case "without_skill":
-				withoutTotal += agg.Total
+				withoutGraded += graded
 				withoutPass += agg.Passed
+				withoutSkipped += agg.Skipped
 				withoutTokens += agg.Tokens
 			}
 		}
@@ -128,9 +142,9 @@ func (b *benchmark) finalize() {
 	b.Summary = benchmarkSummary{
 		TotalCases:     len(b.Cases),
 		TotalRuns:      totalRuns,
-		WithSkill:      groupSummary{PassPct: pct(withPass, withTotal), Tokens: withTokens},
-		WithoutSkill:   groupSummary{PassPct: pct(withoutPass, withoutTotal), Tokens: withoutTokens},
-		OverallPassPct: pct(withPass+withoutPass, withTotal+withoutTotal),
+		WithSkill:      groupSummary{PassPct: pct(withPass, withGraded), Tokens: withTokens, Skipped: withSkipped},
+		WithoutSkill:   groupSummary{PassPct: pct(withoutPass, withoutGraded), Tokens: withoutTokens, Skipped: withoutSkipped},
+		OverallPassPct: pct(withPass+withoutPass, withGraded+withoutGraded),
 	}
 }
 
@@ -151,10 +165,10 @@ func (b *benchmark) printSummary() {
 	fmt.Printf("=== Summary ===\n")
 	fmt.Printf("Cases:        %d\n", b.Summary.TotalCases)
 	fmt.Printf("Runs:         %d\n", b.Summary.TotalRuns)
-	fmt.Printf("with_skill    pass-rate: %5.1f%%   tokens: %d\n",
-		b.Summary.WithSkill.PassPct, b.Summary.WithSkill.Tokens)
-	fmt.Printf("without_skill pass-rate: %5.1f%%   tokens: %d\n",
-		b.Summary.WithoutSkill.PassPct, b.Summary.WithoutSkill.Tokens)
+	fmt.Printf("with_skill    pass-rate: %5.1f%%   tokens: %d   skipped: %d\n",
+		b.Summary.WithSkill.PassPct, b.Summary.WithSkill.Tokens, b.Summary.WithSkill.Skipped)
+	fmt.Printf("without_skill pass-rate: %5.1f%%   tokens: %d   skipped: %d\n",
+		b.Summary.WithoutSkill.PassPct, b.Summary.WithoutSkill.Tokens, b.Summary.WithoutSkill.Skipped)
 	if b.Summary.WithSkill.PassPct > 0 || b.Summary.WithoutSkill.PassPct > 0 {
 		delta := b.Summary.WithSkill.PassPct - b.Summary.WithoutSkill.PassPct
 		fmt.Printf("delta (with - without): %+.1fpp\n", delta)

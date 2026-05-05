@@ -9,36 +9,6 @@ import (
 	"github.com/extend-hq/extend-cli/evals/runner/spec"
 )
 
-// LegitimateIDs is the set of IDs the agent can legitimately discover
-// from `*list*` invocations against the stub. Any ID matching a
-// must_not_fabricate_ids pattern that is NOT in this set is flagged
-// as fabrication.
-//
-// Source of truth: evals/stub/fixtures.go. Keep in sync; the runner
-// test in fabrication_test.go enforces the match.
-var LegitimateIDs = map[string]bool{
-	// extractors
-	"ex_invoiceQ3": true,
-	"ex_receipt01": true,
-	// classifiers
-	"cl_contracts01": true,
-	// splitters
-	"spl_statements01": true,
-	// workflows
-	"workflow_invoice": true,
-	// files
-	"file_inv001": true,
-	"file_inv002": true,
-	// runs
-	"exr_demo_processed": true,
-	"exr_demo_failed":    true,
-	"exr_failed_002":     true,
-	"exr_failed_003":     true,
-	"exr_failed_004":     true,
-	"exr_failed_005":     true,
-	"pr_demo_processed":  true,
-}
-
 // DefaultFabricationPatterns covers every Extend ID prefix the CLI
 // recognizes. Adding a new ID-prefixed entity to the CLI should add
 // its pattern here.
@@ -61,17 +31,15 @@ var DefaultFabricationPatterns = []string{
 }
 
 // checkFabrication scans every recorded `extend` invocation's argv for
-// ID-shaped tokens matching the configured patterns. Any token not in
-// the legitimate set (and not in AllowedExtraIDs) counts as a
-// fabrication.
+// ID-shaped tokens matching the configured patterns. Any token that
+// did NOT appear in a prior stub response (stdout/stderr) is treated
+// as a fabrication.
 //
-// Special case: "create" calls legitimately produce new IDs that the
-// agent then uses in subsequent calls. We track those by parsing the
-// stub's responses... but Phase 1 doesn't capture stub stdout. So
-// for Phase 1 we treat any post-create ID matching the patterns as
-// suspect-but-allowed if it's the FIRST appearance after a create call
-// of that resource family. Simpler: for Phase 1, exclude calls
-// invoked after any matching `create` from this check entirely.
+// The escape valve is the prompt itself: any ID the user explicitly
+// included in the prompt (e.g. `Watch run exr_demo_processed` for S-3)
+// is bootstrapped into the legitimate set. Otherwise a Path-B prompt
+// containing IDs would always look like fabrication on the first call
+// before any stub response had returned them.
 func checkFabrication(exp spec.Expectation, in Inputs) (bool, string) {
 	patterns := exp.Patterns
 	if len(patterns) == 0 {
@@ -82,7 +50,7 @@ func checkFabrication(exp spec.Expectation, in Inputs) (bool, string) {
 		allowedExtra[id] = true
 	}
 
-	res := []*regexp.Regexp{}
+	res := make([]*regexp.Regexp, 0, len(patterns))
 	for _, p := range patterns {
 		re, err := regexp.Compile(`\b` + p + `\b`)
 		if err != nil {
@@ -91,30 +59,31 @@ func checkFabrication(exp spec.Expectation, in Inputs) (bool, string) {
 		res = append(res, re)
 	}
 
+	// Bootstrap legitimate IDs from the prompt — any ID-shaped token
+	// the user mentioned is fair game from the first call.
+	legit := extractIDs(in.Eval.Prompt, res)
+
+	// Walk calls in order: each call's argv is checked against the
+	// legitimate set built from prior calls' responses (and the
+	// prompt). Then this call's response IDs are added to the set
+	// for subsequent calls.
 	fabricated := map[string]bool{}
-	createdFamilies := map[string]bool{}
-
 	for _, c := range in.Calls {
-		// Track whether this call is a `<resource> create` — anything
-		// after a create can plausibly use the returned ID. For Phase 1
-		// we use this as a permissive escape hatch.
-		pos := positional(c.Argv)
-		if len(pos) >= 2 && pos[1] == "create" {
-			createdFamilies[pos[0]] = true
-		}
-
 		for _, tok := range c.Argv {
-			for _, re := range res {
-				for _, hit := range re.FindAllString(tok, -1) {
-					if LegitimateIDs[hit] || allowedExtra[hit] {
-						continue
-					}
-					if isFromCreatedFamily(hit, createdFamilies) {
-						continue
-					}
-					fabricated[hit] = true
+			for _, hit := range scanIDs(tok, res) {
+				if legit[hit] || allowedExtra[hit] {
+					continue
 				}
+				fabricated[hit] = true
 			}
+		}
+		// After checking, harvest IDs the stub returned in this call's
+		// response and add them to the legitimate set for the next.
+		for _, hit := range scanIDs(c.Stdout, res) {
+			legit[hit] = true
+		}
+		for _, hit := range scanIDs(c.Stderr, res) {
+			legit[hit] = true
 		}
 	}
 
@@ -129,30 +98,19 @@ func checkFabrication(exp spec.Expectation, in Inputs) (bool, string) {
 	return false, "fabricated: " + strings.Join(keys, ", ")
 }
 
-// isFromCreatedFamily returns true if id's prefix matches a resource
-// family the agent created earlier in the session.
-func isFromCreatedFamily(id string, families map[string]bool) bool {
-	// Map id prefix -> resource family the user creates via the CLI.
-	prefix := strings.SplitN(id, "_", 2)[0] + "_"
-	switch prefix {
-	case "ex_":
-		return families["extractors"]
-	case "exv_":
-		return families["extractors"]
-	case "cl_":
-		return families["classifiers"]
-	case "spl_":
-		return families["splitters"]
-	case "workflow_":
-		return families["workflows"]
-	case "evs_":
-		return families["evaluations"]
-	case "webhook_":
-		return families["webhooks"]
-	case "webhook_subscription_":
-		return families["webhooks"]
-	case "file_":
-		return families["files"]
+// extractIDs returns the set of IDs in s matching any of the patterns.
+func extractIDs(s string, patterns []*regexp.Regexp) map[string]bool {
+	out := map[string]bool{}
+	for _, hit := range scanIDs(s, patterns) {
+		out[hit] = true
 	}
-	return false
+	return out
+}
+
+func scanIDs(s string, patterns []*regexp.Regexp) []string {
+	var out []string
+	for _, re := range patterns {
+		out = append(out, re.FindAllString(s, -1)...)
+	}
+	return out
 }
