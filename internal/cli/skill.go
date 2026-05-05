@@ -227,6 +227,7 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 	}
 
 	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch`.\n\n")
+	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` uses `--schema schema.json` for the values schema.\n\n")
 }
 
 func writeSkillWait(b *strings.Builder) {
