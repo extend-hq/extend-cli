@@ -414,7 +414,6 @@ runs ignore --using, --sort-by, and --sort; workflow runs ignore
 			"--type is required.",
 			"Edit runs are not listable; use 'extend runs get edr_...' for individual edit runs.",
 			"Parse runs ignore --using, --sort-by, and --sort; workflow runs ignore --source and --source-id.",
-			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
 		},
 		SeeAlso: []string{"runs get", "runs watch", "batches get"},
 		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},

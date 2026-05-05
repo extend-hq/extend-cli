@@ -114,10 +114,6 @@ passing the response's nextPageToken to --page-token.
 			{Label: "Next page", Cmd: "extend files list --page-token <token-from-previous-response>"},
 			{Label: "Just IDs", Cmd: "extend files list -o json --jq '.data[].id'"},
 		},
-		Gotchas: []string{
-			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
-			"--all auto-paginates and can exceed agent context budgets; prefer --page-token in scripts.",
-		},
 		SeeAlso: []string{"files upload", "files get", "files delete"},
 		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {

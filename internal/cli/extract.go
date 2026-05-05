@@ -65,7 +65,6 @@ The extraction config can come from one of two sources:
 		Gotchas: []string{
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
 			"--override-config requires --using; it has no effect on inline --config.",
-			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
 		},
 		SeeAlso:  []string{"parse", "classify", "extract batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},

@@ -67,9 +67,6 @@ processor accuracy via 'extend evaluations runs get'.
 			{Label: "Scoped to one processor", Cmd: "extend evaluations list --entity ex_abc --sort-by updatedAt"},
 			{Label: "Next page", Cmd: "extend evaluations list --page-token <token-from-previous-response>"},
 		},
-		Gotchas: []string{
-			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
-		},
 		SeeAlso: []string{"evaluations get", "evaluations create"},
 		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -243,9 +240,6 @@ accuracy score.
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend evaluations items list evs_abc"},
 			{Label: "Next page", Cmd: "extend evaluations items list evs_abc --page-token <token-from-previous-response>"},
-		},
-		Gotchas: []string{
-			"Page tokens are bound to the originating query; repeat the same filter flags on every paginated call.",
 		},
 		SeeAlso: []string{"evaluations get", "evaluations items get", "evaluations items create"},
 		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},

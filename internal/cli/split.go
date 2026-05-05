@@ -59,8 +59,6 @@ the persisted splitter.`,
 		},
 		Gotchas: []string{
 			"--using is required (no inline-config option for split).",
-			"By default the command waits for terminal state. Pass --wait=false to return the run ID immediately.",
-			"On TTY, output is a segments table; pipe or pass -o json for the full run object.",
 		},
 		SeeAlso:  []string{"parse", "split batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
