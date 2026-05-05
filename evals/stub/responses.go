@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,11 +12,15 @@ import (
 // emits TTY-styled output; we emit JSON unconditionally because graders
 // parse stdout directly. Real CLI behaviour differences (TTY vs pipe)
 // don't affect what the agent's harness sees.
+//
+// Writes go through the package-level `stdout` writer (a MultiWriter
+// to real stdout + the recording buffer) so the response is captured
+// in the recording.
 func emitJSON(v any) {
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(os.Stderr, "stub: encode response: %v\n", err)
+		fmt.Fprintf(stderr, "stub: encode response: %v\n", err)
 	}
 }
 
@@ -185,7 +188,17 @@ func emitWorkflowRun(args []string, mode string) {
 
 // emitRunsList is the centerpiece for pagination tests. In paginated
 // mode we split fixtureFailedRuns across pages keyed by --page-token.
+//
+// Mirrors a real-CLI behaviour: --type edit is rejected (the API has
+// no list-edit-runs endpoint). Agents are expected to recognize this
+// and use `runs get edr_xxx` per ID instead.
 func emitRunsList(args []string, mode string) {
+	if flagValue(args, "type") == "edit" {
+		fmt.Fprintln(stderr,
+			"Error: --type edit is not supported (edit runs are not listable; use 'extend runs get edr_...' for individual edit runs)")
+		exitCode = 1
+		return
+	}
 	pageSize := atoiOr(flagValue(args, "page-size"), 0)
 	if pageSize == 0 {
 		pageSize = 3
@@ -288,8 +301,9 @@ func emitRunsCancel(args []string, mode string) {
 	}
 	// Parse runs cannot be cancelled in real life. Mirror that.
 	if strings.HasPrefix(id, "pr_") {
-		fmt.Fprintln(os.Stderr, "Error: parse runs cannot be cancelled (use 'runs delete' to remove the record)")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "Error: parse runs cannot be cancelled (use 'runs delete' to remove the record)")
+		exitCode = 1
+		return
 	}
 	emitJSON(synthesizeRun(id, "CANCELLED"))
 }
@@ -359,8 +373,8 @@ func emitExtractorsGet(args []string, mode string) {
 			return
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Error: extractor %q not found\n", id)
-	os.Exit(1)
+	fmt.Fprintf(stderr, "Error: extractor %q not found\n", id)
+	exitCode = 1
 }
 
 func emitExtractorsCreate(args []string, mode string) {

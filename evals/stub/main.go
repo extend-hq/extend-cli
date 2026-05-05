@@ -27,11 +27,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// stdout and stderr are the writers all emit*() functions go through.
+// main() replaces them with io.MultiWriter(real, &buf) so the per-call
+// response is captured into the recording entry. Tests that exercise
+// emit functions directly default to the real fds.
+var (
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+)
+
+// exitCode is set by emit functions that need to fail (e.g. parse-run
+// cancel attempts). main() reads it after dispatch and propagates via
+// os.Exit so flushRecord runs first.
+var exitCode int
 
 func main() {
 	args := os.Args[1:]
@@ -44,10 +59,28 @@ func main() {
 	// auth_error. Recording is what graders walk over to make assertions.
 	record(args, mode)
 
+	// stdoutBuf/stderrBuf are appended to as emit*() functions write
+	// (via emitJSON, fmt.Fprintln, etc.); flushRecord serializes them
+	// alongside the argv into the recording. The fabrication grader
+	// scans these for legitimate IDs.
+	defer func() {
+		flushRecord(exitCode)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
+
+	// Wire the global stdout/stderr writers to tee output through the
+	// per-call buffers and the real fds. emit functions write through
+	// these so the recording captures responses verbatim.
+	stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
+	stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+
 	switch mode {
 	case "auth_error":
 		emitAuthError()
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	// Dispatch by command shape. Order matters: the most specific
@@ -191,30 +224,72 @@ func hasFlag(args []string, name string) bool {
 }
 
 // record appends one JSONL entry per invocation to EXTEND_EVAL_RECORD.
+// The entry is finalized at process exit so the response (captured
+// stdout) can be included; see the deferred wrap in main().
 func record(args []string, mode string) {
+	if os.Getenv("EXTEND_EVAL_RECORD") == "" {
+		return
+	}
+	currentRecord = &recordEntry{
+		TS:   time.Now().UTC().Format(time.RFC3339Nano),
+		Argv: args,
+		Mode: mode,
+		CWD:  must(os.Getwd()),
+	}
+}
+
+type recordEntry struct {
+	TS       string   `json:"ts"`
+	Argv     []string `json:"argv"`
+	Mode     string   `json:"mode"`
+	CWD      string   `json:"cwd"`
+	ExitCode int      `json:"exit_code"`
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
+}
+
+// currentRecord, stdoutBuf, stderrBuf are populated during dispatch
+// and flushed at process exit. Capturing stdout/stderr is what lets
+// the fabrication grader verify which IDs the agent legitimately saw
+// in prior responses without us tracking it call-by-call.
+var (
+	currentRecord *recordEntry
+	stdoutBuf     strings.Builder
+	stderrBuf     strings.Builder
+)
+
+// flushRecord finalizes the in-progress record entry and appends it
+// to the JSONL file. Idempotent; safe to call multiple times (a
+// no-op after the first call).
+func flushRecord(exitCode int) {
+	if currentRecord == nil {
+		return
+	}
+	currentRecord.ExitCode = exitCode
+	currentRecord.Stdout = stdoutBuf.String()
+	currentRecord.Stderr = stderrBuf.String()
+
 	path := os.Getenv("EXTEND_EVAL_RECORD")
 	if path == "" {
+		currentRecord = nil
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "stub: mkdir record dir: %v\n", err)
+		currentRecord = nil
 		return
-	}
-	entry := map[string]any{
-		"ts":   time.Now().UTC().Format(time.RFC3339Nano),
-		"argv": args,
-		"mode": mode,
-		"cwd":  must(os.Getwd()),
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stub: open record: %v\n", err)
+		currentRecord = nil
 		return
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(entry); err != nil {
+	if err := json.NewEncoder(f).Encode(currentRecord); err != nil {
 		fmt.Fprintf(os.Stderr, "stub: write record: %v\n", err)
 	}
+	currentRecord = nil
 }
 
 func must(s string, err error) string {
@@ -225,12 +300,42 @@ func must(s string, err error) string {
 }
 
 func emitAuthError() {
-	fmt.Fprintln(os.Stderr, "Error: 401 Unauthorized: missing or invalid API key")
-	fmt.Fprintln(os.Stderr, "Hint: set EXTEND_API_KEY in your environment to authenticate.")
+	fmt.Fprintln(stderr, "Error: 401 Unauthorized: missing or invalid API key")
+	fmt.Fprintln(stderr, "Hint: set EXTEND_API_KEY in your environment to authenticate.")
 }
 
+// emitHelp produces a help-shaped string realistic enough for an
+// agent to read and quote when the user asks "what flags does X
+// accept?". The contents intentionally mirror the real CLI's flag
+// set for a few common commands so H-* cases produce useful output.
 func emitHelp() {
-	fmt.Println("extend (eval stub) — fake CLI used by the skill-evals runner")
+	fmt.Println(`extend — Extend document AI CLI (eval stub).
+
+Common commands:
+  extract <input>     Run extraction on a document.
+                        --using <id>           extractor ID
+                        --config <json>        inline config (instead of --using)
+                        --override-config      vary the persisted config for one run
+                        --wait[=true|false]    block until terminal (default: true)
+                        --priority <0-100>     lower = higher priority
+                        --metadata key=value   repeatable
+                        --output-file <path>   write run output (markdown only)
+                        -o, --output <fmt>     json|yaml|raw|id|table|markdown
+                        --jq <expr>            filter output with jq
+                        --workspace <id>       org-scoped key
+                        --region us|us2|eu     region selection
+  extract batch       Run extraction on up to 1,000 inputs at once.
+  parse <input>       Parse a document into raw text/markdown.
+  classify <input>    Classify a document into a category.
+  split <input>       Split a multi-document PDF.
+  edit <input>        Fill PDF form fields via a values schema.
+  run <input>         Run a configured workflow.
+  runs list           List runs of a given type.
+  runs watch <id>     Poll until terminal.
+  runs get <id>       Fetch one run by ID.
+
+Help topics:
+  extend help auth | output | lifecycle | errors`)
 }
 
 func emitUnknown(args []string) {

@@ -89,9 +89,11 @@ type Expectation struct {
 	CountAtLeast   map[string]int        `json:"count_at_least,omitempty"` // verb path -> min count
 
 	// stable_answer
-	Criterion     string `json:"criterion,omitempty"`
-	AnswerPattern string `json:"answer_pattern,omitempty"` // regex; case-insensitive
-	AnswerSubstr  string `json:"answer_substr,omitempty"`  // substring; case-insensitive
+	Criterion            string `json:"criterion,omitempty"`
+	AnswerPattern        string `json:"answer_pattern,omitempty"`          // regex; case-insensitive
+	AnswerSubstr         string `json:"answer_substr,omitempty"`           // substring; case-insensitive
+	AnswerMustNotContain string `json:"answer_must_not_contain,omitempty"` // substring; case-insensitive
+	AnswerMustNotMatch   string `json:"answer_must_not_match,omitempty"`   // regex; case-insensitive
 
 	// must_not_fabricate_ids
 	Patterns        []string `json:"patterns,omitempty"`          // regex patterns of ID shapes to ban
@@ -203,8 +205,9 @@ func (e *Expectation) Validate() error {
 			return fmt.Errorf("extend_call: at least one of must_contain/must_not_contain/count_under/count_at_least required")
 		}
 	case TypeStableAnswer:
-		if e.AnswerPattern == "" && e.AnswerSubstr == "" {
-			return fmt.Errorf("stable_answer: answer_pattern or answer_substr required")
+		if e.AnswerPattern == "" && e.AnswerSubstr == "" &&
+			e.AnswerMustNotContain == "" && e.AnswerMustNotMatch == "" {
+			return fmt.Errorf("stable_answer: answer_pattern, answer_substr, answer_must_not_contain, or answer_must_not_match required")
 		}
 	case TypeMustNotFabricateIDs:
 		if len(e.Patterns) == 0 {

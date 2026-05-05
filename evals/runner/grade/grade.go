@@ -19,21 +19,29 @@ import (
 	"github.com/extend-hq/extend-cli/evals/runner/spec"
 )
 
-// Result is one expectation's verdict.
+// Result is one expectation's verdict. Skipped expectations (e.g.
+// judge expectations before the LLM-judge is wired in Phase 3) are
+// reported but do not count toward pass-rate.
 type Result struct {
 	Text     string               `json:"text"`
 	Passed   bool                 `json:"passed"`
+	Skipped  bool                 `json:"skipped,omitempty"`
 	Evidence string               `json:"evidence"`
 	Type     spec.ExpectationType `json:"type"`
 }
 
 // CallRecord is one stub-recorded `extend` invocation. Mirrors the
-// JSONL written by evals/stub/main.go's record() function.
+// JSONL written by evals/stub/main.go's flushRecord() function. Each
+// call's stdout/stderr is captured so the fabrication grader can
+// scan for legitimate IDs without coupling to fixture details.
 type CallRecord struct {
-	TS   string   `json:"ts"`
-	Argv []string `json:"argv"`
-	Mode string   `json:"mode"`
-	CWD  string   `json:"cwd"`
+	TS       string   `json:"ts"`
+	Argv     []string `json:"argv"`
+	Mode     string   `json:"mode"`
+	CWD      string   `json:"cwd"`
+	ExitCode int      `json:"exit_code"`
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
 }
 
 // Inputs is everything the grader needs to evaluate one run.
@@ -64,8 +72,11 @@ func Grade(in Inputs) []Result {
 		case spec.TypeMustNotFabricateIDs:
 			r.Passed, r.Evidence = checkFabrication(exp, in)
 		case spec.TypeJudge:
-			r.Passed = false
-			r.Evidence = "judge expectations not implemented in Phase 1"
+			// Skipped until the LLM-judge is wired (Phase 3). Skipped
+			// expectations don't count toward pass-rate but are
+			// preserved in grading.json so authors see what's pending.
+			r.Skipped = true
+			r.Evidence = "judge not wired (Phase 3)"
 		default:
 			r.Evidence = fmt.Sprintf("unknown type %q", exp.Type)
 		}
