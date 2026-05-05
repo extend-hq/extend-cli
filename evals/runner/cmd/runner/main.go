@@ -40,7 +40,6 @@ import (
 	"github.com/extend-hq/extend-cli/evals/runner/grade"
 	"github.com/extend-hq/extend-cli/evals/runner/harness"
 	"github.com/extend-hq/extend-cli/evals/runner/spec"
-	"github.com/extend-hq/extend-cli/evals/runner/workspace"
 )
 
 func main() {
@@ -76,16 +75,16 @@ func run() error {
 	if root == "" {
 		root = defaultWorkspaceRoot()
 	}
-	ws, err := workspace.New(root, *iter)
+	ws, err := newWorkspace(root, *iter)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("workspace: %s\n", ws.IterationDir())
+	fmt.Printf("workspace: %s\n", ws.iterationDir())
 
 	// Build the stub binary once into a stable location; we'll add it
 	// to PATH for every harness invocation by symlinking into each
 	// run's stub-bin/ dir as `extend`.
-	stubBin, err := buildStub(ws.IterationDir())
+	stubBin, err := buildStub(ws.iterationDir())
 	if err != nil {
 		return fmt.Errorf("build stub: %w", err)
 	}
@@ -184,12 +183,12 @@ func run() error {
 	close(taskCh)
 	wg.Wait()
 
-	if err := bench.write(ws.BenchmarkPath()); err != nil {
+	if err := bench.write(ws.benchmarkPath()); err != nil {
 		return fmt.Errorf("write benchmark: %w", err)
 	}
 	fmt.Println()
 	bench.printSummary()
-	fmt.Printf("\nbenchmark: %s\n", ws.BenchmarkPath())
+	fmt.Printf("\nbenchmark: %s\n", ws.benchmarkPath())
 	return nil
 }
 
@@ -199,13 +198,13 @@ func runOne(
 	d harness.Driver,
 	e spec.Eval,
 	mode, configName string, runN int,
-	ws *workspace.Workspace,
+	ws *workspace,
 	stubBin string,
 	timeout time.Duration,
 	tune harness.TuneOptions,
 	judgeCfg grade.JudgeConfig,
 ) (*harness.Result, []grade.Result, error) {
-	dir, err := ws.RunDir(e.ID, d.Name(), mode, configName, runN)
+	dir, err := ws.runDir(e.ID, d.Name(), mode, configName, runN)
 	if err != nil {
 		return nil, nil, err
 	}
