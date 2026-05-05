@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-pdf/fpdf"
 )
@@ -33,21 +34,26 @@ func Materialize(dstDir string, names []string) ([]string, error) {
 	return out, nil
 }
 
-// generate dispatches by base name (the path under evals/files/).
+// generate dispatches by basename, accepting variants of the same
+// fixture (invoice2.pdf, invoice_q3.pdf etc. all dispatch to the
+// invoice generator). Variant support lets cases like AP-1 stage a
+// folder of multiple PDFs of the same kind without bespoke generators
+// for each filename.
 func generate(name, path string) error {
-	switch filepath.Base(name) {
-	case "invoice.pdf":
-		return writeInvoicePDF(path)
-	case "contract.pdf":
-		return writeContractPDF(path)
-	case "receipt.pdf":
-		return writeReceiptPDF(path)
-	case "combined.pdf":
-		return writeCombinedPDF(path)
-	case "items.json":
+	base := filepath.Base(name)
+	switch {
+	case base == "items.json":
 		return writeJSON(path, sampleEvaluationItems())
-	case "extractor.json":
+	case base == "extractor.json":
 		return writeJSON(path, sampleExtractorConfig())
+	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "invoice"):
+		return writeInvoicePDF(path)
+	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "contract"):
+		return writeContractPDF(path)
+	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "receipt"):
+		return writeReceiptPDF(path)
+	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "combined"):
+		return writeCombinedPDF(path)
 	default:
 		return fmt.Errorf("no fixture generator for %q", name)
 	}

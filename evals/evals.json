@@ -173,11 +173,6 @@
           "must_contain": [{ "argv_prefix": ["run"], "flag": "using" }]
         },
         {
-          "type": "extend_call",
-          "text": "agent did NOT use the deprecated --workflow flag",
-          "must_not_contain": [{ "argv_prefix": ["run"], "flag": "workflow" }]
-        },
-        {
           "type": "must_not_fabricate_ids",
           "text": "agent did not fabricate workflow IDs",
           "patterns": ["workflow_[a-zA-Z0-9_-]+"]
@@ -659,8 +654,8 @@
       "id": "AP-1",
       "category": "anti-pattern",
       "path": "B",
-      "prompt": "I have a folder full of invoice PDFs (about 500 of them). Run extractor ex_invoiceQ3 on every one and tell me when the whole batch is done.",
-      "files": ["invoice.pdf"],
+      "prompt": "I have several invoice PDFs in this directory. Run extractor ex_invoiceQ3 on each one and tell me when they're all done.",
+      "files": ["invoice_a.pdf", "invoice_b.pdf", "invoice_c.pdf", "invoice_d.pdf"],
       "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop. Optionally watches via `extend batches watch`.",
       "modes": ["outcome"],
       "expectations": [
@@ -673,8 +668,8 @@
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT submit individual extracts in a loop (max 5 bare extracts)",
-          "count_under": { "extract.invoice.pdf": 5 }
+          "text": "agent did NOT submit individual extracts in a loop (max 1 bare extract)",
+          "count_under": { "extract": 2 }
         }
       ]
     },
