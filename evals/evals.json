@@ -243,14 +243,18 @@
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent ran `extend extract invoice.pdf --using ex_invoiceQ3`",
+          "text": "agent ran `extend extract invoice.pdf --using ex_invoiceQ3` (path-tolerant)",
           "must_contain": [
-            { "argv_prefix": ["extract"], "args": ["invoice.pdf", "--using", "ex_invoiceQ3"] }
+            {
+              "argv_prefix": ["extract"],
+              "args_basename": ["invoice.pdf"],
+              "flag_value": { "using": "ex_invoiceQ3" }
+            }
           ]
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT use --all or --config (with --using)",
+          "text": "agent did NOT use --all (anti-pattern)",
           "must_not_contain": [{ "flag": "all" }]
         },
         {

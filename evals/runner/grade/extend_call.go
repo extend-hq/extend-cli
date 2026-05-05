@@ -2,6 +2,7 @@ package grade
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/extend-hq/extend-cli/evals/runner/spec"
@@ -90,6 +91,11 @@ func predicateMatches(p spec.ExtendCallPredicate, c CallRecord) bool {
 			return false
 		}
 	}
+	for _, want := range p.ArgsBasename {
+		if !containsBasename(c.Argv, want) {
+			return false
+		}
+	}
 	if p.Flag != "" {
 		if !hasFlag(c.Argv, p.Flag) {
 			return false
@@ -150,6 +156,18 @@ func hasVerbPrefix(pos, want []string) bool {
 func contains(haystack []string, needle string) bool {
 	for _, h := range haystack {
 		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// containsBasename returns true if any token in haystack has its
+// path basename equal to needle. Used by ExtendCallPredicate.ArgsBasename
+// so an asserted "invoice.pdf" matches both relative and absolute forms.
+func containsBasename(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if filepath.Base(h) == needle {
 			return true
 		}
 	}
