@@ -59,6 +59,7 @@ var descriptionVerbs = []descriptionVerb{
 	{"splitting multi-document bundles into segments", "split"},
 	{"filling PDF forms via a values schema", "edit"},
 	{"running multi-step document AI workflows", "run"},
+	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, workflow_run_)", "runs"},
 }
 
 // disambiguationExamples are concrete user-phrasings the description
@@ -66,12 +67,17 @@ var descriptionVerbs = []descriptionVerb{
 // said "Extend" by name. Per agentskills.io's "be pushy" guidance: the
 // most useful negative-failure case is the user describing the task
 // without the brand name.
+//
+// Include at least one ID-bearing phrasing so the agent recognizes
+// `exr_`/`pr_`/`clr_`/`splr_`/`edr_` as Extend run IDs and doesn't
+// mistake them for Claude Code Task IDs or other tool-specific tokens.
 var disambiguationExamples = []string{
 	`pull line items from these invoices`,
 	`OCR these receipts`,
 	`categorize this contract`,
 	`fill out this PDF form`,
 	`split this combined PDF into individual statements`,
+	`watch run exr_xxx until it finishes`,
 }
 
 // resourceFamily captures one of the four processor families (extractors,
