@@ -152,25 +152,46 @@ func TestRenderSkillIsStable(t *testing.T) {
 	}
 }
 
-// TestRenderSkillSizeBudget asserts the body stays under a soft budget so
-// it fits in agent skill catalogs without summarisation. Agentskills.io
-// recommends ≤5,000 tokens; ~4 chars/token gives a 20,000-byte target.
-// We allow some headroom (30,000) before alarming; the current body is
-// ~16 KB so this is a regression guard, not a tight constraint.
-func TestRenderSkillSizeBudget(t *testing.T) {
+// TestSkillUnderRecommendedTokenBudget enforces the agentskills.io
+// specification's recommended ceiling of ~5,000 tokens for SKILL.md
+// bodies (the spec's progressive-disclosure principle: just the core
+// instructions the agent needs on every run; depth lives behind
+// references/ or — for this skill — `extend help <topic>` and
+// `extend <command> --help`).
+//
+// Tokenizers vary slightly per LLM family; English prose mixed with code
+// runs about 4 chars/token on Anthropic's and OpenAI's tokenizers, so
+// 5,000 tokens corresponds to roughly 20,000 bytes. The constant below
+// is the byte budget; if a future tokenizer audit shows the estimate is
+// off, adjust the byte budget rather than dropping the test.
+//
+// When this test fails, the choices are:
+//  1. Trim or restructure a section (most common — see the catalog and
+//     workflow recipes for highest-leverage cuts).
+//  2. Move detailed reference content behind `extend help <topic>` or
+//     `extend <command> --help`, then update the dig-deeper section to
+//     point the agent there.
+//  3. If the new content is genuinely high-leverage and there is no
+//     better home, raise the budget *deliberately* with a comment
+//     explaining why.
+func TestSkillUnderRecommendedTokenBudget(t *testing.T) {
+	const recommendedTokens = 5000
+	const charsPerToken = 4
+	const recommendedBytes = recommendedTokens * charsPerToken
+
 	body := RenderSkill(RootDoc(testAppForDocs()))
-	const softLimitBytes = 30000
-	if got := len(body); got > softLimitBytes {
-		t.Errorf("skill body grew to %d bytes (soft limit %d). Either trim a section or raise the limit deliberately.", got, softLimitBytes)
+	if got := len(body); got > recommendedBytes {
+		t.Errorf("skill body is %d bytes (~%d tokens at %d chars/token); spec recommends <=%d tokens. Trim a section, move detail behind `extend <cmd> --help`, or raise the budget deliberately.",
+			got, got/charsPerToken, charsPerToken, recommendedTokens)
 	}
 }
 
-// TestRenderSkillLineBudget asserts a soft line budget. Some agent
-// catalog UIs render skill bodies inline; very long bodies hurt
-// browseability. Same shape as the byte budget — guard, not tight rule.
+// TestRenderSkillLineBudget asserts a soft line budget independent of
+// the token budget — some agent catalog UIs render skill bodies inline
+// and browseability degrades past several hundred lines.
 func TestRenderSkillLineBudget(t *testing.T) {
 	body := RenderSkill(RootDoc(testAppForDocs()))
-	const softLimitLines = 600
+	const softLimitLines = 400
 	if got := strings.Count(body, "\n"); got > softLimitLines {
 		t.Errorf("skill body grew to %d lines (soft limit %d).", got, softLimitLines)
 	}
