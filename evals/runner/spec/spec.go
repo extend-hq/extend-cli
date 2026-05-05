@@ -124,13 +124,6 @@ type ExtendCallPredicate struct {
 	// ["--using", "ex_abc"].
 	Args []string `json:"args,omitempty"`
 
-	// ArgsBasename is like Args but compares each argv token by its
-	// path basename, so an asserted "invoice.pdf" matches both the
-	// relative form ("invoice.pdf") and absolute paths
-	// ("/abs/path/to/invoice.pdf"). Use for filename args that the
-	// agent might emit either way.
-	ArgsBasename []string `json:"args_basename,omitempty"`
-
 	// Flag, if set, requires the named long flag to be present.
 	Flag string `json:"flag,omitempty"`
 
