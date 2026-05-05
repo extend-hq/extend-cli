@@ -62,7 +62,8 @@ func run() error {
 		effort      = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
 		fastMode    = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
 		noJudge     = flag.Bool("no-judge", false, "skip LLM-judge expectations (no Anthropic API calls); judge expectations report Skipped")
-		judgeModel  = flag.String("judge-model", "claude-opus-4-5", "model used by the LLM judge for `judge` expectations")
+		judgeModel  = flag.String("judge-model", "claude-opus-4-7", "model used by the LLM judge for `judge` expectations")
+		judgeEffort = flag.String("judge-effort", "low", "effort level for the judge: low|medium|high|xhigh|max (low recommended; judging is a simple classification task)")
 	)
 	flag.Parse()
 
@@ -132,11 +133,12 @@ func run() error {
 
 	judgeCfg := grade.JudgeFromEnv()
 	judgeCfg.Model = *judgeModel
+	judgeCfg.Effort = *judgeEffort
 	if *noJudge {
 		judgeCfg.Disabled = true
 	}
 
-	judgeNote := "judge=" + judgeCfg.Model
+	judgeNote := fmt.Sprintf("judge=%s effort=%s", judgeCfg.Model, judgeCfg.Effort)
 	switch {
 	case judgeCfg.Disabled:
 		judgeNote = "judge=disabled"

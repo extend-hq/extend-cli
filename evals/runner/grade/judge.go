@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +25,7 @@ type JudgeConfig struct {
 	Disabled bool
 	APIKey   string        // ANTHROPIC_API_KEY; required when Disabled is false
 	Model    string        // model ID, e.g. "claude-opus-4-7"
+	Effort   string        // "low" | "medium" | "high" | "xhigh" | "max"; defaults to "low" for judging
 	BaseURL  string        // optional override, defaults to "https://api.anthropic.com"
 	Timeout  time.Duration // per-call timeout; defaults to 60s
 	Client   *http.Client  // optional override (tests inject a stub)
@@ -33,10 +33,17 @@ type JudgeConfig struct {
 
 // JudgeFromEnv builds a JudgeConfig from environment defaults. The
 // runner calls this and then optionally overrides via flags.
+//
+// Defaults:
+//   - Model: claude-opus-4-7 (consistent rubric across both harness outputs).
+//   - Effort: low. Judging "did the agent's prose match this criterion?"
+//     is a simple classification, not deep reasoning — Opus 4.7 at low
+//     effort scopes its work to what was asked and runs much faster.
 func JudgeFromEnv() JudgeConfig {
 	return JudgeConfig{
 		APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		Model:   "claude-opus-4-5", // judge default; consistent rubric across both harness outputs
+		Model:   "claude-opus-4-7",
+		Effort:  "low",
 		BaseURL: "https://api.anthropic.com",
 		Timeout: 60 * time.Second,
 	}
@@ -44,7 +51,7 @@ func JudgeFromEnv() JudgeConfig {
 
 // checkJudge dispatches a judge expectation to the Anthropic Messages
 // API and returns the verdict. Any infrastructure failure (no API key,
-// network error, malformed response) returns Passed=false with an
+// network error, schema mismatch) returns Passed=false with an
 // explanatory evidence string — so a flaky judge never silently passes
 // a case.
 func checkJudge(exp spec.Expectation, in Inputs, cfg JudgeConfig) (passed bool, skipped bool, evidence string) {
@@ -66,26 +73,41 @@ func checkJudge(exp spec.Expectation, in Inputs, cfg JudgeConfig) (passed bool, 
 	return verdict.Passed, false, verdict.Evidence
 }
 
-// JudgeVerdict is the structured response shape the model is asked to
-// emit. Mirrors skill-creator's three-field record but flattened for
-// JSON parsing.
+// JudgeVerdict is the structured response shape the model emits, bound
+// by output_config.format on the API call. Structured outputs guarantee
+// the response is valid JSON matching this shape — no parsing fallback
+// needed.
 type JudgeVerdict struct {
 	Passed   bool   `json:"passed"`
 	Evidence string `json:"evidence"`
+}
+
+// judgeOutputSchema is the JSON Schema we hand to the API. The schema's
+// description fields are visible to the model and reinforce the
+// verbatim-quote rule from the prompt.
+var judgeOutputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"passed": map[string]any{
+			"type":        "boolean",
+			"description": "true if the agent's response satisfies the criterion; false otherwise.",
+		},
+		"evidence": map[string]any{
+			"type":        "string",
+			"description": "A short verbatim quote from the agent's final message OR a literal `extend ...` argv from the invocations list. Never a paraphrase.",
+		},
+	},
+	"required":             []string{"passed", "evidence"},
+	"additionalProperties": false,
 }
 
 // buildJudgePrompt assembles the judge prompt. Modelled on
 // skill-creator/agents/grader.md: the judge sees the user's prompt,
 // the eval's expected behaviour, the criterion to verify, the agent's
 // final message, and a compact summary of every `extend` call the
-// agent made. The judge is asked to emit a single JSON object.
-//
-// Discipline rules:
-//   - Evidence MUST be a verbatim quote from the agent's response,
-//     not a summary.
-//   - The judge must apply the discriminating-assertion test: if the
-//     verdict would also pass for a clearly wrong response, return
-//     Passed=false.
+// agent made. Structured outputs guarantee the response shape; the
+// prompt focuses on the discriminating-assertion rule and the
+// verbatim-quote constraint.
 func buildJudgePrompt(exp spec.Expectation, in Inputs) string {
 	var b strings.Builder
 	b.WriteString("You are a strict grader for an AI coding agent's response to a CLI-related prompt.\n\n")
@@ -115,25 +137,22 @@ func buildJudgePrompt(exp spec.Expectation, in Inputs) string {
 		b.WriteString("(The agent made no `extend` invocations.)\n\n")
 	}
 
-	b.WriteString("OUTPUT FORMAT — reply with a single JSON object on its own line:\n")
-	b.WriteString(`{"passed": true|false, "evidence": "<short verbatim quote or fact>"}` + "\n\n")
 	b.WriteString("RULES:\n")
 	b.WriteString("- `evidence` MUST be a verbatim quote from the agent's final message, OR a literal `extend ...` argv from the invocations list. Never paraphrase.\n")
 	b.WriteString("- Apply the discriminating-assertion test: if your `passed` verdict would also pass for a clearly wrong agent response, you're being too lenient — return `passed: false`.\n")
 	b.WriteString("- If the criterion is unverifiable from the available evidence, return `passed: false` with evidence explaining what's missing.\n")
-	b.WriteString("- Output only the JSON object. No prose, no markdown fence.\n")
 
 	return b.String()
 }
 
 // callJudge POSTs the prompt to the Anthropic Messages API and parses
-// the assistant response as a JudgeVerdict. The API surface is held
-// stable enough by anthropic-version=2023-06-01 that this single-shot
-// client doesn't need a vendor SDK.
+// the assistant response as a JudgeVerdict. Uses structured outputs
+// (output_config.format) so the response is guaranteed to be valid
+// JSON matching judgeOutputSchema — no regex / fallback parsing.
 func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 	model := cfg.Model
 	if model == "" {
-		model = "claude-opus-4-5"
+		model = "claude-opus-4-7"
 	}
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
@@ -148,9 +167,20 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 		client = &http.Client{Timeout: timeout}
 	}
 
+	outputConfig := map[string]any{
+		"format": map[string]any{
+			"type":   "json_schema",
+			"schema": judgeOutputSchema,
+		},
+	}
+	if cfg.Effort != "" {
+		outputConfig["effort"] = cfg.Effort
+	}
+
 	body := map[string]any{
-		"model":      model,
-		"max_tokens": 512,
+		"model":         model,
+		"max_tokens":    1024,
+		"output_config": outputConfig,
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
 		},
@@ -182,7 +212,7 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, snippetN(string(respBody), 200))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, snippetN(string(respBody), 240))
 	}
 
 	var apiResp struct {
@@ -206,34 +236,12 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 		return nil, errors.New("empty assistant response")
 	}
 
-	verdict, err := parseVerdict(text)
-	if err != nil {
-		return nil, fmt.Errorf("parse verdict %q: %w", snippetN(text, 200), err)
-	}
-	return verdict, nil
-}
-
-// parseVerdict tolerates a few model-side quirks: leading/trailing
-// prose, a code-fenced JSON object, or a bare JSON object.
-func parseVerdict(s string) (*JudgeVerdict, error) {
-	s = strings.TrimSpace(s)
-	// Strip code fences if present.
-	if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```json")
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
-	}
-	// If extra prose surrounds the JSON, isolate the first {...} run.
-	if !strings.HasPrefix(s, "{") {
-		re := regexp.MustCompile(`(?s)\{[^{}]*"passed"[^{}]*\}`)
-		if m := re.FindString(s); m != "" {
-			s = m
-		}
-	}
+	// Structured outputs guarantee text is JSON matching judgeOutputSchema —
+	// no parser fallback needed. Surface decode errors loudly if the
+	// guarantee ever breaks.
 	var v JudgeVerdict
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return nil, err
+	if err := json.Unmarshal([]byte(text), &v); err != nil {
+		return nil, fmt.Errorf("decode structured verdict %q: %w", snippetN(text, 240), err)
 	}
 	return &v, nil
 }
