@@ -1,7 +1,8 @@
-// Package workspace owns the on-disk layout of a single eval run. The
-// layout follows skill-creator's iteration-N convention so per-run
-// artifacts are easy to navigate by humans and aggregable by the
-// benchmark step:
+package main
+
+// On-disk layout for one runner invocation. Mirrors skill-creator's
+// iteration-N convention so per-run artifacts are easy to navigate
+// by humans and aggregable by the benchmark step:
 //
 //	<root>/iteration-<N>/
 //	  eval-<id>/
@@ -18,7 +19,6 @@
 //	            home/                         agent's HOME (skill installed here)
 //	            stub-bin/                     compiled stub on PATH
 //	  benchmark.json                          aggregated rollup
-package workspace
 
 import (
 	"fmt"
@@ -28,15 +28,15 @@ import (
 	"time"
 )
 
-// Workspace is the top-level container for one runner invocation.
-type Workspace struct {
+// workspace is the top-level container for one runner invocation.
+type workspace struct {
 	Root      string // absolute path to the workspace root
 	Iteration int    // iteration number (auto-incremented if --iteration unspecified)
 }
 
-// New picks the next iteration number under root and prepares the dir.
-// Pass iter > 0 to force a specific iteration label.
-func New(root string, iter int) (*Workspace, error) {
+// newWorkspace picks the next iteration number under root and prepares
+// the iteration dir. Pass iter > 0 to force a specific iteration label.
+func newWorkspace(root string, iter int) (*workspace, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("abs %s: %w", root, err)
@@ -47,29 +47,25 @@ func New(root string, iter int) (*Workspace, error) {
 	if iter == 0 {
 		iter = nextIteration(abs)
 	}
-	w := &Workspace{Root: abs, Iteration: iter}
-	if err := os.MkdirAll(w.IterationDir(), 0o755); err != nil {
+	w := &workspace{Root: abs, Iteration: iter}
+	if err := os.MkdirAll(w.iterationDir(), 0o755); err != nil {
 		return nil, err
 	}
 	return w, nil
 }
 
-// IterationDir is the iteration-N directory under Root.
-func (w *Workspace) IterationDir() string {
+// iterationDir is the iteration-N directory under Root.
+func (w *workspace) iterationDir() string {
 	return filepath.Join(w.Root, fmt.Sprintf("iteration-%d", w.Iteration))
 }
 
-// EvalDir returns the per-eval dir under the iteration.
-func (w *Workspace) EvalDir(evalID string) string {
-	return filepath.Join(w.IterationDir(), "eval-"+evalID)
-}
-
-// RunDir returns the leaf dir for one harness x mode x config x run-n
-// invocation. Creates the dir if it doesn't exist.
-func (w *Workspace) RunDir(evalID, harness, mode, config string, runN int) (string, error) {
+// runDir returns the leaf dir for one harness × mode × config × run-n
+// invocation. Creates the dir and its scratch/home/stub-bin children.
+func (w *workspace) runDir(evalID, harnessName, mode, configName string, runN int) (string, error) {
 	dir := filepath.Join(
-		w.EvalDir(evalID),
-		harness, mode, config,
+		w.iterationDir(),
+		"eval-"+evalID,
+		harnessName, mode, configName,
 		fmt.Sprintf("run-%d", runN),
 	)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -83,9 +79,9 @@ func (w *Workspace) RunDir(evalID, harness, mode, config string, runN int) (stri
 	return dir, nil
 }
 
-// BenchmarkPath is where the aggregator writes the rollup.
-func (w *Workspace) BenchmarkPath() string {
-	return filepath.Join(w.IterationDir(), "benchmark.json")
+// benchmarkPath is where the aggregator writes the rollup.
+func (w *workspace) benchmarkPath() string {
+	return filepath.Join(w.iterationDir(), "benchmark.json")
 }
 
 // nextIteration returns the lowest unused iteration number under root.
