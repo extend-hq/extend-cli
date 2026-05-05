@@ -57,8 +57,8 @@ See `evals/AGENTS.md` for the full authoring contract. Short version:
    context; tests command shape).
 2. Add an entry to `evals.json` with `id`, `category`, `path`,
    `prompt`, `files`, `modes`, and `expectations`.
-3. Stage any new fixture inputs in `runner/fixtures/fixtures.go` —
-   fixtures are generated on demand at run time, not committed.
+3. Stage any new fixture inputs in `runner/fixtures/fixtures.go`.
+   Fixtures are generated on demand at run time, not committed.
 4. Run the case once locally: `go run ./cmd/runner -cases <ID>
    -harnesses claude_code -runs 1`.
 5. Iterate on the expectations until they match the agent's actual
@@ -77,8 +77,4 @@ Bump `-runs 3` for stddev estimation; cost scales linearly. Use
 `-cases X,Y,Z` and `-harnesses claude_code` to scope down during
 development.
 
-## Status
 
-Phase 1 ships 4 representative cases (T+1, T-1, S-1, P-1) and the
-runner skeleton. The full ~32-case roster lands in Phase 2; see
-`TODO.md` for the schedule.

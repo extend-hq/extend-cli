@@ -88,14 +88,14 @@ Run `extend <command> --help` for flags.
 ## Use with coding agents
 
 The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
-agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, …) to
-use `extend` correctly without you having to spell out every command.
+agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, etc.)
+to use `extend` correctly without you having to spell out every command.
 
 Install to the cross-client default path:
 
     extend skill install
 
-This writes `~/.agents/skills/extend/SKILL.md` — the path Codex,
+This writes `~/.agents/skills/extend/SKILL.md`, the path Codex,
 OpenCode, Cursor, and most other harnesses look at. Claude Code reads
 from `~/.claude/skills/` instead, so point `--target` at it:
 
@@ -105,7 +105,7 @@ Or print the body to stdout and redirect wherever you want:
 
     extend skill > /path/to/SKILL.md
 
-The skill is a pure function of the CLI's doc tree — re-run
+The skill is a pure function of the CLI's doc tree, so re-run
 `extend skill install` after upgrading to pick up new commands and
 flag changes.
 
