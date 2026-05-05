@@ -141,12 +141,12 @@ func TestWorkflowRun_AsyncLifecycle(t *testing.T) {
 
 	submitRes := runExtend(t, env,
 		"run", "testdata/sample.txt",
-		"--workflow", workflowID,
+		"--using", workflowID,
 		"--wait",
 		"--timeout", "5m",
 		"-o", "json",
 	)
-	submitRes.requireOK(t, "run", "--workflow", workflowID)
+	submitRes.requireOK(t, "run", "--using", workflowID)
 
 	var run map[string]any
 	submitRes.decodeJSON(t, &run)
@@ -221,10 +221,10 @@ func TestWorkflowBatch_ReturnsBatchID(t *testing.T) {
 	res := runExtend(t, env,
 		"run", "batch",
 		"testdata/sample.txt", "testdata/sample.txt",
-		"--workflow", workflowID,
+		"--using", workflowID,
 		"-o", "json",
 	)
-	res.requireOK(t, "run", "batch", "--workflow", workflowID)
+	res.requireOK(t, "run", "batch", "--using", workflowID)
 
 	var got map[string]any
 	res.decodeJSON(t, &got)
@@ -357,7 +357,7 @@ func TestWorkflowRun_UpdateMetadata(t *testing.T) {
 	// accepts in-flight runs.
 	submitRes := runExtend(t, env,
 		"run", "testdata/sample.txt",
-		"--workflow", workflowID,
+		"--using", workflowID,
 		"-o", "json",
 	)
 	submitRes.requireOK(t, "run")
