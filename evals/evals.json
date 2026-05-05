@@ -105,6 +105,7 @@
       "files": ["contract.pdf"],
       "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one. The prompt deliberately omits the file path; the agent should glance at the working directory.",
       "modes": ["outcome"],
+      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone — needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
       "expectations": [
         { "type": "skill_activates", "skill": "extend", "text": "skill is activated" },
         {
