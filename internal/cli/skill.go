@@ -55,11 +55,12 @@ type descriptionVerb struct {
 var descriptionVerbs = []descriptionVerb{
 	{"extracting structured data from PDFs or images", "extract"},
 	{"parsing documents to text or markdown", "parse"},
-	{"classifying documents into configured categories", "classify"},
+	{"classifying or identifying the type of a document (e.g. telling MSA from SOW from NDA)", "classify"},
 	{"splitting multi-document bundles into segments", "split"},
 	{"filling PDF forms via a values schema", "edit"},
 	{"running multi-step document AI workflows", "run"},
 	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, workflow_run_)", "runs"},
+	{"uploading documents to an Extend workspace and managing the resulting file_xxx IDs", "files"},
 }
 
 // disambiguationExamples are concrete user-phrasings the description
@@ -184,6 +185,7 @@ func RenderSkill(root *CommandDoc) string {
 	writeSkillFrontmatter(&b)
 	writeSkillAuth(&b)
 	writeSkillPickActions(&b, root)
+	writeSkillActiveBehaviour(&b)
 	writeSkillWait(&b)
 	writeSkillPagination(&b)
 	writeSkillWorkflows(&b)
@@ -191,6 +193,19 @@ func RenderSkill(root *CommandDoc) string {
 	writeSkillTopics(&b, root)
 
 	return b.String()
+}
+
+// writeSkillActiveBehaviour documents how the agent should behave once
+// this skill is loaded. These are not command-shape rules — they're
+// shell-agent disposition rules that fire on every prompt while the
+// skill is active. Keep this section short and generic; if a rule
+// only applies to one command, put it on that command's `Gotchas`
+// instead.
+func writeSkillActiveBehaviour(b *strings.Builder) {
+	b.WriteString("## When this skill is active\n\n")
+	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
+	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
+	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n\n")
 }
 
 func writeSkillFrontmatter(b *strings.Builder) {
