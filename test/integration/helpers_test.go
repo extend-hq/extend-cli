@@ -81,15 +81,6 @@ func requireRunOps(t *testing.T) {
 	}
 }
 
-// requireDestructive gates tests that mutate shared/long-lived resources.
-// Set EXTEND_TEST_DESTRUCTIVE=1 only against ephemeral test environments.
-func requireDestructive(t *testing.T) {
-	t.Helper()
-	if os.Getenv("EXTEND_TEST_DESTRUCTIVE") != "1" {
-		t.Skip("EXTEND_TEST_DESTRUCTIVE != 1; skipping destructive update test")
-	}
-}
-
 // itestName generates a resource name unique to one test invocation.
 //
 // The format is `cli-itest-<sanitized-test>-<unix-ms>`. The sanitized test

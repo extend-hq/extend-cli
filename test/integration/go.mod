@@ -12,9 +12,7 @@
 //
 // Tests skip silently when EXTEND_BASE_URL or EXTEND_API_KEY are unset.
 // Run-creating ops (extract/parse/classify/split/edit/workflow runs) cost
-// credits and are gated behind EXTEND_TEST_RUN_OPS=1. Updates to existing
-// shared resources are gated behind EXTEND_TEST_DESTRUCTIVE=1; do not set
-// that against a production workspace.
+// credits and are gated behind EXTEND_TEST_RUN_OPS=1.
 module github.com/extend-hq/extend-cli/test/integration
 
 go 1.26.2
