@@ -8,9 +8,9 @@ name: skill-evals
 # Required repository secrets:
 #   ANTHROPIC_API_KEY — used by Claude Code (the harness) AND by the
 #                       LLM judge (Opus 4.7 by default).
-#   OPENAI_API_KEY    — used by Codex (no ChatGPT login in CI; the
-#                       CLI falls back to API-key auth when this env
-#                       var is set).
+#   OPENAI_API_KEY    — used by Codex; the workflow exports it as
+#                       CODEX_API_KEY so codex exec authenticates
+#                       without writing auth.json to disk.
 on:
   workflow_dispatch:
     inputs:
@@ -59,7 +59,12 @@ jobs:
     timeout-minutes: 60
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Codex CLI does not consult OPENAI_API_KEY at runtime — auth is
+      # read from $CODEX_HOME/auth.json or, undocumented but in-tree at
+      # codex-rs/login/src/auth/manager.rs, from CODEX_API_KEY in env.
+      # We set the env var so codex exec can authenticate without
+      # writing the key to disk.
+      CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Pin the workspace inside the runner so artifact upload is
       # straightforward; the runner accepts any path via -workspace.
       EVAL_WORKSPACE: ${{ github.workspace }}/skill-evals-workspace
@@ -70,7 +75,7 @@ jobs:
         run: |
           missing=""
           [ -z "$ANTHROPIC_API_KEY" ] && missing="$missing ANTHROPIC_API_KEY"
-          [ -z "$OPENAI_API_KEY" ]    && missing="$missing OPENAI_API_KEY"
+          [ -z "$CODEX_API_KEY" ]     && missing="$missing OPENAI_API_KEY"
           if [ -n "$missing" ]; then
             echo "::error::Missing required repo secret(s):$missing"
             exit 1
