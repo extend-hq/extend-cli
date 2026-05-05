@@ -19,6 +19,9 @@ func baseEnv(opts RunOptions) []string {
 		// model-side auth.
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
 		"OPENAI_API_KEY",
+		// CODEX_API_KEY is the runtime env-var auth path consulted by
+		// codex exec when there's no auth.json. See workflow comment.
+		"CODEX_API_KEY",
 		"CODEX_HOME",
 	}
 	out := []string{}
