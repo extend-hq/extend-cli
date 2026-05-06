@@ -29,11 +29,16 @@ func renderWithDefault(app *App, payload any, defaultFormat output.Format) error
 // renderList picks the right renderer for a paginated list result based on
 // --output:
 //
-//	-o table        -> tabwriter table (regardless of TTY)
+//	-o table        -> tabwriter table (the default)
 //	-o markdown     -> GitHub-flavored markdown pipe table
 //	-o json/yaml/raw/id -> falls through to renderWithDefault on the raw payload
-//	no -o, TTY      -> tabwriter table (preserves the historical default)
-//	no -o, non-TTY  -> JSON (script-friendly default)
+//	no -o           -> tabwriter table (regardless of TTY); pass -o json for
+//	                   machine-readable output
+//
+// Format selection deliberately ignores stdout-TTY state so agent
+// harnesses (which always pipe stdout) get the same human-readable
+// defaults a user would see in a terminal. Color is gated separately
+// via ColorEnabled() so piped consumers don't get ANSI escapes.
 //
 // pages is the slice of API page objects collected by the list command;
 // it is unwrapped to the single page when len==1 so json/yaml output for a
@@ -67,11 +72,11 @@ func renderListForCmd(cmd *cobra.Command, app *App, pages []any, headers []strin
 	case app.Format == "":
 		switch {
 		case app.JQ != "":
+			// --jq operates on JSON; setting it implicitly opts into
+			// JSON output regardless of the TTY default.
 			renderErr = renderWithDefault(app, raw, output.FormatJSON)
-		case app.IO.IsStdoutTTY():
-			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
 		default:
-			renderErr = renderWithDefault(app, raw, output.FormatJSON)
+			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
 		}
 	default:
 		parsed, err := output.ParseFormat(app.Format)

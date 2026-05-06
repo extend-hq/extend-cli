@@ -171,7 +171,7 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 }
 
 func renderSplitResult(app *App, run *client.SplitRun) error {
-	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	if run.Output == nil || len(run.Output.Splits) == 0 {
