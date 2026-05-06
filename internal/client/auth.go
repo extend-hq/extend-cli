@@ -26,6 +26,7 @@ const (
 	EnvWorkspaceID   = "EXTEND_WORKSPACE_ID"
 	EnvAPIVersion    = "EXTEND_API_VERSION"
 	EnvWebhookSecret = "EXTEND_WEBHOOK_SECRET"
+	EnvDebug         = "EXTEND_DEBUG"
 )
 
 // EnvVars enumerates every environment variable the CLI consults. Order is
@@ -38,4 +39,5 @@ var EnvVars = []EnvVarSpec{
 	{Name: EnvWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
 	{Name: EnvAPIVersion, Description: "Pin the API version sent with each request. Defaults to " + DefaultAPIVersion + "."},
 	{Name: EnvWebhookSecret, Description: "Default signing secret used by 'extend webhooks verify'."},
+	{Name: EnvDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 }

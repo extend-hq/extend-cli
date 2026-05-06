@@ -54,6 +54,12 @@ type Client struct {
 	APIVersion  string
 	WorkspaceID string
 	HTTP        *http.Client
+
+	// Debug, when non-nil, receives one log line per HTTP request and
+	// response. Used by `--debug` and EXTEND_DEBUG=1. The Authorization
+	// header is redacted; bodies are logged only on error responses
+	// (they typically include the server-side error message).
+	Debug io.Writer
 }
 
 func New(apiKey string) *Client {
@@ -109,15 +115,90 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+
+	c.debugRequest(req)
+	start := time.Now()
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		c.debugTransportErr(method, c.BaseURL+path, time.Since(start), err)
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		return nil, decodeError(resp)
+		apiErr := decodeError(resp)
+		c.debugResponseErr(method, c.BaseURL+path, resp, time.Since(start), apiErr)
+		return nil, apiErr
 	}
+	c.debugResponse(method, c.BaseURL+path, resp, time.Since(start))
 	return resp, nil
+}
+
+// debugRequest logs the outbound request: method, URL, content-length,
+// and the workspace header. Authorization is never logged. Called only
+// when Debug is non-nil; callers don't have to guard themselves.
+func (c *Client) debugRequest(req *http.Request) {
+	if c.Debug == nil {
+		return
+	}
+	contentLen := req.ContentLength
+	wsTag := ""
+	if v := req.Header.Get("X-Extend-Workspace-Id"); v != "" {
+		wsTag = " workspace=" + v
+	}
+	fmt.Fprintf(c.Debug, "extend [debug] → %s %s (body=%dB)%s\n",
+		req.Method, req.URL.String(), max64(contentLen, 0), wsTag)
+}
+
+// debugResponse logs a successful response: status, request id, latency.
+// Body byte count when known via Content-Length.
+func (c *Client) debugResponse(method, url string, resp *http.Response, dur time.Duration) {
+	if c.Debug == nil {
+		return
+	}
+	rid := resp.Header.Get("x-extend-request-id")
+	clen := resp.Header.Get("content-length")
+	bodyTag := ""
+	if clen != "" {
+		bodyTag = " body=" + clen + "B"
+	}
+	fmt.Fprintf(c.Debug, "extend [debug] ← %s %s %d (req=%s, %s)%s\n",
+		method, url, resp.StatusCode, requestIDOrPlaceholder(rid), dur.Round(time.Millisecond), bodyTag)
+}
+
+// debugResponseErr logs an error response: status, request id, latency,
+// and the server's error message (which is short — it's already an
+// APIError struct from decodeError).
+func (c *Client) debugResponseErr(method, url string, resp *http.Response, dur time.Duration, apiErr error) {
+	if c.Debug == nil {
+		return
+	}
+	rid := resp.Header.Get("x-extend-request-id")
+	fmt.Fprintf(c.Debug, "extend [debug] ← %s %s %d (req=%s, %s) error: %v\n",
+		method, url, resp.StatusCode, requestIDOrPlaceholder(rid), dur.Round(time.Millisecond), apiErr)
+}
+
+// debugTransportErr logs a transport-level failure (timeout, DNS, TLS).
+// No request ID is available because no response came back.
+func (c *Client) debugTransportErr(method, url string, dur time.Duration, err error) {
+	if c.Debug == nil {
+		return
+	}
+	fmt.Fprintf(c.Debug, "extend [debug] ✗ %s %s (%s) transport error: %v\n",
+		method, url, dur.Round(time.Millisecond), err)
+}
+
+func requestIDOrPlaceholder(rid string) string {
+	if rid == "" {
+		return "-"
+	}
+	return rid
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func decodeError(resp *http.Response) error {

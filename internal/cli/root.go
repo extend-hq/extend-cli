@@ -22,6 +22,7 @@ type App struct {
 	JQ        string
 	Workspace string
 	Region    string
+	Debug     bool
 }
 
 // RootDoc returns the typed documentation tree rooted at the `extend`
@@ -106,6 +107,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&app.JQ, "jq", "", "Filter output with a jq expression")
 	root.PersistentFlags().StringVar(&app.Workspace, "workspace", "", "Workspace ID for org-scoped API keys (or EXTEND_WORKSPACE_ID)")
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
+	root.PersistentFlags().BoolVar(&app.Debug, "debug", false, "Log every HTTP request to stderr (or EXTEND_DEBUG=1)")
 
 	app.NewClient = func() (*client.Client, error) {
 		key := os.Getenv(client.EnvAPIKey)
@@ -138,12 +140,31 @@ func NewRoot() *cobra.Command {
 		}
 		c.WorkspaceID = ws
 
+		// Debug logging: --debug flag wins; otherwise honor EXTEND_DEBUG.
+		// Truthy values: "1", "true", "yes", "on" (case-insensitive).
+		if app.Debug || debugEnvTruthy(os.Getenv(client.EnvDebug)) {
+			c.Debug = app.IO.ErrOut
+		}
+
 		return c, nil
 	}
 
 	root.AddCommand(newVersionCommand(app))
 	installHelpTemplate(root)
 	return root
+}
+
+// debugEnvTruthy reports whether EXTEND_DEBUG should enable debug
+// logging. Treats "1", "true", "yes", "on" (case-insensitive) as on,
+// and the empty string or "0"/"false"/"no"/"off" as off. Anything else
+// is treated as on so a user-typed value isn't silently ignored.
+func debugEnvTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func Execute() int {
