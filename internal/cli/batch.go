@@ -541,7 +541,7 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 // which is `{batchId}` only — there's no run count, status, or createdAt
 // like in processor/parse batches.
 func renderWorkflowBatchSubmitted(app *App, resp *client.WorkflowBatchResponse, runCount int) error {
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" {
 		return renderWithDefault(app, resp, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)
@@ -553,7 +553,7 @@ func renderWorkflowBatchSubmitted(app *App, resp *client.WorkflowBatchResponse, 
 }
 
 func renderBatchSubmitted(app *App, br *client.BatchRun) error {
-	if app.Format != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" {
 		return renderWithDefault(app, br, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)

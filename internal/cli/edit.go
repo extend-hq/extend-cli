@@ -236,7 +236,7 @@ func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileI
 }
 
 func renderEditResult(app *App, run *client.EditRun) error {
-	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)

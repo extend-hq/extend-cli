@@ -315,8 +315,10 @@ func TestWebhooksEndpointsList_Empty(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if !strings.Contains(ta.out.String(), `"data":[]`) {
-		t.Errorf("expected empty list JSON, got: %s", ta.out.String())
+	// Default output is the empty-message text (no -o flag passed); pass
+	// -o json explicitly when machine-readable output is needed.
+	if !strings.Contains(ta.out.String(), "No webhook endpoints") {
+		t.Errorf("expected empty-list message, got: %s", ta.out.String())
 	}
 }
 

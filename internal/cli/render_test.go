@@ -15,6 +15,94 @@ type fakePage struct {
 	NextPageToken string
 }
 
+// TestRenderListDefault_TableEvenWhenPiped guards the format-default
+// flip: with no -o flag and no --jq, rendering MUST produce the
+// human-readable table even when stdout isn't a TTY (i.e. when the
+// process is being driven by an agent harness that captures stdout).
+// JSON is only chosen when explicitly requested via -o or implied by
+// --jq.
+func TestRenderListDefault_TableEvenWhenPiped(t *testing.T) {
+	ios, _, out, _ := iostreams.Test()
+	// Both streams left as non-TTY (the default), simulating a pipe.
+	app := &App{IO: ios}
+
+	pages := []any{fakePage{NextPageToken: ""}}
+	rows := [][]string{{"ex_abc", "Q3 invoices", "2026-04-30"}}
+	if err := renderList(app, pages, []string{"id", "name", "created"}, rows, "none"); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	got := out.String()
+	// Table output contains the column names (uppercased by the table
+	// renderer) and the row values.
+	if !strings.Contains(strings.ToLower(got), "id") || !strings.Contains(got, "ex_abc") {
+		t.Errorf("expected table output even when stdout is piped, got: %q", got)
+	}
+	// JSON output would start with {. Make sure we did NOT fall back to JSON.
+	if strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Errorf("expected table output (not JSON) when -o is unset, got: %q", got)
+	}
+}
+
+// TestRenderListDefault_JQImpliesJSON confirms that passing --jq
+// switches the default to JSON (because jq operates on JSON), even
+// though the format-default flip otherwise picks the table form.
+func TestRenderListDefault_JQImpliesJSON(t *testing.T) {
+	ios, _, out, _ := iostreams.Test()
+	app := &App{IO: ios, JQ: ".[].id"}
+
+	pages := []any{fakePage{NextPageToken: ""}}
+	rows := [][]string{{"ex_abc"}}
+	// Pass a tiny one-row payload so jq has something to filter.
+	type item struct {
+		ID string `json:"id"`
+	}
+	pages = []any{[]item{{ID: "ex_abc"}}}
+	if err := renderList(app, pages, []string{"id"}, rows, "none"); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	got := strings.TrimSpace(out.String())
+	if got != `"ex_abc"` {
+		t.Errorf("expected jq-filtered JSON output, got: %q", got)
+	}
+}
+
+// TestRenderListDefault_ExplicitJSON confirms that -o json still
+// produces JSON output regardless of TTY state. This is the path
+// scripts and agents take when they want to parse the result.
+func TestRenderListDefault_ExplicitJSON(t *testing.T) {
+	ios, _, out, _ := iostreams.Test()
+	app := &App{IO: ios, Format: "json"}
+
+	type item struct {
+		ID string `json:"id"`
+	}
+	pages := []any{[]item{{ID: "ex_abc"}}}
+	if err := renderList(app, pages, []string{"id"}, [][]string{{"ex_abc"}}, "none"); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"id"`) || !strings.Contains(got, `"ex_abc"`) {
+		t.Errorf("expected JSON when -o json is set, got: %q", got)
+	}
+}
+
+// TestRenderListDefault_EmptyMessageWhenPiped guards that an empty
+// list renders the human-friendly emptyMsg even when stdout is piped
+// (the same path TestWebhooksEndpointsList_Empty exercises through
+// the full command tree).
+func TestRenderListDefault_EmptyMessageWhenPiped(t *testing.T) {
+	ios, _, out, _ := iostreams.Test()
+	app := &App{IO: ios}
+
+	pages := []any{fakePage{NextPageToken: ""}}
+	if err := renderList(app, pages, []string{"id"}, [][]string{}, "No webhook endpoints."); err != nil {
+		t.Fatalf("renderList: %v", err)
+	}
+	if !strings.Contains(out.String(), "No webhook endpoints.") {
+		t.Errorf("expected empty-list message, got: %q", out.String())
+	}
+}
+
 // TestPaginationHint_AppearsOnTTYWithMore checks that the pagination hint
 // fires to stderr when the last page has a NextPageToken and stderr is a
 // TTY, and that it includes a runnable next-page command preserving the

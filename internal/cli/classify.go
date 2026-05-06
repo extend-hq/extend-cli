@@ -171,7 +171,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 }
 
 func renderClassifyResult(app *App, run *client.ClassifyRun) error {
-	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	if run.Output == nil {
