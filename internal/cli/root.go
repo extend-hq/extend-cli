@@ -103,7 +103,14 @@ func NewRoot() *cobra.Command {
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 
-	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (default: command-specific)")
+	// PersistentPreRun fires after Cobra parses flags but before any
+	// subcommand's RunE. Used to fall back to env-var defaults when
+	// the corresponding flag wasn't passed.
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		applyEnvDefaults(app)
+	}
+
+	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (or EXTEND_OUTPUT; default: command-specific)")
 	root.PersistentFlags().StringVar(&app.JQ, "jq", "", "Filter output with a jq expression")
 	root.PersistentFlags().StringVar(&app.Workspace, "workspace", "", "Workspace ID for org-scoped API keys (or EXTEND_WORKSPACE_ID)")
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
@@ -152,6 +159,23 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newVersionCommand(app))
 	installHelpTemplate(root)
 	return root
+}
+
+// applyEnvDefaults resolves persistent-flag defaults from environment
+// variables for the slots Cobra didn't fill at parse time. The flag
+// always wins; env fills the gap when the user didn't pass it. Run from
+// PersistentPreRun so the order is: parse flags → env-fill → RunE.
+//
+//	--output    ↔  EXTEND_OUTPUT     (output format: json|yaml|...)
+//
+// Other flag/env pairings (--workspace ↔ EXTEND_WORKSPACE_ID, --region
+// ↔ EXTEND_REGION) are resolved inside NewClient because they only
+// apply when an HTTP client is constructed; the output format applies
+// to every command, so its fallback lives here.
+func applyEnvDefaults(app *App) {
+	if app.Format == "" {
+		app.Format = os.Getenv(client.EnvOutput)
+	}
 }
 
 // debugEnvTruthy reports whether EXTEND_DEBUG should enable debug

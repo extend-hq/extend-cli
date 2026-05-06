@@ -15,6 +15,43 @@ type fakePage struct {
 	NextPageToken string
 }
 
+// TestEnvOutput_FillsWhenFlagUnset checks that EXTEND_OUTPUT is read
+// when --output isn't passed, so users (and agent harnesses) can set
+// a default format once instead of repeating -o on every call.
+func TestEnvOutput_FillsWhenFlagUnset(t *testing.T) {
+	t.Setenv("EXTEND_OUTPUT", "json")
+	app := &App{}
+	applyEnvDefaults(app)
+	if app.Format != "json" {
+		t.Errorf("expected app.Format=%q, got %q", "json", app.Format)
+	}
+}
+
+// TestEnvOutput_FlagWins guards precedence: --output beats EXTEND_OUTPUT.
+// The user always retains per-call control even if a global default is
+// set in the environment.
+func TestEnvOutput_FlagWins(t *testing.T) {
+	t.Setenv("EXTEND_OUTPUT", "json")
+	app := &App{Format: "table"} // simulates --output=table on the command line
+	applyEnvDefaults(app)
+	if app.Format != "table" {
+		t.Errorf("flag should win over env; expected app.Format=%q, got %q", "table", app.Format)
+	}
+}
+
+// TestEnvOutput_NoEnvNoFlagLeavesEmpty confirms that with neither flag
+// nor env set, app.Format stays empty so per-command defaults take
+// over (TTY-format table for lists, custom inline output for action
+// verbs, etc.).
+func TestEnvOutput_NoEnvNoFlagLeavesEmpty(t *testing.T) {
+	t.Setenv("EXTEND_OUTPUT", "")
+	app := &App{}
+	applyEnvDefaults(app)
+	if app.Format != "" {
+		t.Errorf("expected empty Format when neither flag nor env set, got %q", app.Format)
+	}
+}
+
 // TestRenderListDefault_TableEvenWhenPiped guards the format-default
 // flip: with no -o flag and no --jq, rendering MUST produce the
 // human-readable table even when stdout isn't a TTY (i.e. when the
