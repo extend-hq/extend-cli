@@ -244,7 +244,7 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 	}
 
 	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch`.\n\n")
-	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` uses `--schema schema.json` for the values schema.\n\n")
+	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` takes `--instructions` (free-form prose). See `extend edit --help` for the full set.\n\n")
 }
 
 func writeSkillWait(b *strings.Builder) {
@@ -353,6 +353,17 @@ func writeSkillWorkflows(b *strings.Builder) {
            --timestamp "$X_EXTEND_REQUEST_TIMESTAMP" \
            --secret "$(cat webhook.secret)" \
            --body-file payload.json
+
+### Fill a PDF form
+
+Pass values inline as ` + "`--instructions`" + ` and auto-download the filled PDF:
+
+    extend edit form.pdf \
+        --instructions "name is Acme Corp; date is 2026-04-15" \
+        --output-file filled.pdf
+
+Without ` + "`--output-file`" + `, the filled PDF stays on the server; fetch later
+with ` + "`extend files download <file-id>`" + `.
 
 ### Iterate an extractor against an evaluation set
 

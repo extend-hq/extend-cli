@@ -49,13 +49,22 @@ Use 'extend edit schema generate <input>' first to detect form fields and
 scaffold a schema; populate the values inline (as 'default' on each field);
 then run 'extend edit <input> --schema schema.json'.
 
+--instructions adds free-form prose guidance applied at fill time:
+formatting rules ("dates as MM/DD/YYYY"), conditional logic ("if marital
+status is 'single', leave the spouse section blank"), or disambiguation
+between similarly-named fields the schema can't express. It's additive to
+the schema's 'default' values, not a replacement; populate values as
+usual and use --instructions for the things prose handles better.
+
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
 files download'.`,
 		Examples: []Example{
+			{Label: "Inline instructions", Cmd: `extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15" --output-file filled.pdf`},
 			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate default values inline, then run the next example."},
 			{Label: "Fill and download", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
+			{Label: "With fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
 		},
 		Gotchas: []string{
@@ -84,9 +93,9 @@ files download'.`,
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&schemaPath, "schema", "", "Path to schema JSON (with values inline as 'default'); omit to auto-generate")
-			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide field filling")
-			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Instructions used only when auto-generating the schema (no --schema)")
-			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout")
+			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose applied at fill time (formatting rules, conditional logic, field disambiguation). Additive to schema 'default' values.")
+			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
+			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
