@@ -264,19 +264,12 @@ func writeSkillWait(b *strings.Builder) {
 }
 
 func writeSkillPagination(b *strings.Builder) {
-	b.WriteString("## Pagination (the most common agent mistake)\n\n")
-	b.WriteString("List commands return one page at a time. Iterate with `--page-token`, **NOT** `--all`:\n\n")
-	b.WriteString(`    FILTERS=(--type extract --using ex_xxx --status PROCESSED)
-    tok=""
-    while :; do
-        page=$(extend runs list "${FILTERS[@]}" --page-token "$tok" -o json)
-        echo "$page" | jq '.data[]'
-        tok=$(echo "$page" | jq -r '.nextPageToken')
-        [ -z "$tok" ] || [ "$tok" = "null" ] && break
-    done
+	b.WriteString("## Pagination\n\n")
+	b.WriteString("List commands return one page by default. Pass `--max N` to fetch up to N total results — the CLI auto-paginates internally and never makes you handle page tokens:\n\n")
+	b.WriteString(`    extend runs list --type extract --status FAILED --max 100
 
 `)
-	b.WriteString("**Page tokens are bound to the originating query.** Repeat the same filter flags on every paginated call; changing them mid-iteration produces incorrect results. `--all` auto-paginates into one response and can exceed agent context budgets.\n\n")
+	b.WriteString("Use `--all` only when you genuinely want every result (scripts, not agents). Power users can still cursor explicitly with `--page-token`, but most callers should not need to see tokens at all.\n\n")
 	b.WriteString("`--jq <expr>` filters JSON output before rendering, but cannot combine with `-o markdown` (markdown is not JSON). Use `-o json --jq '...'` and select the markdown chunk paths instead.\n\n")
 }
 

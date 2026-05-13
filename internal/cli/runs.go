@@ -377,6 +377,7 @@ func newRunsListDoc(app *App) *CommandDoc {
 		sourceID  string
 		fileName  string
 		limit     int
+		maxN      int
 		all       bool
 		pageToken string
 		sortBy    string
@@ -427,6 +428,7 @@ runs ignore --using, --sort-by, and --sort; workflow runs ignore
 				sourceID:  sourceID,
 				fileName:  fileName,
 				limit:     limit,
+				max:       maxN,
 				all:       all,
 				pageToken: pageToken,
 				sortBy:    sortBy,
@@ -441,9 +443,10 @@ runs ignore --using, --sort-by, and --sort; workflow runs ignore
 			cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
 			cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
 			cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to return per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page, the default)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
 			_ = cmd.MarkFlagRequired("type")
@@ -460,6 +463,7 @@ type runsListParams struct {
 	sourceID  string
 	fileName  string
 	limit     int
+	max       int
 	all       bool
 	pageToken string
 	sortBy    string
@@ -490,7 +494,7 @@ func runRunsList(cmd *cobra.Command, app *App, p runsListParams) error {
 		SortDir:          p.sortDir,
 	}
 
-	rows, pages, err := collectListRows(ctx, cli, kind, opts, p.all)
+	rows, pages, err := collectListRows(ctx, cli, kind, opts, p.all, p.max)
 	if err != nil {
 		return err
 	}
@@ -516,7 +520,7 @@ func parseRunKind(s string) (client.RunKind, error) {
 	return "", fmt.Errorf("unknown run type %q (want extract|parse|classify|split|workflow|edit)", s)
 }
 
-func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKind, opts client.ListRunsOptions, all bool) ([][]string, []any, error) {
+func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKind, opts client.ListRunsOptions, all bool, max int) ([][]string, []any, error) {
 	var rows [][]string
 	var rawPages []any
 	for {
@@ -581,11 +585,12 @@ func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKin
 		}
 		rows = append(rows, pageRows...)
 		rawPages = append(rawPages, page)
-		if !all || pageToken == "" {
+		if paginationDone(all, max, len(rows), pageToken) {
 			break
 		}
 		opts.PageToken = pageToken
 	}
+	rows = capRowsToMax(rows, max)
 	return rows, rawPages, nil
 }
 

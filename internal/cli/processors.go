@@ -72,6 +72,7 @@ func (a processorAccessor[T, V]) listDoc(app *App) *CommandDoc {
 		sortBy    string
 		sortDir   string
 		limit     int
+		maxN      int
 		all       bool
 		pageToken string
 	)
@@ -130,20 +131,22 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 				for _, it := range items {
 					rows = append(rows, a.rowFields(it))
 				}
-				if !all || next == "" {
+				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
 				opts.PageToken = next
 			}
+			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows,
 				fmt.Sprintf("No %s.", a.pluralNoun))
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }
@@ -208,6 +211,7 @@ func (a processorAccessor[T, V]) versionsListDoc(app *App) *CommandDoc {
 	var (
 		verSortDir   string
 		verLimit     int
+		verMax       int
 		verAll       bool
 		verPageToken string
 	)
@@ -255,11 +259,12 @@ is the editable working copy.
 				}
 				pages = append(pages, page)
 				allItems = append(allItems, items...)
-				if !verAll || next == "" {
+				if paginationDone(verAll, verMax, len(allItems), next) {
 					break
 				}
 				opts.PageToken = next
 			}
+			allItems = capRowsToMax(allItems, verMax)
 			rows := make([][]string, 0, len(allItems))
 			for _, v := range allItems {
 				rows = append(rows, a.verRowFn(v))
@@ -268,9 +273,10 @@ is the editable working copy.
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&verSortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&verLimit, "limit", 20, "Maximum versions per page")
-			cmd.Flags().StringVar(&verPageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&verAll, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&verLimit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&verMax, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&verPageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&verAll, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }
