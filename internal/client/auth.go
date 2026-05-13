@@ -28,6 +28,7 @@ const (
 	EnvWebhookSecret = "EXTEND_WEBHOOK_SECRET"
 	EnvDebug         = "EXTEND_DEBUG"
 	EnvOutput        = "EXTEND_OUTPUT"
+	EnvEnv           = "EXTEND_ENV"
 )
 
 // EnvVars enumerates every environment variable the CLI consults. Order is
@@ -42,4 +43,5 @@ var EnvVars = []EnvVarSpec{
 	{Name: EnvWebhookSecret, Description: "Default signing secret used by 'extend webhooks verify'."},
 	{Name: EnvDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 	{Name: EnvOutput, Description: "Default output format when --output is not set: json|yaml|raw|id|table|markdown."},
+	{Name: EnvEnv, Description: "Environment label (e.g. 'test') that selects EXTEND_<UPPER>_API_KEY in place of EXTEND_API_KEY."},
 }
