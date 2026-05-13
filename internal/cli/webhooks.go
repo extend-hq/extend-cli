@@ -64,6 +64,7 @@ func newWebhookEndpointsListDoc(app *App) *CommandDoc {
 		status    string
 		sortDir   string
 		limit     int
+		maxN      int
 		all       bool
 		pageToken string
 	)
@@ -111,19 +112,21 @@ subscriptions list' to see what each endpoint is subscribed to.
 				for _, ep := range page.Data {
 					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt)})
 				}
-				if !all || page.NextPageToken == "" {
+				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
 					break
 				}
 				opts.PageToken = page.NextPageToken
 			}
+			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&status, "status", "", "Filter by status: enabled|disabled")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }
@@ -448,6 +451,7 @@ func newWebhookSubscriptionsListDoc(app *App) *CommandDoc {
 		resourceID string
 		sortDir    string
 		limit      int
+		maxN       int
 		all        bool
 		pageToken  string
 	)
@@ -497,20 +501,22 @@ classifier, splitter, or workflow) and a set of event types. Use
 				for _, s := range page.Data {
 					rows = append(rows, []string{s.ID, s.WebhookEndpointID, s.ResourceType, s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt)})
 				}
-				if !all || page.NextPageToken == "" {
+				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
 					break
 				}
 				opts.PageToken = page.NextPageToken
 			}
+			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&endpointID, "endpoint", "", "Filter by webhook endpoint ID (we_...)")
 			cmd.Flags().StringVar(&resourceID, "resource", "", "Filter by resource ID (extractor/classifier/splitter/workflow)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }

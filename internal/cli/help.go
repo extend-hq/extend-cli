@@ -157,13 +157,12 @@ func RunnableLeaves(root *cobra.Command) []*cobra.Command {
 // references for pagination behavior. Centralising it means the recommended
 // pattern (token-by-token, NOT --all, same filters across pages) stays
 // consistent across the surface.
-const paginationGuidance = `Pagination: agents and scripts should iterate page-by-page using
---page-token rather than --all, which fetches every page into a single
-response and can blow past context limits on busy workspaces. The token
-is bound to the originating query on the server, so every paginated
-follow-up call must repeat the same filter flags as the first call;
-changing them mid-iteration produces incorrect results. The stderr
-hint emitted on TTYs prints the exact next-page command for you.`
+const paginationGuidance = `Pagination: pass --max N to fetch up to N total results, auto-paginating
+internally. Use --all to fetch every page when you really want everything
+(scripts only; agents should bound the fetch). Power users who want
+explicit cursor control can use --page-token, but most callers should
+not need to see tokens at all. The stderr hint emitted on TTYs prints
+the exact next-page command for you when one is needed.`
 
 // HelpTopicAnnotation marks a Cobra command as a runtime-rendered help topic
 // rather than a regular CLI verb. Topics are runnable (their Run prints the

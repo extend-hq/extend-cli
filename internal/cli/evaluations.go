@@ -43,6 +43,7 @@ func newEvaluationsListDoc(app *App) *CommandDoc {
 		sortBy    string
 		sortDir   string
 		limit     int
+		maxN      int
 		all       bool
 		pageToken string
 	)
@@ -92,20 +93,22 @@ processor accuracy via 'extend evaluations runs get'.
 				for _, s := range page.Data {
 					rows = append(rows, []string{s.ID, s.Name, relTime(s.CreatedAt)})
 				}
-				if !all || page.NextPageToken == "" {
+				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
 					break
 				}
 				opts.PageToken = page.NextPageToken
 			}
+			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&entity, "entity", "", "Filter by extractor/classifier/splitter ID (ex_/cl_/spl_)")
 			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }
@@ -220,6 +223,7 @@ func newEvaluationItemsListDoc(app *App) *CommandDoc {
 		sortBy    string
 		sortDir   string
 		limit     int
+		maxN      int
 		all       bool
 		pageToken string
 	)
@@ -270,19 +274,21 @@ accuracy score.
 					}
 					rows = append(rows, []string{it.ID, name})
 				}
-				if !all || page.NextPageToken == "" {
+				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
 					break
 				}
 				opts.PageToken = page.NextPageToken
 			}
+			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "file"}, rows, "No items.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum results per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }

@@ -88,6 +88,7 @@ func newFilesListDoc(app *App) *CommandDoc {
 	var (
 		nameContains string
 		limit        int
+		maxN         int
 		all          bool
 		pageToken    string
 		sortDir      string
@@ -117,19 +118,20 @@ passing the response's nextPageToken to --page-token.
 		SeeAlso: []string{"files upload", "files get", "files delete"},
 		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd, app, nameContains, limit, all, pageToken, sortDir)
+			return runFilesList(cmd, app, nameContains, limit, maxN, all, pageToken, sortDir)
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&nameContains, "name-contains", "", "Filter to files whose name contains this substring")
-			cmd.Flags().IntVar(&limit, "limit", 20, "Maximum files to return per page")
-			cmd.Flags().StringVar(&pageToken, "page-token", "", "Fetch a specific page (token from a previous response's nextPageToken)")
-			cmd.Flags().BoolVar(&all, "all", false, "Auto-paginate every page into one response (avoid for agent use; prefer --page-token)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (by createdAt)")
 		},
 	}
 }
 
-func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit int, all bool, pageToken, sortDir string) error {
+func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max int, all bool, pageToken, sortDir string) error {
 	ctx := cmd.Context()
 	cli, err := app.NewClient()
 	if err != nil {
@@ -157,11 +159,12 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit int, 
 				relTime(f.CreatedAt),
 			})
 		}
-		if !all || page.NextPageToken == "" {
+		if paginationDone(all, max, len(rows), page.NextPageToken) {
 			break
 		}
 		opts.PageToken = page.NextPageToken
 	}
+	rows = capRowsToMax(rows, max)
 
 	return renderListForCmd(cmd, app, pages, []string{"id", "name", "type", "created"}, rows, "No files.")
 }
