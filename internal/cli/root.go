@@ -22,6 +22,7 @@ type App struct {
 	JQ        string
 	Workspace string
 	Region    string
+	Env       string // optional environment label (e.g. "test"); selects EXTEND_<UPPER>_API_KEY
 	Debug     bool
 }
 
@@ -55,6 +56,8 @@ Environment variables:
   EXTEND_WORKSPACE_ID    Workspace ID for org-scoped API keys
   EXTEND_API_VERSION     Pin the API version sent with each request
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
+  EXTEND_ENV             Environment label that selects an alternate API key
+                         (e.g. --env test reads EXTEND_TEST_API_KEY)
 
 The --workspace and --region flags override their respective env vars.`,
 		Subcommands: []*CommandDoc{
@@ -69,6 +72,7 @@ The --workspace and --region flags override their respective env vars.`,
 			newRunsDoc(app),
 			newBatchesDoc(app),
 			newFilesDoc(app),
+			newDownloadDoc(app),
 			// Resources
 			extractorAccessor().doc(app),
 			classifierAccessor().doc(app),
@@ -115,11 +119,13 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&app.Workspace, "workspace", "", "Workspace ID for org-scoped API keys (or EXTEND_WORKSPACE_ID)")
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 	root.PersistentFlags().BoolVar(&app.Debug, "debug", false, "Log every HTTP request to stderr (or EXTEND_DEBUG=1)")
+	root.PersistentFlags().StringVar(&app.Env, "env", "", "Environment label that selects the API key: e.g. --env test reads EXTEND_TEST_API_KEY instead of EXTEND_API_KEY (or EXTEND_ENV)")
 
 	app.NewClient = func() (*client.Client, error) {
-		key := os.Getenv(client.EnvAPIKey)
+		keyVar := apiKeyEnvVar(app.Env)
+		key := os.Getenv(keyVar)
 		if key == "" {
-			return nil, fmt.Errorf("%s environment variable is required", client.EnvAPIKey)
+			return nil, fmt.Errorf("%s environment variable is required", keyVar)
 		}
 		c := client.New(key)
 
@@ -167,15 +173,49 @@ func NewRoot() *cobra.Command {
 // PersistentPreRun so the order is: parse flags → env-fill → RunE.
 //
 //	--output    ↔  EXTEND_OUTPUT     (output format: json|yaml|...)
+//	--env       ↔  EXTEND_ENV        (environment label for API-key selection)
 //
 // Other flag/env pairings (--workspace ↔ EXTEND_WORKSPACE_ID, --region
 // ↔ EXTEND_REGION) are resolved inside NewClient because they only
-// apply when an HTTP client is constructed; the output format applies
-// to every command, so its fallback lives here.
+// apply when an HTTP client is constructed; the output format and env
+// label apply to every command, so their fallbacks live here.
 func applyEnvDefaults(app *App) {
 	if app.Format == "" {
 		app.Format = os.Getenv(client.EnvOutput)
 	}
+	if app.Env == "" {
+		app.Env = os.Getenv(client.EnvEnv)
+	}
+}
+
+// apiKeyEnvVar returns the env var name from which the API key should
+// be read for the given environment label. Empty label keeps the
+// historical EXTEND_API_KEY behavior; "test" maps to EXTEND_TEST_API_KEY,
+// "staging" to EXTEND_STAGING_API_KEY, etc. The label is uppercased and
+// non-alphanumeric characters are stripped so a stray "Test" or "test-1"
+// still resolves to a stable variable name.
+func apiKeyEnvVar(envLabel string) string {
+	envLabel = strings.TrimSpace(envLabel)
+	if envLabel == "" {
+		return client.EnvAPIKey
+	}
+	upper := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - 32
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '_':
+			return r
+		}
+		return -1
+	}, envLabel)
+	if upper == "" {
+		return client.EnvAPIKey
+	}
+	return "EXTEND_" + upper + "_API_KEY"
 }
 
 // debugEnvTruthy reports whether EXTEND_DEBUG should enable debug

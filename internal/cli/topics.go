@@ -108,7 +108,17 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("\nPrecedence:\n\n")
 	b.WriteString("  --workspace flag     >  EXTEND_WORKSPACE_ID\n")
 	b.WriteString("  --region flag        >  EXTEND_REGION\n")
+	b.WriteString("  --env flag           >  EXTEND_ENV\n")
 	b.WriteString("  EXTEND_BASE_URL      >  EXTEND_REGION (base URL bypasses region selection)\n")
+	b.WriteString("\nMultiple environments:\n\n")
+	b.WriteString("  --env <label> reads the API key from EXTEND_<UPPER>_API_KEY instead of\n")
+	b.WriteString("  EXTEND_API_KEY, so you can keep separate keys for test/prod side-by-side:\n\n")
+	b.WriteString("    export EXTEND_API_KEY=sk_prod_xxx\n")
+	b.WriteString("    export EXTEND_TEST_API_KEY=sk_test_xxx\n")
+	b.WriteString("    extend --env test runs list --type extract\n\n")
+	b.WriteString("  Other env vars (workspace, region) are not split per environment;\n")
+	b.WriteString("  the docs note workflow definitions are shared between environments while\n")
+	b.WriteString("  runs and data are isolated by the key in use.\n")
 	return b.String()
 }
 

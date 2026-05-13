@@ -52,6 +52,52 @@ func TestEnvOutput_NoEnvNoFlagLeavesEmpty(t *testing.T) {
 	}
 }
 
+// TestEnvLabel_FillsFromEnvVar mirrors the EXTEND_OUTPUT precedence
+// for EXTEND_ENV: the env var fills app.Env when --env isn't passed.
+func TestEnvLabel_FillsFromEnvVar(t *testing.T) {
+	t.Setenv("EXTEND_ENV", "test")
+	app := &App{}
+	applyEnvDefaults(app)
+	if app.Env != "test" {
+		t.Errorf("expected app.Env=%q, got %q", "test", app.Env)
+	}
+}
+
+// TestEnvLabel_FlagWins guards precedence: --env beats EXTEND_ENV.
+func TestEnvLabel_FlagWins(t *testing.T) {
+	t.Setenv("EXTEND_ENV", "test")
+	app := &App{Env: "staging"} // simulates --env=staging
+	applyEnvDefaults(app)
+	if app.Env != "staging" {
+		t.Errorf("flag should win over env; got %q", app.Env)
+	}
+}
+
+// TestAPIKeyEnvVar codifies the env-label → env-var-name mapping that
+// powers --env. Empty label keeps the historical EXTEND_API_KEY name.
+// Non-alphanumerics in the label are stripped so users can pass labels
+// like "test-1" without producing invalid var names.
+func TestAPIKeyEnvVar(t *testing.T) {
+	cases := []struct {
+		label string
+		want  string
+	}{
+		{"", "EXTEND_API_KEY"},
+		{"test", "EXTEND_TEST_API_KEY"},
+		{"TEST", "EXTEND_TEST_API_KEY"},
+		{"staging", "EXTEND_STAGING_API_KEY"},
+		{"test-1", "EXTEND_TEST1_API_KEY"},
+		{"my_env", "EXTEND_MY_ENV_API_KEY"},
+		{"   ", "EXTEND_API_KEY"}, // whitespace-only → default
+	}
+	for _, tc := range cases {
+		got := apiKeyEnvVar(tc.label)
+		if got != tc.want {
+			t.Errorf("apiKeyEnvVar(%q) = %q, want %q", tc.label, got, tc.want)
+		}
+	}
+}
+
 // TestRenderListDefault_TableEvenWhenPiped guards the format-default
 // flip: with no -o flag and no --jq, rendering MUST produce the
 // human-readable table even when stdout isn't a TTY (i.e. when the
