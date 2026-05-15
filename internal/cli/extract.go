@@ -49,22 +49,36 @@ typed structured fields back. Prefer 'parse' for raw text or markdown,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
-The extraction config can come from one of two sources:
-  --using <id>       use an existing extractor (and optionally
-                     --override-config to vary it for this one run)
-  --config <json>    config without an extractor (inline JSON, path, or file:// URI)`,
+The extraction config comes from one of these three forms. Exactly one
+of --using or --config is required:
+
+  # Run a saved extractor as-is.
+  extend extract <input> --using ex_xxx
+
+  # Run a saved extractor, merging per-run tweaks onto its saved config.
+  extend extract <input> --using ex_xxx --override-config patch.json
+
+  # Run a one-off config without a saved extractor (good for prototyping
+  # or short-lived agent workflows).
+  extend extract <input> --config inline-config.json
+
+For both --override-config and --config, the value may be inline JSON,
+a path, a file:// URI, or '-' to read from stdin. They are NOT
+interchangeable: --override-config merges onto a --using extractor;
+--config replaces the need for one entirely.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
 			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},
 			{Label: "Async", Cmd: "extend extract file_xK9mLPq --using ex_abc --wait=false", Note: "Returns the run ID immediately; poll with `extend runs watch`."},
-			{Label: "Override config", Cmd: "extend extract invoice.pdf --using ex_abc --override-config override.json"},
-			{Label: "Inline override", Cmd: `extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'`},
-			{Label: "Config without extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
+			{Label: "Merge per-run tweaks onto a saved extractor", Cmd: "extend extract invoice.pdf --using ex_abc --override-config override.json"},
+			{Label: "Inline per-run override", Cmd: `extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'`},
+			{Label: "One-off run with no saved extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
 			{Label: "Filter output with jq", Cmd: "extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw"},
 		},
 		Gotchas: []string{
+			"--config and --override-config are different: --config runs without a saved extractor, --override-config merges onto a --using extractor.",
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
-			"--override-config requires --using; it has no effect on inline --config.",
+			"--override-config requires --using; passing it alongside --config is rejected.",
 		},
 		SeeAlso:  []string{"parse", "classify", "extract batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
@@ -96,14 +110,14 @@ The extraction config can come from one of two sources:
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&extractorID, "using", "", "Extractor ID (mutually exclusive with --config)")
+			cmd.Flags().StringVar(&extractorID, "using", "", "Saved extractor ID (mutually exclusive with --config)")
 			cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the extractor's config for this run only")
-			cmd.Flags().StringVar(&configPath, "config", "", "JSON object, path, or file:// URI for extract config (skips the extractor; mutually exclusive with --using)")
+			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using extractor's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off extract config used INSTEAD of a saved extractor. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
 		Subcommands: []*CommandDoc{newExtractBatchDoc(app)},
@@ -175,7 +189,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return fmt.Errorf("wait: %w", err)
+		return formatActionWaitError(err, run.ID)
 	}
 
 	if err := renderWithDefault(app, final, output.FormatJSON); err != nil {

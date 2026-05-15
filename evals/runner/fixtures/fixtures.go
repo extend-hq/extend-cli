@@ -54,6 +54,10 @@ func generate(name, path string) error {
 		return writeReceiptPDF(path)
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "combined"):
 		return writeCombinedPDF(path)
+	case base == "w2.pdf":
+		return writeW2PDF(path)
+	case base == "form1040.pdf":
+		return writeForm1040PDF(path)
 	default:
 		return fmt.Errorf("no fixture generator for %q", name)
 	}
@@ -130,6 +134,54 @@ func writeCombinedPDF(path string) error {
 				"Outstanding balance: $1,234.56. Please remit by 2026-05-15.",
 			"", "", false)
 	}
+	return pdf.OutputFileAndClose(path)
+}
+
+// writeW2PDF emits a fake W-2 PDF that carries source values the agent
+// should *read* (not fill into). Pairs with form1040.pdf for the
+// "fill a form from another document" recipe in skill.md. The contents
+// are deliberately wage-statement-shaped so any model has something
+// plausible to "extract" without a real schema.
+func writeW2PDF(path string) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.Cell(0, 12, "Form W-2 — Wage and Tax Statement (2025)")
+	pdf.Ln(15)
+	pdf.SetFont("Helvetica", "", 11)
+	pdf.Cell(0, 8, "Employee: Wile E. Coyote")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Employer: Acme Industries")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Box 1 (Wages):           67,500.00")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Box 2 (Federal tax):      9,800.00")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Box 3 (Social Security): 67,500.00")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Box 4 (Social tax):       4,185.00")
+	return pdf.OutputFileAndClose(path)
+}
+
+// writeForm1040PDF emits a fake 1040 PDF: the *target* form whose
+// fields the agent should fill. Field labels are written as text so a
+// realistic agent flow (parse the form, decide which W-2 box maps
+// where) has something to work against; the stub doesn't care about
+// the bytes.
+func writeForm1040PDF(path string) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.Cell(0, 12, "Form 1040 — U.S. Individual Income Tax Return (Draft)")
+	pdf.Ln(15)
+	pdf.SetFont("Helvetica", "", 11)
+	pdf.Cell(0, 8, "Name: ______________________________________")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Line 1a (Wages from Form W-2 Box 1): __________")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Line 25a (Federal tax withheld):     __________")
+	pdf.Ln(7)
+	pdf.Cell(0, 8, "Line 1z (Total wages):               __________")
 	return pdf.OutputFileAndClose(path)
 }
 

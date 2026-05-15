@@ -47,14 +47,17 @@ with a confidence score.
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
-Pass --override-config as inline JSON, a plain file path, or an absolute
-file:// URI to vary the classifier's config for this one run without modifying
+--override-config merges per-run tweaks onto the --using classifier's
+saved config, just for this one run. Source: inline JSON, a plain file
+path, an absolute file:// URI, or '-' to read from stdin. It does NOT
+replace the classifier; pass --using to pick the classifier and
+--override-config to vary it without modifying
 the persisted classifier.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend classify invoice.pdf --using cl_abc"},
 			{Label: "URL with JSON output", Cmd: "extend classify https://example.com/x.pdf --using cl_abc -o json"},
-			{Label: "Override config", Cmd: "extend classify invoice.pdf --using cl_abc --override-config override.json"},
-			{Label: "Inline override", Cmd: `extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Merge per-run tweaks onto a saved classifier", Cmd: "extend classify invoice.pdf --using cl_abc --override-config override.json"},
+			{Label: "Inline per-run override", Cmd: `extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'`},
 			{Label: "Filter via jq", Cmd: "extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw"},
 		},
 		Gotchas: []string{
@@ -85,11 +88,11 @@ the persisted classifier.`,
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
 			cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "JSON object, path, or file:// URI for overrideConfig that varies the classifier's config for this run only")
+			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using classifier's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 			_ = cmd.MarkFlagRequired("using")
 		},
@@ -152,7 +155,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return fmt.Errorf("wait: %w", err)
+		return formatActionWaitError(err, run.ID)
 	}
 
 	if err := renderClassifyResult(app, final); err != nil {

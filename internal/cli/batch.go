@@ -677,7 +677,7 @@ Polls every 2s, backing off to 30s.`,
 			})
 			sp.Stop("")
 			if err != nil {
-				return fmt.Errorf("wait: %w", err)
+				return formatWatchWaitError(err, id)
 			}
 			if err := renderBatchSubmitted(app, final); err != nil {
 				return err
@@ -693,7 +693,7 @@ Polls every 2s, backing off to 30s.`,
 			return nil
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait")
+			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum total time to wait for the batch to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
 		},
 	}

@@ -58,9 +58,9 @@ Pass -o json/yaml for the full run object, or -o markdown to force raw.
 
 Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars.
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
---block-options as inline JSON, a plain file path, or an absolute file:// URI.
---advanced-options accepts the remaining tuning knobs verbatim (return-OCR,
-page ranges, parallelism, etc.) in the same forms.`,
+--block-options as inline JSON, a plain file path, an absolute file:// URI,
+or '-' to read from stdin. --advanced-options accepts the remaining tuning
+knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend parse contract.pdf"},
 			{Label: "Save raw markdown", Cmd: "extend parse contract.pdf -o markdown > contract.md"},
@@ -109,11 +109,11 @@ page ranges, parallelism, etc.) in the same forms.`,
 			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
 			cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
-			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "JSON object, path, or file:// URI for blockOptions (figures/tables/text/barcodes/keyValue/formulas)")
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "JSON object, path, or file:// URI for advancedOptions (returnOcr, pageRanges, etc.)")
+			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "blockOptions for fine-grained block detection (figures/tables/text/barcodes/keyValue/formulas). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "advancedOptions for parse tuning (returnOcr, pageRanges, etc.). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
 		Subcommands: []*CommandDoc{newParseBatchDoc(app)},
@@ -172,7 +172,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return fmt.Errorf("wait: %w", err)
+		return formatActionWaitError(err, run.ID)
 	}
 
 	if err := renderParseResult(app, final, p.target); err != nil {

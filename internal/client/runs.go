@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 )
@@ -177,16 +178,17 @@ type WaitOptions struct {
 }
 
 func waitForRun[T any](
-	ctx context.Context,
+	parentCtx context.Context,
 	get func(context.Context) (T, error),
 	statusOf func(T) RunStatus,
 	opts WaitOptions,
 	onPoll func(T),
 ) (T, error) {
 	opts = applyWaitDefaults(opts)
+	ctx := parentCtx
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		ctx, cancel = context.WithTimeout(parentCtx, opts.Timeout)
 		defer cancel()
 	}
 	var zero T
@@ -194,7 +196,12 @@ func waitForRun[T any](
 	for {
 		run, err := get(ctx)
 		if err != nil {
-			return zero, err
+			// Distinguish our own timeout from a parent-context cancel
+			// (Ctrl-C, parent deadline, etc.). The typed WaitTimeoutError
+			// lets callers offer "increase --timeout" / "--wait=false +
+			// runs watch" guidance instead of surfacing a bare
+			// "context deadline exceeded" string.
+			return zero, classifyWaitErr(err, parentCtx, opts.Timeout)
 		}
 		if onPoll != nil {
 			onPoll(run)
@@ -204,13 +211,28 @@ func waitForRun[T any](
 		}
 		select {
 		case <-ctx.Done():
-			return zero, ctx.Err()
+			return zero, classifyWaitErr(ctx.Err(), parentCtx, opts.Timeout)
 		case <-time.After(delay):
 		}
 		if delay < opts.MaxInterval {
 			delay = min(delay*5/4, opts.MaxInterval)
 		}
 	}
+}
+
+// classifyWaitErr maps a raw error from a polling iteration into either the
+// typed WaitTimeoutError (when we hit our own timeout) or the original
+// error (parent cancel, transport failure, API error). It's called from
+// both the `get` path and the `ctx.Done()` arm so a slow API call that
+// happens to hit the deadline first still surfaces as a wait timeout.
+func classifyWaitErr(err error, parentCtx context.Context, timeout time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) && parentCtx.Err() == nil && timeout > 0 {
+		return &WaitTimeoutError{Timeout: timeout}
+	}
+	return err
 }
 
 func applyWaitDefaults(opts WaitOptions) WaitOptions {

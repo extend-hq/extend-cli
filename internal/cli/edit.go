@@ -40,21 +40,32 @@ func newEditDoc(app *App) *CommandDoc {
 			"flatten a filled-out pdf form",
 			"run an edit operation against a pdf form",
 		},
-		WhenToUse: `Use when you have a fillable PDF and a schema (or want to scaffold one)
-to populate its form fields and emit a filled PDF. For schema scaffolding
-only, use the 'extend edit schema generate' subcommand.`,
-		Details: `Fill PDF form fields using a schema (with values) and produce a filled PDF.
+		WhenToUse: `Use to fill the form fields of a PDF and emit a filled PDF. Two
+ways to provide values: pass --instructions for simple natural-language
+fills, or pass --schema with a scaffolded schema for structured fills.
+For schema scaffolding only, use 'extend edit schema generate'.`,
+		Details: `Fill PDF form fields and produce a filled PDF.
 
-Use 'extend edit schema generate <input>' first to detect form fields and
-scaffold a schema; populate the values inline (as 'default' on each field);
-then run 'extend edit <input> --schema schema.json'.
+There are two ways to provide values:
 
---instructions adds free-form prose guidance applied at fill time:
-formatting rules ("dates as MM/DD/YYYY"), conditional logic ("if marital
-status is 'single', leave the spouse section blank"), or disambiguation
-between similarly-named fields the schema can't express. It's additive to
-the schema's 'default' values, not a replacement; populate values as
-usual and use --instructions for the things prose handles better.
+  1. Instructions-only (simplest; recommended when chaining from
+     other commands or for one-off fills):
+
+         extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15"
+
+     The server detects the form fields and applies your prose. No
+     schema-authoring required.
+
+  2. Schema + values (recommended for repeatable, structured fills):
+
+         extend edit schema generate form.pdf > schema.json
+         # populate values on each field per the generated shape, then:
+         extend edit form.pdf --schema schema.json
+
+     Use --instructions alongside --schema for formatting rules
+     ("dates as MM/DD/YYYY"), conditional logic ("if marital status is
+     'single', leave the spouse section blank"), or disambiguation
+     between similarly-named fields the schema cannot express.
 
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
@@ -62,13 +73,14 @@ return the run ID immediately and fetch the filled PDF later via 'extend
 files download'.`,
 		Examples: []Example{
 			{Label: "Inline instructions", Cmd: `extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15" --output-file filled.pdf`},
-			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate default values inline, then run the next example."},
-			{Label: "Fill and download", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
-			{Label: "With fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
+			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
+			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
+			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
 		},
 		Gotchas: []string{
-			"Values are taken from the 'default' field on each schema entry; populate them before running.",
+			"--schema and --instructions can be combined; for simple fills, --instructions alone is enough.",
+			"Populate values per the shape emitted by 'extend edit schema generate' — do not invent field names; inspect the generated schema first.",
 			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
 		},
@@ -92,15 +104,15 @@ files download'.`,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&schemaPath, "schema", "", "Path to schema JSON (with values inline as 'default'); omit to auto-generate")
-			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose applied at fill time (formatting rules, conditional logic, field disambiguation). Additive to schema 'default' values.")
+			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend edit schema generate'. Omit to let the server auto-detect form fields.")
+			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
 			cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for completion")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
 		Subcommands: []*CommandDoc{newEditSchemaDoc(app)},
 	}
@@ -165,7 +177,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return fmt.Errorf("wait: %w", err)
+		return formatActionWaitError(err, run.ID)
 	}
 
 	if final.Status == client.StatusFailed {
@@ -245,6 +257,14 @@ func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileI
 }
 
 func renderEditResult(app *App, run *client.EditRun) error {
+	// Surface the no-output-file case loudly in every render path
+	// (pretty, JSON, jq), because a PROCESSED run with no edited PDF
+	// is the failure mode the May 2026 agent-experience transcripts
+	// flagged: a run completes "successfully" but never produces a
+	// filled document, and the agent reports victory anyway. Warn to
+	// stderr so machine-readable stdout is unaffected.
+	maybeWarnEmptyEditOutput(app, run)
+
 	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
@@ -259,6 +279,26 @@ func renderEditResult(app *App, run *client.EditRun) error {
 		fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Download:   extend files download %s -O filled.pdf", fid))
 	}
 	return nil
+}
+
+// maybeWarnEmptyEditOutput prints a stderr warning when the server
+// reports PROCESSED but did not attach an edited file to the run
+// output. This usually indicates a schema-shape mismatch — the server
+// accepted the request but found nothing to fill — and historically
+// agents misread the lack of an error as success. The warning is
+// strictly informational: exit code is unchanged, since the API
+// itself reported a terminal-success state.
+func maybeWarnEmptyEditOutput(app *App, run *client.EditRun) {
+	if run == nil || run.Status != client.StatusProcessed {
+		return
+	}
+	if outputFileID(run) != "" {
+		return
+	}
+	pal := paletteFor(app.IO)
+	fmt.Fprintf(app.IO.ErrOut, "%s edit run %s reported PROCESSED but produced no filled PDF (output.editedFile is missing).\n",
+		pal.Yellow("warning:"), run.ID)
+	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("  This usually means the server detected no fields to fill — double-check your --schema or --instructions. Inspect the full run with: extend runs get %s -o json", run.ID))
 }
 
 // newEditSchemaDoc returns the typed documentation for the
@@ -358,7 +398,7 @@ are overlaid onto your starting point.`,
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only detect native PDF form fields (set false to detect via vision)")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
-			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Path to a starting-point JSON Schema (overlaid by detection)")
+			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 		},
 	}

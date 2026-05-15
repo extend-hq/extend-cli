@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,13 @@ type App struct {
 	Region    string
 	Env       string // optional environment label (e.g. "test"); selects EXTEND_<UPPER>_API_KEY
 	Debug     bool
+	// HTTPTimeout caps each individual HTTP request (POST/GET).
+	// Distinct from per-command --timeout (the overall wait budget
+	// for a run to reach a terminal state). Zero leaves the client
+	// default in place. Uploads never honor this — they use a
+	// separate untimed client because end-to-end http.Client
+	// timeouts are hostile to large multipart bodies.
+	HTTPTimeout time.Duration
 }
 
 // RootDoc returns the typed documentation tree rooted at the `extend`
@@ -55,11 +63,14 @@ Environment variables:
   EXTEND_REGION          Region: us|us2|eu (ignored if EXTEND_BASE_URL is set)
   EXTEND_WORKSPACE_ID    Workspace ID for org-scoped API keys
   EXTEND_API_VERSION     Pin the API version sent with each request
+  EXTEND_HTTP_TIMEOUT    Per-HTTP-request timeout, e.g. 60s. Distinct
+                         from per-command --timeout (overall wait).
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
   EXTEND_ENV             Environment label that selects an alternate API key
                          (e.g. --env test reads EXTEND_TEST_API_KEY)
 
-The --workspace and --region flags override their respective env vars.`,
+The --workspace, --region, and --http-timeout flags override their
+respective env vars.`,
 		Subcommands: []*CommandDoc{
 			// Actions
 			newExtractDoc(app),
@@ -120,6 +131,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 	root.PersistentFlags().BoolVar(&app.Debug, "debug", false, "Log every HTTP request to stderr (or EXTEND_DEBUG=1)")
 	root.PersistentFlags().StringVar(&app.Env, "env", "", "Environment label that selects the API key: e.g. --env test reads EXTEND_TEST_API_KEY instead of EXTEND_API_KEY (or EXTEND_ENV)")
+	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
 	app.NewClient = func() (*client.Client, error) {
 		keyVar := apiKeyEnvVar(app.Env)
@@ -159,12 +171,45 @@ func NewRoot() *cobra.Command {
 			c.Debug = app.IO.ErrOut
 		}
 
+		// Per-HTTP-request timeout: --http-timeout flag wins; otherwise
+		// honor EXTEND_HTTP_TIMEOUT. Both override the client default.
+		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(client.EnvHTTPTimeout)); ok {
+			c.SetHTTPTimeout(d)
+		}
+
 		return c, nil
 	}
 
 	root.AddCommand(newVersionCommand(app))
 	installHelpTemplate(root)
 	return root
+}
+
+// resolveHTTPTimeout picks the effective per-request timeout to install
+// on the HTTP client. Precedence:
+//
+//  1. --http-timeout flag (any positive value wins, including 0 if the
+//     caller explicitly set it via SetHTTPTimeout? — no: flag default is
+//     0 == "unset", so we treat positive as "user asked for this").
+//  2. EXTEND_HTTP_TIMEOUT env (parseable as time.Duration; "60s",
+//     "2m", etc.). Malformed values are silently ignored — a typo
+//     shouldn't break every command. Surface it via --debug.
+//  3. Neither set → return ok=false; caller leaves the client default
+//     (DefaultHTTPTimeout) in place.
+//
+// A returned timeout of 0 is meaningful: it disables the http.Client
+// timeout entirely, leaving the context as the only deadline. Useful
+// in tests and for users debugging slow networks.
+func resolveHTTPTimeout(flag time.Duration, env string) (time.Duration, bool) {
+	if flag > 0 {
+		return flag, true
+	}
+	if env != "" {
+		if d, err := time.ParseDuration(env); err == nil && d >= 0 {
+			return d, true
+		}
+	}
+	return 0, false
 }
 
 // applyEnvDefaults resolves persistent-flag defaults from environment

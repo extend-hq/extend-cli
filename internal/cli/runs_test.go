@@ -289,10 +289,20 @@ func TestRunsWatch_TimeoutCancelsPolling(t *testing.T) {
 	err := runRunsWatch(context.Background(), ta.app, "exr_slow", 200*time.Millisecond, false)
 	elapsed := time.Since(start)
 	if err == nil {
-		t.Error("expected timeout error")
+		t.Fatal("expected timeout error")
 	}
 	if elapsed > 2*time.Second {
 		t.Errorf("watch should have respected --timeout; elapsed %v", elapsed)
+	}
+	// The error message must guide the user toward raising --timeout
+	// rather than surfacing a bare "context deadline exceeded". Agents
+	// in the wild were spinning on the same failing watch invocation
+	// because the prior message gave them no recovery action.
+	msg := err.Error()
+	for _, want := range []string{"exr_slow", "--timeout", "200ms"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("watch timeout error missing %q: %s", want, msg)
+		}
 	}
 }
 
