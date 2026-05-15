@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,6 +53,11 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--cd", opts.ScratchDir,
 	}
+	// Pin to gpt-5.5 — the codex CLI's default model varies per release
+	// and the codex-specific defaults (gpt-5.2-codex) reject API-key
+	// auth + don't accept text.verbosity="low". gpt-5.5 is the general
+	// reasoning model and accepts both auth modes and verbosity levels.
+	args = append(args, "-c", `model="gpt-5.5"`)
 	if opts.Tune.Effort != "" {
 		// Codex calls this `model_reasoning_effort`; values: minimal,
 		// low, medium, high, xhigh. "minimal" disables image_gen and
@@ -59,9 +65,12 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		// for safety unless explicitly set.
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Tune.Effort))
 	}
-	if opts.Tune.FastMode {
+	if opts.Tune.FastMode && hasChatGPTLogin() {
 		// Maps to OpenAI service_tier="fast"; 1.5x faster, 2.5x credit
-		// rate. Requires ChatGPT login (not API key).
+		// rate. Requires ChatGPT login (not API key). Setting it with
+		// API-key auth produces "model not supported with ChatGPT
+		// account" 400s, so only enable when auth.json has the tokens
+		// section that indicates an OAuth-based login.
 		args = append(args, "-c", `service_tier="fast"`)
 	}
 	args = append(args, opts.Prompt)
@@ -133,6 +142,25 @@ func hostCodexHome() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".codex")
+}
+
+// hasChatGPTLogin returns true if the host's CODEX_HOME/auth.json has
+// the "tokens" section (OAuth-based ChatGPT login). API-key-only
+// auth.json files contain just OPENAI_API_KEY; setting
+// service_tier="fast" with that produces a 400 about the codex model
+// not being supported on a ChatGPT account.
+func hasChatGPTLogin() bool {
+	b, err := os.ReadFile(filepath.Join(hostCodexHome(), "auth.json"))
+	if err != nil {
+		return false
+	}
+	var probe struct {
+		Tokens map[string]any `json:"tokens"`
+	}
+	if json.Unmarshal(b, &probe) != nil {
+		return false
+	}
+	return len(probe.Tokens) > 0
 }
 
 // installSkillForCodex generates the SKILL.md and writes it to the
