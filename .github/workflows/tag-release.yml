@@ -1,0 +1,124 @@
+name: tag-release
+
+# Cut a new `v*` tag from main and push it. Pushing the tag is what
+# triggers the existing `release.yml` workflow, which produces the
+# cross-platform binaries, GitHub Release, and npm packages. Splitting
+# tag-creation from artifact-build means an accidental tag is just a
+# revert, not a half-published release.
+#
+# Manual dispatch only — we don't want a stray push to main to mint a
+# version. Provide either a semver bump (patch/minor/major; the next
+# version is computed from the latest `v*` tag) or an explicit version
+# string when an out-of-band number is needed (release candidates,
+# coordinated jumps, etc.).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (or 'explicit' to use explicit_version)"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - explicit
+      explicit_version:
+        description: "Explicit version (vX.Y.Z) — only used when bump=explicit"
+        required: false
+        type: string
+
+permissions:
+  contents: write   # needed to push the tag back
+
+jobs:
+  tag:
+    name: tag and push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history + tags so `git tag --list` sees every previous
+          # release. The default shallow clone hides them.
+          fetch-depth: 0
+
+      # workflow_dispatch can target any ref via the GitHub UI's "Use
+      # workflow from" picker. We refuse anything other than main so a
+      # tag never gets pinned to a feature branch by accident.
+      - name: ensure dispatched from main
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::tag-release must be dispatched against main; got ${GITHUB_REF}"
+            exit 1
+          fi
+
+      - name: compute next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT: ${{ inputs.explicit_version }}
+        run: |
+          set -euo pipefail
+          if [ "$BUMP" = "explicit" ]; then
+            if [ -z "$EXPLICIT" ]; then
+              echo "::error::bump=explicit requires explicit_version (e.g. v0.3.0)"
+              exit 1
+            fi
+            # Minimal sanity check: must start with 'v' + digit.
+            case "$EXPLICIT" in
+              v[0-9]*) next="$EXPLICIT" ;;
+              *) echo "::error::explicit_version must look like vX.Y.Z; got $EXPLICIT"; exit 1 ;;
+            esac
+          else
+            latest=$(git tag --list 'v*' --sort=-v:refname | head -1)
+            if [ -z "$latest" ]; then
+              latest="v0.0.0"
+            fi
+            echo "Latest tag: $latest"
+            v=${latest#v}
+            IFS=. read -r major minor patch <<< "$v"
+            : "${major:=0}" "${minor:=0}" "${patch:=0}"
+            case "$BUMP" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              patch) patch=$((patch+1)) ;;
+              *) echo "::error::unknown bump value: $BUMP"; exit 1 ;;
+            esac
+            next="v${major}.${minor}.${patch}"
+          fi
+
+          # Refuse to clobber an existing tag — the downstream release
+          # workflow would either fail on the duplicate or, worse,
+          # publish to an existing GitHub Release.
+          if git rev-parse "refs/tags/${next}" >/dev/null 2>&1; then
+            echo "::error::tag ${next} already exists; refusing to overwrite"
+            exit 1
+          fi
+          echo "Next tag: $next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      - name: create and push tag
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # CI-side identity for the annotated tag. The repo's main
+          # branch is the source of truth; this identity only appears
+          # on the tag object, not on any commit.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag $TAG; release.yml will now build and publish."
+
+      - name: summary
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          {
+            echo "### Tagged \`$TAG\`"
+            echo
+            echo "Watch the [release workflow](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/release.yml) for build and publish progress."
+          } >> "$GITHUB_STEP_SUMMARY"
