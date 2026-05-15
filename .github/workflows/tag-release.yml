@@ -12,8 +12,10 @@ name: tag-release
 # string when an out-of-band number is needed (release candidates,
 # coordinated jumps, etc.).
 #
-# Step bodies live in `.github/scripts/` rather than inline so they
-# can be exercised locally with the same env vars CI uses.
+# The substantive logic lives in `scripts/` so it can be exercised
+# locally without the GitHub Actions runtime. The workflow itself only
+# wires CI-specific glue (capturing stdout into $GITHUB_OUTPUT, naming
+# the bot author via $TAG_AUTHOR).
 on:
   workflow_dispatch:
     inputs:
@@ -46,17 +48,23 @@ jobs:
           # release. The default shallow clone hides them.
           fetch-depth: 0
 
-      - name: ensure dispatched from main
-        run: .github/scripts/ensure-on-main.sh
+      - name: ensure on main
+        run: ./scripts/ensure-on-main.sh
 
+      # next-tag.sh prints the chosen tag on stdout and progress on
+      # stderr, so the one-liner captures only the tag itself for
+      # downstream steps. The numeric user-id in TAG_AUTHOR (on the
+      # next step) identifies the github-actions[bot] account so the
+      # tag is attributed to the bot in GitHub's UI.
       - name: compute next version
         id: next
         env:
           BUMP: ${{ inputs.bump }}
           EXPLICIT_VERSION: ${{ inputs.explicit_version }}
-        run: .github/scripts/next-tag.sh
+        run: echo "tag=$(./scripts/next-tag.sh)" >> "$GITHUB_OUTPUT"
 
       - name: create and push tag
         env:
           TAG: ${{ steps.next.outputs.tag }}
-        run: .github/scripts/push-tag.sh
+          TAG_AUTHOR: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+        run: ./scripts/push-tag.sh
