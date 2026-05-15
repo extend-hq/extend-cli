@@ -819,6 +819,70 @@
       ]
     },
     {
+      "id": "W-5",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Fill the form fields in form1040.pdf using the values from w2.pdf. Save the filled PDF to ./filled.pdf.",
+      "files": [
+        "w2.pdf",
+        "form1040.pdf"
+      ],
+      "expected_output": "Agent reads values from w2.pdf (via `extend parse` or `extend extract`) and runs `extend edit form1040.pdf` with --output-file ./filled.pdf. Critically, edit targets form1040.pdf (the form) NOT w2.pdf (the source).",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend edit form1040.pdf` (the target form)",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "args": [
+                "form1040.pdf"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did NOT edit the source W-2",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "args": [
+                "w2.pdf"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent passed --output-file as the prompt asked",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "flag": "output-file"
+            }
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "Before calling `extend edit`, the agent read values from w2.pdf using `extend parse` or `extend extract` (or explained that it inferred the W-2 values from the prompt without needing to read the source). The agent did not silently invent W-2 values."
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate extractor IDs",
+          "patterns": [
+            "ex_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
+    },
+    {
       "id": "Q-1",
       "category": "run-type-quirk",
       "path": "B",

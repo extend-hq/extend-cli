@@ -1,6 +1,31 @@
 package client
 
-import "time"
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// WaitTimeoutError is returned by the wait helpers when the configured
+// Timeout elapses before the run reaches a terminal state. It is distinct
+// from a parent-context cancellation (which surfaces the parent's err
+// instead) so callers can tell "user gave up" from "we hit our own clock"
+// and render an actionable retry hint.
+type WaitTimeoutError struct {
+	// Timeout is the budget that was exceeded.
+	Timeout time.Duration
+}
+
+func (e *WaitTimeoutError) Error() string {
+	return fmt.Sprintf("wait timed out after %s without reaching a terminal state", e.Timeout)
+}
+
+// Is lets errors.Is(err, context.DeadlineExceeded) match this typed error.
+// Existing callers that only check for DeadlineExceeded keep working; new
+// callers can errors.As to grab the timeout duration for richer messages.
+func (e *WaitTimeoutError) Is(target error) bool {
+	return target == context.DeadlineExceeded
+}
 
 // WaitProfile names a polling cadence used by long-running commands.
 //

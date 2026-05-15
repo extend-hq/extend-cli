@@ -48,12 +48,30 @@ var DefaultRetryConfig = RetryConfig{
 	MaxBackoff:     5 * time.Second,
 }
 
+// DefaultHTTPTimeout caps individual non-upload HTTP requests (each
+// POST/GET, not the overall wait budget). Configurable via
+// --http-timeout / EXTEND_HTTP_TIMEOUT. Tuned for the common case
+// of small JSON request/response payloads against a region close to
+// the caller; uploads use a separate untimed client (see UploadHTTP)
+// because end-to-end HTTP timeouts are hostile to large bodies.
+const DefaultHTTPTimeout = 60 * time.Second
+
 type Client struct {
 	BaseURL     string
 	APIKey      string
 	APIVersion  string
 	WorkspaceID string
-	HTTP        *http.Client
+	// HTTP carries the configured per-request timeout (default 60s).
+	// Used for every call EXCEPT upload streams.
+	HTTP *http.Client
+	// UploadHTTP is used by streaming uploads (multipart bodies over
+	// io.Pipe). It has no http.Client-level timeout; the caller's
+	// context is the only deadline. End-to-end HTTP timeouts are
+	// counterproductive here because a legitimate 100MB upload over
+	// a flaky connection can easily exceed the 60s normal-request
+	// budget, surfacing as a vague "context deadline exceeded"
+	// instead of a fixable error.
+	UploadHTTP *http.Client
 
 	// Debug, when non-nil, receives one log line per HTTP request and
 	// response. Used by `--debug` and EXTEND_DEBUG=1. The Authorization
@@ -67,8 +85,19 @@ func New(apiKey string) *Client {
 		BaseURL:    DefaultBaseURL,
 		APIKey:     apiKey,
 		APIVersion: DefaultAPIVersion,
-		HTTP:       &http.Client{Timeout: 60 * time.Second},
+		HTTP:       &http.Client{Timeout: DefaultHTTPTimeout},
+		UploadHTTP: &http.Client{},
 	}
+}
+
+// SetHTTPTimeout overrides the per-request timeout used by every call
+// except upload streams. Passing 0 disables the timeout entirely
+// (rely on context cancellation only). UploadHTTP is unaffected.
+func (c *Client) SetHTTPTimeout(d time.Duration) {
+	if c.HTTP == nil {
+		c.HTTP = &http.Client{}
+	}
+	c.HTTP.Timeout = d
 }
 
 var Regions = map[string]string{
@@ -102,6 +131,27 @@ func (e *APIError) Error() string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	return c.doVia(c.HTTP, ctx, method, path, body, contentType)
+}
+
+// doUpload is the variant used by streaming-upload paths
+// (UploadStream). Routes through UploadHTTP so end-to-end timeouts on
+// the normal client don't cut large multipart bodies short.
+func (c *Client) doUpload(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	httpClient := c.UploadHTTP
+	if httpClient == nil {
+		// Defensive default: if a caller built a Client manually and
+		// forgot to set UploadHTTP, fall back to a fresh untimed
+		// client instead of accidentally inheriting HTTP's timeout.
+		httpClient = &http.Client{}
+	}
+	return c.doVia(httpClient, ctx, method, path, body, contentType)
+}
+
+// doVia is the shared request-issuing core. The httpClient parameter
+// is the only thing that varies between normal and upload paths:
+// header set, debug logging, and error decoding are identical.
+func (c *Client) doVia(httpClient *http.Client, ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return nil, err
@@ -118,7 +168,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 
 	c.debugRequest(req)
 	start := time.Now()
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		c.debugTransportErr(method, c.BaseURL+path, time.Since(start), err)
 		return nil, err

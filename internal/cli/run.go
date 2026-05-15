@@ -54,10 +54,10 @@ is treated as terminal because it pauses for human action; use the
 dashboard URL to review and approve.
 
 --outputs lets a caller seed the run with pre-computed processor outputs
-(skips the matching steps). Pass a JSON array inline, as a plain path, or as
-an absolute file:// URI. Each entry is {processorId, output}; output is the
-same shape that processor would normally return (extract: {value}, classify:
-{id, type, confidence}, split: {splits[]}).
+(skips the matching steps). Source: inline JSON, a plain path, an absolute
+file:// URI, or '-' to read from stdin. Each entry is {processorId,
+output}; output is the same shape that processor would normally return
+(extract: {value}, classify: {id, type, confidence}, split: {splits[]}).
 
 --secret key=value provides per-run secrets that step actions can reference.
 Repeatable.`,
@@ -103,8 +103,8 @@ Repeatable.`,
 			cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or specific (e.g. 3)")
 			cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
-			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum time to wait when --wait is set")
-			cmd.Flags().StringVar(&outputsPath, "outputs", "", "JSON array, path, or file:// URI for pre-computed [{processorId, output}] entries")
+			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum total time to wait for the run to reach a terminal state when --wait is set (not a per-HTTP-request timeout; see --http-timeout)")
+			cmd.Flags().StringVar(&outputsPath, "outputs", "", "Pre-computed [{processorId, output}] entries that seed the run and skip matching steps. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			meta.attach(cmd)
@@ -184,7 +184,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return fmt.Errorf("wait: %w", err)
+		return formatActionWaitError(err, run.ID)
 	}
 
 	if err := renderWorkflowResult(app, final); err != nil {

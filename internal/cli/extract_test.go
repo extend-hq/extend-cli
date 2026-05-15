@@ -8,6 +8,35 @@ import (
 	"time"
 )
 
+// TestExtractHelpDistinguishesConfigFlags locks in the disambiguation
+// between --config and --override-config. The two flags do orthogonal
+// things (--config = no saved extractor, --override-config = merge onto
+// a --using extractor) but their names sound related, which has
+// confused agents and humans alike. The Details, Gotchas, and flag
+// usage strings must all surface the distinction; if a refactor loses
+// it, this test fires.
+func TestExtractHelpDistinguishesConfigFlags(t *testing.T) {
+	app := &App{}
+	doc := newExtractDoc(app)
+
+	// Details must explain that the two flags are NOT interchangeable.
+	if !strings.Contains(doc.Details, "NOT") || !strings.Contains(doc.Details, "interchangeable") {
+		t.Errorf("extract Details should call out that --config and --override-config are not interchangeable; got:\n%s", doc.Details)
+	}
+
+	// At least one gotcha must contrast the two flags.
+	var gotchaFound bool
+	for _, g := range doc.Gotchas {
+		if strings.Contains(g, "--config") && strings.Contains(g, "--override-config") {
+			gotchaFound = true
+			break
+		}
+	}
+	if !gotchaFound {
+		t.Errorf("extract should have a gotcha contrasting --config and --override-config; got: %v", doc.Gotchas)
+	}
+}
+
 func TestExtract_AsyncReturnsRunID(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/extract_runs" || r.Method != http.MethodPost {
@@ -79,6 +108,40 @@ func TestExtract_WaitPath(t *testing.T) {
 	}
 	if getCalls < 2 {
 		t.Errorf("expected at least 2 GET calls, got %d", getCalls)
+	}
+}
+
+// TestExtract_WaitTimeoutSurfacesActionableMessage locks in the action-
+// verb wait timeout wording. Agents previously got back a bare "wait:
+// context deadline exceeded" with no recovery action, which led them to
+// silently rerun the same blocking command. The new message must name
+// the run ID, the --timeout flag, and the --wait=false / runs watch
+// alternative.
+func TestExtract_WaitTimeoutSurfacesActionableMessage(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			writeJSON(w, 200, map[string]any{"id": "exr_slow", "status": "PENDING"})
+		case r.Method == http.MethodGet:
+			writeJSON(w, 200, map[string]any{"id": "exr_slow", "status": "PROCESSING"})
+		}
+	})
+	ta := newTestApp(t, srv)
+
+	err := runExtract(context.Background(), ta.app, extractParams{
+		input:       "file_xK9",
+		extractorID: "ex_abc",
+		wait:        true,
+		timeout:     150 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"exr_slow", "--timeout", "--wait=false", "extend runs watch exr_slow"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("action wait timeout error missing %q: %s", want, msg)
+		}
 	}
 }
 

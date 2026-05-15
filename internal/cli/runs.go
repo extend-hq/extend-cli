@@ -206,7 +206,7 @@ works as expected.`,
 			return runRunsWatch(cmd.Context(), app, args[0], timeout, exitStatus)
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
 		},
 	}
@@ -294,7 +294,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderWithDefault(app, final, output.FormatJSON)
@@ -304,7 +304,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderParseResult(app, final, "markdown")
@@ -314,7 +314,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderClassifyResult(app, final)
@@ -324,7 +324,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderSplitResult(app, final)
@@ -334,7 +334,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderWorkflowResult(app, final)
@@ -344,7 +344,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return fmt.Errorf("wait: %w", err)
+			return formatWatchWaitError(err, id)
 		}
 		status = final.Status
 		renderErr = renderEditResult(app, final)

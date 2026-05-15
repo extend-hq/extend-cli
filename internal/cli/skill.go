@@ -349,14 +349,44 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 ### Fill a PDF form
 
-Pass values inline as ` + "`--instructions`" + ` and auto-download the filled PDF:
+**Simple fills**: pass values inline as ` + "`--instructions`" + ` and auto-download
+the filled PDF. The server detects form fields and applies the prose:
 
     extend edit form.pdf \
         --instructions "name is Acme Corp; date is 2026-04-15" \
         --output-file filled.pdf
 
+**Structured fills** (when you already have a populated schema, or want a
+repeatable shape): scaffold the schema once, populate values on each
+field per the generated shape, and then run ` + "`edit --schema`" + `:
+
+    extend edit schema generate form.pdf > schema.json
+    # populate values on each field per the generated shape, then:
+    extend edit form.pdf --schema schema.json --output-file filled.pdf
+
+Combine both for fills that need conditional or formatting guidance the
+schema cannot express:
+
+    extend edit form.pdf --schema schema.json \
+        --instructions "format dates as MM/DD/YYYY; leave spouse blank if single"
+
 Without ` + "`--output-file`" + `, the filled PDF stays on the server; fetch later
 with ` + "`extend files download <file-id>`" + `.
+
+### Fill a PDF form from values in another document
+
+When the values live in a source document (e.g. fill a 1040 from a W-2):
+
+1. Extract or parse the source to surface the values you need:
+
+       extend parse w2.pdf -o markdown > w2-content.md
+       # or, with a configured extractor:
+       extend extract w2.pdf --using ex_xxx -o json > w2-values.json
+
+2. Fill the target form with those values via ` + "`--instructions`" + `,
+   ` + "`--schema`" + `, or both — see "Fill a PDF form" above. Make sure the
+   document you pass to ` + "`extend edit`" + ` is the *target* (the form), not
+   the *source* (the document you read values from).
 
 ### Iterate an extractor against an evaluation set
 

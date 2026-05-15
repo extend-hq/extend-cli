@@ -136,7 +136,7 @@ func (c *Client) UploadStream(ctx context.Context, body io.Reader, filename, con
 		errCh <- nil
 	}()
 
-	resp, err := c.do(ctx, http.MethodPost, "/files/upload", pr, mw.FormDataContentType())
+	resp, err := c.doUpload(ctx, http.MethodPost, "/files/upload", pr, mw.FormDataContentType())
 	if err != nil {
 		return nil, err
 	}

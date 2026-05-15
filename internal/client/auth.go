@@ -25,6 +25,7 @@ const (
 	EnvRegion        = "EXTEND_REGION"
 	EnvWorkspaceID   = "EXTEND_WORKSPACE_ID"
 	EnvAPIVersion    = "EXTEND_API_VERSION"
+	EnvHTTPTimeout   = "EXTEND_HTTP_TIMEOUT"
 	EnvWebhookSecret = "EXTEND_WEBHOOK_SECRET"
 	EnvDebug         = "EXTEND_DEBUG"
 	EnvOutput        = "EXTEND_OUTPUT"
@@ -40,6 +41,7 @@ var EnvVars = []EnvVarSpec{
 	{Name: EnvRegion, Description: "Region: us|us2|eu. Selects the regional API endpoint."},
 	{Name: EnvWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
 	{Name: EnvAPIVersion, Description: "Pin the API version sent with each request. Defaults to " + DefaultAPIVersion + "."},
+	{Name: EnvHTTPTimeout, Description: "Per-HTTP-request timeout (e.g. 60s, 2m). Applies to each API call individually; uploads use a separate untimed client. Distinct from per-command --timeout (overall wait). Defaults to 60s."},
 	{Name: EnvWebhookSecret, Description: "Default signing secret used by 'extend webhooks verify'."},
 	{Name: EnvDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 	{Name: EnvOutput, Description: "Default output format when --output is not set: json|yaml|raw|id|table|markdown."},
