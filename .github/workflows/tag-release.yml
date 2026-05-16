@@ -1,6 +1,9 @@
 name: tag-release
 
-# Cut a v* tag from main; release.yml triggers on tag push.
+# Cut a v* tag from main, then dispatch release.yml at the new tag.
+# We can't rely on the tag-push event itself to trigger release.yml
+# because tag pushes made with the default GITHUB_TOKEN do not
+# trigger downstream workflows.
 on:
   workflow_dispatch:
     inputs:
@@ -20,7 +23,8 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: write    # push the new tag
+  actions: write     # dispatch release.yml
 
 jobs:
   tag:
@@ -46,3 +50,9 @@ jobs:
           TAG: ${{ steps.next.outputs.tag }}
           TAG_AUTHOR: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
         run: ./scripts/push-tag.sh
+
+      - name: dispatch release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.next.outputs.tag }}
+        run: gh workflow run release.yml --ref "$TAG"

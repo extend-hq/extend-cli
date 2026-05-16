@@ -6,6 +6,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Manual + cross-workflow dispatch. The tag-release workflow uses
+  # this to trigger a release immediately after pushing a new tag,
+  # because tag pushes made with the default GITHUB_TOKEN do not
+  # themselves trigger downstream workflows.
+  workflow_dispatch:
 
 permissions:
   contents: write
