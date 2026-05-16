@@ -1,0 +1,48 @@
+name: tag-release
+
+# Cut a v* tag from main; release.yml triggers on tag push.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (or 'explicit' to use explicit_version)"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - explicit
+      explicit_version:
+        description: "Explicit version (vX.Y.Z) — only used when bump=explicit"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: tag and push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: ensure on main
+        run: ./scripts/ensure-on-main.sh
+
+      - name: compute next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.explicit_version }}
+        run: echo "tag=$(./scripts/next-tag.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: create and push tag
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+          TAG_AUTHOR: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+        run: ./scripts/push-tag.sh
