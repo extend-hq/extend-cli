@@ -59,19 +59,23 @@ func prependPath(env []string, dir string) []string {
 	return append(env, "PATH="+dir+":"+os.Getenv("PATH"))
 }
 
-// generateSkillTo runs `go run ./cmd/extend skill` and writes the output
-// to dst. Mkdir-p the parent if needed.
-func generateSkillTo(dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+// installSkillTo runs `go run ./cmd/extend skill install --target <dir>`
+// to lay down the full skill tree (SKILL.md plus references/*.md) under
+// dir. The CLI handles target-path normalization itself (any of
+// ~/.agents, ~/.agents/skills, ~/.agents/skills/extend collapses to the
+// same final dir), so callers can pass the harness-specific root and
+// let the install command decide where to land.
+func installSkillTo(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "run", "./cmd/extend", "skill")
+	cmd := exec.Command("go", "run", "./cmd/extend", "skill", "install", "--target", dir)
 	cmd.Dir = repoRoot()
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("go run extend skill: %w", err)
+	cmd.Stderr = os.Stderr // surface failures during eval runs
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go run extend skill install: %w", err)
 	}
-	return os.WriteFile(dst, out, 0o644)
+	return nil
 }
 
 // repoRoot returns the parent module's directory (extend-cli/) by

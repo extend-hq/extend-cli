@@ -121,12 +121,10 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	return res, nil
 }
 
-// installSkillForClaude generates the SKILL.md and writes it to the
-// per-harness path under HomeDir. Claude Code reads from
-// $HOME/.claude/skills/<name>/SKILL.md.
+// installSkillForClaude lays down SKILL.md and the references/ tree at
+// $HOME/.claude/skills/extend/, the Claude Code-specific path.
 func installSkillForClaude(homeDir string) error {
-	dst := filepath.Join(homeDir, ".claude", "skills", "extend", "SKILL.md")
-	return generateSkillTo(dst)
+	return installSkillTo(filepath.Join(homeDir, ".claude", "skills", "extend"))
 }
 
 // claudeFinalMessage walks the parsed event stream for the agent's

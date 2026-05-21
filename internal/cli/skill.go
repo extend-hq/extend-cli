@@ -4,54 +4,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-// This file is the SKILL.md generator: a pure function over the typed
-// CommandDoc tree plus two cobra commands (`extend skill` and
-// `extend skill install`) that surface it.
+// SKILL.md generator and installer.
 //
-// The body intentionally targets ~5,000 tokens / ~500 lines so it fits
-// comfortably in agent skill catalogs (Claude Code, Codex, OpenCode, and
-// any other consumer of the agentskills.io standard).
+// The body intentionally stays slim: just frontmatter, auth, action
+// selection, active-behaviour rules, brief wait/pagination, and a
+// references section pointing at on-demand detail (references/*.md and
+// `extend help <topic>`). Detail content lives in CommandDoc help-topic
+// bodies (one per references/*.md file), so the same source is the
+// canonical truth for both surfaces.
 //
-// Body composition (in order):
-//
-//  1. YAML frontmatter (`name`, `description` from descriptionVerbs).
-//  2. Authentication — minimal: API key + region + pointer to topic.
-//  3. Pick the right action — table generated from Group:"Actions" leaves.
-//  4. Wait, async, watch — hand-written cross-cutting prose.
-//  5. Pagination — verbatim guidance with bash example.
-//  6. Common workflows — hand-written multi-command recipes.
-//  7. Command reference — per-section emitters (actions, inspection,
-//     processor resources [parametric], webhooks, evaluations).
-//  8. Reference topics — pointers to `extend help <topic>`.
-//
-// Hand-written claims about the doc tree (description verbs, resource
-// family list, wait-by-default verbs, pagination example commands and
-// flags, workflow recipe command paths) are guarded by tests in
-// skill_test.go. The renderer + tests + this comment are the contract:
-// if a hand-written claim drifts from the typed tree, a test fails.
+// `extend skill install` writes SKILL.md plus the references/ directory
+// to a target directory (default ~/.agents/skills/extend/). There is no
+// stdout-dump path; inspect the rendered output by installing to a
+// throwaway directory and `cat`ing the files.
 
 const skillName = "extend"
 
 // descriptionVerb pairs a user-intent phrase that drives skill triggering
-// with the action-verb command it maps to. The frontmatter description is
-// rendered from this table; tests assert each Command resolves in the
+// with the action-verb command it maps to. The frontmatter description
+// is rendered from this table; tests assert each Command resolves in the
 // doc tree, so the description cannot drift unnoticed.
 type descriptionVerb struct {
-	// Phrase is the imperative user-intent fragment as it should appear
-	// in the description text (lowercase, no leading article).
-	Phrase string
-	// Command is the corresponding top-level command name. Must resolve
-	// in RootDoc.Subcommands.
+	Phrase  string
 	Command string
 }
 
-// descriptionVerbs is the ordered list of action verbs the skill claims
-// to handle. Order is the order they appear in the rendered description.
 var descriptionVerbs = []descriptionVerb{
 	{"extracting structured data from PDFs or images", "extract"},
 	{"parsing documents to text or markdown", "parse"},
@@ -65,15 +48,10 @@ var descriptionVerbs = []descriptionVerb{
 
 // disambiguationExamples are concrete user-phrasings the description
 // surfaces to push the agent into triggering even when the user hasn't
-// said "Extend" by name. Per agentskills.io's "be pushy" guidance: the
-// most useful negative-failure case is the user describing the task
-// without the brand name.
+// said "Extend" by name.
 //
 // IMPORTANT: do not paste eval-set prompts (or paraphrases of them) in
-// here. Doing so overfits the description to the test set. The
-// `descriptionVerbs` table already covers run inspection by enumerating
-// the ID prefixes; the agent gets the run-watching coverage from there
-// without seeing a near-verbatim copy of the S-3 prompt.
+// here. Doing so overfits the description to the test set.
 var disambiguationExamples = []string{
 	`pull line items from these invoices`,
 	`OCR these receipts`,
@@ -82,26 +60,16 @@ var disambiguationExamples = []string{
 	`split this combined PDF into individual statements`,
 }
 
-// resourceFamily captures one of the four processor families (extractors,
-// classifiers, splitters, workflows). The skill renders these
-// parametrically because their command shape is identical; per-family
-// expansion in the catalog would be ~115 lines of repetition.
+// resourceFamily captures one of the four processor families. The skill
+// renders these parametrically in the catalog because their command
+// shape is identical.
 type resourceFamily struct {
-	// Plural is the noun used in command paths: "extractors", etc.
-	Plural string
-	// Singular is the noun used in prose: "extractor", etc.
+	Plural   string
 	Singular string
-	// IDPrefix is the ID prefix for instances of this resource: "ex_", etc.
 	IDPrefix string
-	// RunVerb is the action verb that consumes this resource type:
-	// "extract" for extractors, "run" for workflows.
-	RunVerb string
+	RunVerb  string
 }
 
-// resourceFamilies enumerates the four processor families. Order is the
-// order they appear in the rendered prose. A test asserts each Plural
-// resolves in the doc tree with the expected seven-command shape, so
-// adding a fifth family or letting one drift forces an explicit update.
 var resourceFamilies = []resourceFamily{
 	{Plural: "extractors", Singular: "extractor", IDPrefix: "ex_", RunVerb: "extract"},
 	{Plural: "classifiers", Singular: "classifier", IDPrefix: "cl_", RunVerb: "classify"},
@@ -123,14 +91,12 @@ var processorFamilyCommands = []string{
 }
 
 // waitDefaultVerbs lists the action verbs whose runs wait for terminal
-// state by default. The "Wait, async, watch" prose section asserts these
-// behaviours; a test asserts each entry's CommandDoc.Wait.DefaultsToWait
-// matches the documented value.
+// state by default. The Wait section asserts these behaviours; a test
+// asserts each entry's CommandDoc.Wait.DefaultsToWait matches.
 var waitDefaultVerbs = []string{"extract", "classify", "parse", "split", "edit"}
 
 // asyncDefaultVerbs lists the action verbs whose runs are async by
-// default (workflow runs only, currently). Same guard as
-// waitDefaultVerbs.
+// default (workflow runs only, currently).
 var asyncDefaultVerbs = []string{"run"}
 
 // paginationExampleCommand is the command path used in the bash example
@@ -140,11 +106,10 @@ var paginationExampleCommand = []string{"runs", "list"}
 
 // paginationExampleFlags are the flags referenced in the pagination
 // example. Asserted to exist on paginationExampleCommand.
-var paginationExampleFlags = []string{"type", "using", "status", "page-token", "all", "output"}
+var paginationExampleFlags = []string{"type", "using", "status", "max", "all", "output"}
 
 // renderDescription assembles the YAML `description` field from
-// descriptionVerbs and the disambiguation examples. Public via tests so
-// the rendering can be inspected without invoking the full renderer.
+// descriptionVerbs and the disambiguation examples.
 func renderDescription() string {
 	verbs := make([]string, len(descriptionVerbs))
 	for i, v := range descriptionVerbs {
@@ -161,8 +126,6 @@ func renderDescription() string {
 	)
 }
 
-// joinSerial joins items with commas and a serial-comma'd final
-// conjunction ("a, b, or c"). Empty input returns "".
 func joinSerial(items []string, conjunction string) string {
 	switch len(items) {
 	case 0:
@@ -175,38 +138,56 @@ func joinSerial(items []string, conjunction string) string {
 	return strings.Join(items[:len(items)-1], ", ") + ", " + conjunction + " " + items[len(items)-1]
 }
 
-// RenderSkill produces the full SKILL.md content (frontmatter + markdown
-// body) for the given doc tree. Pure function: no I/O, no API calls, no
-// filesystem access. Stable: equivalent input produces equivalent output
-// regardless of environment. Tests rely on these properties.
+// SkillBundle is everything `extend skill install` writes: the SKILL.md
+// body plus one file under references/ for every detail topic.
+// Returned by RenderSkillBundle so the install command can compute the
+// full output in pure-Go before touching the filesystem.
+type SkillBundle struct {
+	// SkillMD is the body of SKILL.md (frontmatter + slim markdown).
+	SkillMD string
+	// References maps relative filename ("workflows.md", "auth.md", …)
+	// to the markdown body for references/<name>.
+	References map[string]string
+}
+
+// RenderSkillBundle returns the SKILL.md content + every reference
+// file. Pure function over the typed doc tree: no I/O, no API calls.
+func RenderSkillBundle(root *CommandDoc) SkillBundle {
+	return SkillBundle{
+		SkillMD:    RenderSkill(root),
+		References: renderReferences(root),
+	}
+}
+
+// RenderSkill produces the SKILL.md body (frontmatter + slim markdown).
+// Detail lives in references/*.md and `extend help <topic>`; this body
+// just gives the agent enough shape to know when to load deeper
+// content. Pure function: equivalent input produces equivalent output.
 func RenderSkill(root *CommandDoc) string {
 	var b strings.Builder
-
 	writeSkillFrontmatter(&b)
 	writeSkillAuth(&b)
 	writeSkillPickActions(&b, root)
 	writeSkillActiveBehaviour(&b)
 	writeSkillWait(&b)
 	writeSkillPagination(&b)
-	writeSkillWorkflows(&b)
-	writeSkillCatalog(&b, root)
-	writeSkillTopics(&b, root)
-
+	writeSkillReferences(&b, root)
 	return b.String()
 }
 
-// writeSkillActiveBehaviour documents how the agent should behave once
-// this skill is loaded. These are not command-shape rules — they're
-// shell-agent disposition rules that fire on every prompt while the
-// skill is active. Keep this section short and generic; if a rule
-// only applies to one command, put it on that command's `Gotchas`
-// instead.
-func writeSkillActiveBehaviour(b *strings.Builder) {
-	b.WriteString("## When this skill is active\n\n")
-	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
-	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
-	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n")
-	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
+// renderReferences returns one file per help topic plus convenience
+// pointers. The map keys are filenames relative to a references/
+// directory; values are markdown bodies (currently produced by topic
+// RenderBody functions).
+func renderReferences(root *CommandDoc) map[string]string {
+	out := map[string]string{}
+	for _, e := range Walk(root) {
+		if !e.Doc.IsTopic() {
+			continue
+		}
+		out[e.Doc.Name()+".md"] = e.Doc.RenderBody(root)
+	}
+	return out
 }
 
 func writeSkillFrontmatter(b *strings.Builder) {
@@ -224,376 +205,80 @@ func writeSkillAuth(b *strings.Builder) {
 	b.WriteString("    export EXTEND_API_KEY=sk_xxx              # required\n")
 	b.WriteString("    export EXTEND_REGION=us|us2|eu            # optional, default us\n")
 	b.WriteString("    export EXTEND_WORKSPACE_ID=ws_xxx         # required only for org-scoped API keys\n\n")
-	b.WriteString("Per-call equivalents: `--region eu`, `--workspace ws_xxx`. For API-version pinning or `EXTEND_BASE_URL`, run `extend help auth`.\n\n")
+	b.WriteString("Per-call equivalents: `--region eu`, `--workspace ws_xxx`. For API-version pinning, EXTEND_BASE_URL, multi-environment keys, or auth troubleshooting: `references/auth.md` (or `extend help auth`).\n\n")
 }
 
-// writeSkillPickActions renders the "which verb do I run" table dynamically
-// from the Group:"Actions" leaves at the top level. Each row pairs the
-// command's Summary with its first-form invocation. Pulled from the live
-// tree — adding a new action verb shows up here automatically.
 func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 	b.WriteString("## Pick the right action\n\n")
 	b.WriteString("| Need | Command |\n")
 	b.WriteString("|---|---|\n")
-
 	for _, sub := range root.Subcommands {
 		if sub.Group != "Actions" {
 			continue
 		}
 		fmt.Fprintf(b, "| %s | `extend %s` |\n", sub.Summary, sub.Use)
 	}
-
 	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch`.\n\n")
-	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` takes `--instructions` (free-form prose). See `extend edit --help` for the full set.\n\n")
+	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` takes `--instructions` (free-form prose). Full per-command catalog: `references/commands.md`.\n\n")
+}
+
+func writeSkillActiveBehaviour(b *strings.Builder) {
+	b.WriteString("## When this skill is active\n\n")
+	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
+	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
+	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n")
+	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
 }
 
 func writeSkillWait(b *strings.Builder) {
 	b.WriteString("## Wait, async, watch\n\n")
-	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`) **wait by default** for terminal state and print the result. Pass `--wait=false` to return the run ID immediately.\n\n")
-	b.WriteString("`extend run` (workflow runs) is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
-	b.WriteString("Follow a run by ID, regardless of type:\n\n")
-	b.WriteString("    extend runs watch <run-id>\n\n")
-	b.WriteString("The run type is auto-detected from the ID prefix (`exr_`, `pr_`, `clr_`, `splr_`, `workflow_run_`, `edr_`). Use `--exit-status` to gate downstream scripts on success:\n\n")
-	b.WriteString("    extend runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
-	b.WriteString("To inspect current state without polling: `extend runs get <id>`.\n\n")
-	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
-	b.WriteString("- **Edit runs** (`edr_*`) are not listable — the API has no `LIST /edit_runs`. Use `extend runs get edr_xxx` for individual edit runs.\n")
-	b.WriteString("- **Parse runs** (`pr_*`) cannot be cancelled; the API rejects the attempt. Other run types support best-effort cancel.\n")
-	b.WriteString("- **Workflow batches** (returned by `extend run batch`) have **no GET endpoint**. `extend batches get`/`watch` work only on processor batches (`bpr_*`). Track workflow batches with `extend runs list --type workflow --batch <id>`.\n\n")
-	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
+	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`) **wait by default** for terminal state. Pass `--wait=false` to return the run ID immediately. `extend run` (workflow runs) is **async by default** — pass `--wait` to block.\n\n")
+	b.WriteString("Follow any run by ID (type auto-detected from the prefix `exr_`/`pr_`/`clr_`/`splr_`/`workflow_run_`/`edr_`):\n\n")
+	b.WriteString("    extend runs watch <run-id> --exit-status && downstream-script.sh\n\n")
+	b.WriteString("For per-command wait/profile/failure tables, polling cadence, and run-type quirks (parse cancellation, edit-run listability, workflow batches): `references/lifecycle.md` (or `extend help lifecycle`).\n\n")
 }
 
 func writeSkillPagination(b *strings.Builder) {
 	b.WriteString("## Pagination\n\n")
-	b.WriteString("List commands return one page by default. Pass `--max N` to fetch up to N total results — the CLI auto-paginates internally and never makes you handle page tokens:\n\n")
-	b.WriteString(`    extend runs list --type extract --status FAILED --max 100
-
-`)
-	b.WriteString("Use `--all` only when you genuinely want every result (scripts, not agents). Power users can still cursor explicitly with `--page-token`, but most callers should not need to see tokens at all.\n\n")
-	b.WriteString("`--jq <expr>` filters JSON output before rendering, but cannot combine with `-o markdown` (markdown is not JSON). Use `-o json --jq '...'` and select the markdown chunk paths instead.\n\n")
+	b.WriteString("List commands return one page by default. `--max N` auto-paginates internally up to N results; tokens stay hidden. Avoid `--all` in agent contexts (no bound).\n\n")
+	b.WriteString(`    extend runs list --type extract --status FAILED --max 100` + "\n\n")
+	b.WriteString("For the explicit token-by-token pattern, --jq guidance, and per-command output defaults: `references/output.md` (or `extend help output`).\n\n")
 }
 
-// writeSkillWorkflows emits hand-authored multi-command recipes for the
-// most common end-to-end tasks an agent will perform. Per the
-// agentskills.io best-practices guide ("favor procedures over
-// declarations"), this teaches the agent how to chain commands rather
-// than just listing them.
-//
-// Every `extend <command>` token in this section is asserted to resolve
-// in the doc tree by TestSkillWorkflowsReferenceRealCommands; if a
-// command is renamed or removed, the test fails until the recipe is
-// updated.
-func writeSkillWorkflows(b *strings.Builder) {
-	b.WriteString(`## Common workflows
+// writeSkillReferences emits the "load on demand" section: each topic
+// gets a one-line entry naming both the file path and the equivalent
+// `extend help <topic>` command, plus a one-sentence trigger hint.
+// Order is hand-curated to put the highest-leverage references first.
+func writeSkillReferences(b *strings.Builder, root *CommandDoc) {
+	b.WriteString("## When you need more detail\n\n")
+	b.WriteString("Load these on demand when the situation matches. They live alongside this `SKILL.md` under `references/`, and are also available offline via `extend help <topic>`:\n\n")
 
-### Stand up an extractor and run it
-
-1. Create the extractor draft from a config body:
-
-       extend extractors create --from-file extractor.json --name "Q3 invoices"
-
-   Returns a new ` + "`ex_xxx`" + ` ID. The draft is editable but not yet deployed.
-2. Iterate on the draft as needed:
-
-       extend extractors update ex_xxx --from-file patch.json
-
-3. Publish version 1.0 once the draft is solid:
-
-       extend extractors versions create ex_xxx --release-type major
-
-4. Run extraction against a document:
-
-       extend extract invoice.pdf --using ex_xxx
-
-### Process a folder of inputs and inspect failures
-
-1. Submit all inputs in one batch and capture the batch ID:
-
-       BATCH=$(extend extract batch *.pdf --using ex_xxx --jq '.id' -o raw)
-
-2. Wait for the batch to finish; gate downstream work on success:
-
-       extend batches watch "$BATCH" --exit-status || echo "batch failed"
-
-3. List runs that failed (or any other status) for inspection:
-
-       extend runs list --type extract --batch "$BATCH" --status FAILED -o json
-
-4. Pull a specific failed run's full payload (auto-detects type from prefix):
-
-       extend runs get exr_yyy -o json
-
-### Configure a webhook for workflow completions
-
-1. Create the receiving endpoint and capture the signing secret
-   (returned only once — store it):
-
-       extend webhooks endpoints create --url https://x.com/hook \
-           --name prod \
-           --events workflow_run.completed,workflow_run.failed -o json \
-           | jq -r '.signingSecret' > webhook.secret
-
-2. Bind the endpoint to a specific workflow:
-
-       extend webhooks subscriptions create \
-           --endpoint whe_xxx --resource workflow_yyy \
-           --events workflow_run.completed,workflow_run.failed
-
-3. In your receiver, verify each incoming payload before trusting it:
-
-       extend webhooks verify \
-           --signature "$X_EXTEND_REQUEST_SIGNATURE" \
-           --timestamp "$X_EXTEND_REQUEST_TIMESTAMP" \
-           --secret "$(cat webhook.secret)" \
-           --body-file payload.json
-
-### Fill a PDF form
-
-**Simple fills**: pass values inline as ` + "`--instructions`" + ` and auto-download
-the filled PDF. The server detects form fields and applies the prose:
-
-    extend edit form.pdf \
-        --instructions "name is Acme Corp; date is 2026-04-15" \
-        --output-file filled.pdf
-
-**Structured fills** (when you already have a populated schema, or want a
-repeatable shape): scaffold the schema once, populate values on each
-field per the generated shape, and then run ` + "`edit --schema`" + `:
-
-    extend edit schema generate form.pdf > schema.json
-    # populate values on each field per the generated shape, then:
-    extend edit form.pdf --schema schema.json --output-file filled.pdf
-
-Combine both for fills that need conditional or formatting guidance the
-schema cannot express:
-
-    extend edit form.pdf --schema schema.json \
-        --instructions "format dates as MM/DD/YYYY; leave spouse blank if single"
-
-Without ` + "`--output-file`" + `, the filled PDF stays on the server; fetch later
-with ` + "`extend files download <file-id>`" + `.
-
-### Fill a PDF form from values in another document
-
-When the values live in a source document (e.g. fill a 1040 from a W-2):
-
-1. Extract or parse the source to surface the values you need:
-
-       extend parse w2.pdf -o markdown > w2-content.md
-       # or, with a configured extractor:
-       extend extract w2.pdf --using ex_xxx -o json > w2-values.json
-
-2. Fill the target form with those values via ` + "`--instructions`" + `,
-   ` + "`--schema`" + `, or both — see "Fill a PDF form" above. Make sure the
-   document you pass to ` + "`extend edit`" + ` is the *target* (the form), not
-   the *source* (the document you read values from).
-
-### Iterate an extractor against an evaluation set
-
-1. Define an evaluation set scoped to the extractor:
-
-       extend evaluations create \
-           --from-file '{"name":"Q3 truth","entityId":"ex_xxx"}'
-
-2. Add ground-truth items in bulk:
-
-       extend evaluations items create evs_yyy --from-file items.json
-
-   Each item is ` + "`{fileId, expectedOutput}`" + `; the response wraps them in
-   ` + "`{evaluationSetItems: [...]}`" + `.
-3. Iterate on the extractor draft, then publish a new version
-   (` + "`extend extractors versions create`" + ` as in workflow 1).
-4. Run the evaluation set from the dashboard (CLI does not trigger eval
-   runs), then inspect the resulting run's per-item accuracy and metrics:
-
-       extend evaluations runs get esr_zzz -o json
-
-`)
-}
-
-// writeSkillCatalog renders the per-command reference, dispatching to
-// section-specific emitters. The processor-family section is parametric;
-// the others walk subtrees of the doc tree. Each entry is a single line
-// (invocation + summary); per-command flags, examples, and gotchas are
-// kept in `extend <cmd> --help` to respect the spec's progressive-
-// disclosure principle.
-func writeSkillCatalog(b *strings.Builder, root *CommandDoc) {
-	b.WriteString("## Command reference\n\n")
-	b.WriteString("One line per command — invocation plus a summary. **Run `extend <command> --help` for flags, examples, and per-command gotchas.** The processor-resource block is parametric (the four families share an identical seven-command shape).\n\n")
-	writeCatalogSection(b, root, "Action verbs", "Actions", nil)
-	writeCatalogSection(b, root, "Inspection", "Inspection", nil)
-	writeCatalogProcessorFamilies(b)
-	writeCatalogSubtree(b, root, "Webhooks", "webhooks")
-	writeCatalogSubtree(b, root, "Evaluations", "evaluations")
-}
-
-// writeCatalogSection emits all command leaves whose top-level ancestor
-// has the given Group label. Optionally, skipNames excludes specific
-// top-level subtrees (used when a section's content is rendered
-// elsewhere, e.g. processor families render parametrically).
-func writeCatalogSection(b *strings.Builder, root *CommandDoc, heading, group string, skipNames map[string]bool) {
-	type entry struct {
-		invocation string
-		doc        *CommandDoc
-	}
-	var entries []entry
+	// Hand-curated order, highest-leverage first. Topics not listed
+	// here are still discoverable via `extend help` but don't appear in
+	// this section. A test asserts every entry corresponds to a real
+	// topic.
+	order := []string{"commands", "parse-options", "lifecycle", "output", "auth", "errors"}
+	topics := map[string]*CommandDoc{}
 	for _, e := range Walk(root) {
-		if !e.Doc.IsCommand() {
+		if e.Doc.IsTopic() {
+			topics[e.Doc.Name()] = e.Doc
+		}
+	}
+	for _, name := range order {
+		t, ok := topics[name]
+		if !ok {
 			continue
 		}
-		top := topAncestorName(e, root)
-		if skipNames[top] {
-			continue
-		}
-		topGroup := topGroupForName(root, top)
-		if topGroup != group {
-			continue
-		}
-		entries = append(entries, entry{invocation: leafInvocation(e, root), doc: e.Doc})
+		fmt.Fprintf(b, "- **`references/%s.md`** (or `extend help %s`) — %s. %s\n",
+			name, name, t.Summary, topicLoadHint(name))
 	}
-	if len(entries) == 0 {
-		return
-	}
-	fmt.Fprintf(b, "### %s\n\n", heading)
-	for _, e := range entries {
-		writeCatalogEntry(b, e.invocation, e.doc)
-	}
-	b.WriteString("\n")
-}
-
-// writeCatalogSubtree emits all command leaves under a specific top-level
-// command (by name), regardless of Group. Used for sections like
-// "Webhooks" and "Evaluations" that warrant their own heading despite
-// living under the "Resources" group.
-func writeCatalogSubtree(b *strings.Builder, root *CommandDoc, heading, topName string) {
-	type entry struct {
-		invocation string
-		doc        *CommandDoc
-	}
-	var entries []entry
-	prefix := root.Name() + "." + topName
-	for _, e := range Walk(root) {
-		if !e.Doc.IsCommand() {
-			continue
-		}
-		if !strings.HasPrefix(e.Path, prefix+".") && e.Path != prefix {
-			continue
-		}
-		entries = append(entries, entry{invocation: leafInvocation(e, root), doc: e.Doc})
-	}
-	if len(entries) == 0 {
-		return
-	}
-	fmt.Fprintf(b, "### %s\n\n", heading)
-	for _, e := range entries {
-		writeCatalogEntry(b, e.invocation, e.doc)
-	}
-	b.WriteString("\n")
-}
-
-// writeCatalogProcessorFamilies emits the parametric block for the four
-// processor families. Saves ~100 lines of repetition vs. listing all 28
-// commands individually. TestSkillResourceFamiliesShareShape asserts each
-// family in resourceFamilies actually exposes the seven commands listed
-// here; if a family diverges, the test fails until either the prose is
-// updated or the family is brought back into shape.
-func writeCatalogProcessorFamilies(b *strings.Builder) {
-	plurals := make([]string, len(resourceFamilies))
-	prefixes := make([]string, len(resourceFamilies))
-	for i, f := range resourceFamilies {
-		plurals[i] = f.Plural
-		prefixes[i] = "`" + f.IDPrefix + "`"
-	}
-
-	b.WriteString("### Processor resources\n\n")
-	fmt.Fprintf(b, "**%s share an identical seven-command shape.** Substitute `<plural>` and the corresponding ID prefix (%s):\n\n",
-		capitalize(joinSerial(plurals, "and")),
-		joinSerial(prefixes, "and"),
-	)
-	b.WriteString("- `extend <plural> list` — Page through processors of this type.\n")
-	b.WriteString("- `extend <plural> get <id>` — Show one processor.\n")
-	b.WriteString("- `extend <plural> create --from-file body.json` — New draft.\n")
-	b.WriteString("- `extend <plural> update <id> --from-file patch.json` — Edit the draft. Deployed versions are immutable; the draft is the only mutable surface.\n")
-	b.WriteString("- `extend <plural> versions list <id>` — List published versions.\n")
-	b.WriteString("- `extend <plural> versions get <id> <version|draft>` — Show one version (or the draft).\n")
-	b.WriteString("- `extend <plural> versions create <id> --release-type major|minor` — Publish the draft as a new version.\n\n")
-	b.WriteString("**Workflows differ:** `versions create` uses `--name <deploy-name>` instead of `--release-type`. The deployed name is what `extend run --version` references.\n\n")
-}
-
-// writeCatalogEntry renders one command in the catalog as a single line:
-// invocation + summary. Per-command examples and gotchas live in
-// `extend <cmd> --help` (where they're already projected from
-// CommandDoc.Examples and CommandDoc.Gotchas via the cobra command's
-// Long); the catalog's job is to expose the *shape* of the surface so
-// the agent knows what verbs exist, not to duplicate per-command depth
-// in the body.
-//
-// The dig-deeper section ("When this skill isn't enough") elevates
-// `extend <cmd> --help` as the first-class path to per-command flags,
-// examples, and gotchas. Tests assert the dig-deeper section names this
-// path explicitly.
-func writeCatalogEntry(b *strings.Builder, invocation string, d *CommandDoc) {
-	fmt.Fprintf(b, "- `extend %s` — %s.\n", invocation, strings.TrimRight(d.Summary, "."))
-}
-
-// leafInvocation returns the full invocation string for a leaf:
-// "extract <input>" (top-level) or "extract batch <input>..." (nested).
-func leafInvocation(e Entry, root *CommandDoc) string {
-	pathVerbs := strings.ReplaceAll(strings.TrimPrefix(e.Path, root.Name()+"."), ".", " ")
-	leafName := e.Doc.Name()
-	parentVerbs := strings.TrimSuffix(strings.TrimSuffix(pathVerbs, leafName), " ")
-	if parentVerbs == "" {
-		return e.Doc.Use
-	}
-	return parentVerbs + " " + e.Doc.Use
-}
-
-// topAncestorName returns the name of the top-level Subcommand under
-// root that contains e, or "" if e is the root itself.
-func topAncestorName(e Entry, root *CommandDoc) string {
-	rel := strings.TrimPrefix(e.Path, root.Name()+".")
-	if rel == e.Path {
-		return ""
-	}
-	parts := strings.SplitN(rel, ".", 2)
-	return parts[0]
-}
-
-// topGroupForName looks up the Group label of the top-level Subcommand
-// with the given name, or "" if not found.
-func topGroupForName(root *CommandDoc, name string) string {
-	for _, sub := range root.Subcommands {
-		if sub.Name() == name {
-			return sub.Group
-		}
-	}
-	return ""
-}
-
-// writeSkillTopics emits the dig-deeper section. The body of this skill
-// shows the CLI's *shape* — verbs, decision rules, high-leverage
-// gotchas, and end-to-end recipes. Per the agentskills.io progressive-
-// disclosure principle, depth lives behind `extend help <topic>` and
-// `extend <command> --help`. This section names each, says explicitly
-// when to reach for it, and elevates `extend <command> --help` to the
-// same prominence as the four reference topics.
-func writeSkillTopics(b *strings.Builder, root *CommandDoc) {
-	b.WriteString("## When this skill isn't enough\n\n")
-	b.WriteString("The body above shows the CLI's *shape*. For depth, use the help system before guessing:\n\n")
-	b.WriteString("- `extend <command> --help` — every flag, multiple worked examples, and the full per-command gotcha list. Reach for this whenever a flag isn't obvious or the catalog example doesn't cover your case.\n")
-	for _, sub := range root.Subcommands {
-		if !sub.IsTopic() {
-			continue
-		}
-		fmt.Fprintf(b, "- `extend help %s` — %s. %s\n", sub.Name(), sub.Summary, topicLoadHint(sub.Name()))
-	}
+	b.WriteString("\n`extend <command> --help` is always available for any command's flags, examples, and per-command gotchas — reach for it whenever a flag isn't obvious.\n")
 	b.WriteString("\nThese commands run offline and never contact the Extend API.\n")
 }
 
 // topicLoadHint returns a short directive sentence explaining when an
-// agent should reach for the named topic. Hand-curated; tested by
-// TestSkillTopicLoadHintsCoverAllTopics, which fails if a new topic is
-// added without a hint.
+// agent should reach for the named topic. A test (TestSkillTopicLoadHintsCoverReferenced)
+// fails if a topic listed in writeSkillReferences has no hint here.
 func topicLoadHint(name string) string {
 	switch name {
 	case "auth":
@@ -604,133 +289,181 @@ func topicLoadHint(name string) string {
 		return "Use when reasoning about run states, polling profiles, or when `--exit-status` should fail."
 	case "errors":
 		return "Use when interpreting an error envelope, picking up a `request_id`, or filing a support ticket."
+		// "before" rather than "when" — agents tend to author JSON first and
+		// look up the schema only after a server error. This phrasing nudges
+		// them to read the reference first, which is what the eval S-7 found
+		// they were skipping.
+	case "parse-options":
+		return "Load BEFORE authoring JSON for --chunk-strategy/--block-options/--advanced-options on `extend parse` — the schema is nested and easy to get wrong."
+	case "commands":
+		return "Use to discover what verbs the CLI exposes; pair with `extend <cmd> --help` for depth."
 	}
 	return ""
 }
 
-// newSkillDoc registers `extend skill` as a top-level command in the
-// "Agent surface" group.
+// newSkillDoc registers `extend skill` as a pure group under the
+// "Agent surface" header. The only verb under it is `install`; there
+// is no stdout-dump path (inspect by installing to a throwaway dir).
 func newSkillDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "skill",
-		Summary: "Print a SKILL.md describing this CLI to stdout",
+		Summary: "Install the Extend SKILL.md and reference files for agent harnesses",
 		Group:   "Agent surface",
-		Triggers: []string{
-			"emit a skill markdown describing the extend cli",
-			"generate a skill.md for an agent harness",
-			"render an agent-facing skill document",
-			"print the agentskills.io skill for extend",
-		},
-		WhenToUse: `Use when wiring the CLI into an agent harness (Claude Code, Codex,
-OpenCode, Cursor, Goose, or anything else that consumes the
-agentskills.io standard). Pipe the output to a file or use the install
-subcommand to write it to the cross-client default path.`,
-		Details: `Walks the typed command tree and emits a SKILL.md with YAML
-frontmatter, an authentication primer, an action-selection table,
-wait/async semantics, pagination guidance, end-to-end common workflows,
-the full command catalog (with processor families rendered
-parametrically), and pointers to ` + "`extend help <topic>`" + `. Pure function:
-no API calls, no filesystem access, no network.
+		WhenToUse: `Use to install this CLI's agent skill (SKILL.md plus a references/
+directory of detail topics) into a harness directory like
+~/.agents/skills/extend/. The only verb is "install".`,
+		Details: `An agent skill is a directory containing SKILL.md (a short body the
+agent loads on activation) plus references/*.md (detail files the agent
+loads on demand). See https://agentskills.io/specification for the
+format.
 
-The body targets ~5,000 tokens to fit comfortably in agent skill catalogs.`,
-		Examples: []Example{
-			{Label: "Print to stdout", Cmd: "extend skill"},
-			{Label: "Pipe to default location", Cmd: "mkdir -p ~/.agents/skills/extend && extend skill > ~/.agents/skills/extend/SKILL.md"},
-			{Label: "Or use install", Cmd: "extend skill install"},
-		},
-		Gotchas: []string{
-			"The skill is a pure function of the doc tree; running it does not contact the Extend API.",
-		},
-		SeeAlso: []string{"skill install"},
-		Output:  OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown},
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprint(app.IO.Out, RenderSkill(RootDoc(app)))
-			return nil
-		},
+` + "`extend skill install`" + ` writes the whole tree in one step. The skill
+body and reference content are a pure function of the CLI's typed
+command tree, so the installed skill always matches the binary.`,
 		Subcommands: []*CommandDoc{newSkillInstallDoc(app)},
 	}
 }
 
-// defaultSkillTarget computes the cross-client default install path:
-// $HOME/.agents/skills/extend/SKILL.md.
-func defaultSkillTarget() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("locate home directory: %w", err)
-	}
-	return filepath.Join(home, ".agents", "skills", skillName, "SKILL.md"), nil
-}
-
+// newSkillInstallDoc registers `extend skill install`. Writes
+// SKILL.md and references/*.md to a target directory. The target is
+// resolved permissively (see resolveSkillInstallDir) so any of
+// ~/.agents, ~/.agents/skills, or ~/.agents/skills/extend produces the
+// same final destination.
 func newSkillInstallDoc(app *App) *CommandDoc {
 	var target string
 	return &CommandDoc{
 		Use:     "install",
-		Summary: "Write the SKILL.md to disk (default ~/.agents/skills/extend/SKILL.md)",
+		Summary: "Install SKILL.md + references/ to ~/.agents/skills/extend (default)",
 		Triggers: []string{
 			"install the extend cli skill into the agent skills directory",
 			"write the skill to ~/.agents/skills/extend",
 			"deploy the skill markdown for an agent harness",
 		},
-		WhenToUse: `Use to write the SKILL.md to the cross-client agent skills directory
-in one step, instead of piping ` + "`extend skill > SKILL.md`" + ` yourself. Pass
-` + "`--target`" + ` to write elsewhere (project-local skill checked into a repo,
-or a Claude/Codex/OpenCode-specific path).`,
-		Details: `By default, writes to ` + "`$HOME/.agents/skills/extend/SKILL.md`" + ` —
-the cross-client convention used by Claude Code, Codex, OpenCode,
-Cursor, Goose, and other agentskills.io consumers. The directory is
-created if missing. The file is overwritten if present.
+		WhenToUse: `Use to install the agent skill (SKILL.md plus references/) for a
+harness. Default target is ~/.agents/skills/extend/. Pass --target to
+install elsewhere (e.g. a Claude Code-specific dir or a project repo).`,
+		Details: `Writes:
 
-Override the target with ` + "`--target <path>`" + `. Useful targets:
+  <target>/SKILL.md
+  <target>/references/auth.md
+  <target>/references/output.md
+  <target>/references/lifecycle.md
+  <target>/references/errors.md
+  <target>/references/parse-options.md
+  <target>/references/commands.md
 
-- ` + "`./SKILL.md`" + ` — alongside the agent harness in a checked-in project
-- ` + "`./.agents/skills/extend/SKILL.md`" + ` — project-local cross-client skills dir
-- ` + "`~/.claude/skills/extend/SKILL.md`" + ` — Claude Code-specific
-- ` + "`~/.codex/skills/extend/SKILL.md`" + ` — Codex-specific`,
+--target is permissive: any of these inputs resolves to the same
+location <target>/skills/extend/ when the last segment is "skills",
+or .../skills/extend/ when it isn't already.
+
+  --target ~/.agents                  -> ~/.agents/skills/extend/
+  --target ~/.agents/skills           -> ~/.agents/skills/extend/
+  --target ~/.agents/skills/extend    -> ~/.agents/skills/extend/
+  --target ~/.claude                  -> ~/.claude/skills/extend/
+  --target ~/.claude/skills/extend    -> ~/.claude/skills/extend/
+
+Existing files at the resolved target are overwritten.`,
 		Examples: []Example{
 			{Label: "Default location", Cmd: "extend skill install"},
-			{Label: "Project-local", Cmd: "extend skill install --target ./.agents/skills/extend/SKILL.md"},
-			{Label: "Stdout", Cmd: "extend skill install --target -"},
+			{Label: "Claude Code", Cmd: "extend skill install --target ~/.claude"},
+			{Label: "Explicit final path", Cmd: "extend skill install --target ~/.claude/skills/extend"},
+			{Label: "Project-local", Cmd: "extend skill install --target ./.agents/skills/extend"},
 		},
 		Gotchas: []string{
-			"Existing target file is overwritten without prompt; pipe to a different path first if you want to compare.",
-			"Pass `--target -` to stream to stdout (equivalent to running `extend skill`).",
+			"--target is the directory, not a file path. Both SKILL.md and references/ land underneath.",
+			"Existing target files are overwritten without prompt; install to a fresh directory first if you want to diff.",
 		},
-		SeeAlso: []string{"skill"},
-		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
-		Args:    cobra.NoArgs,
+		Output: OutputSpec{TTY: OutputNone, Pipe: OutputNone},
+		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body := RenderSkill(RootDoc(app))
-
-			if target == "-" {
-				fmt.Fprint(app.IO.Out, body)
-				return nil
+			dir, err := resolveSkillInstallDir(target)
+			if err != nil {
+				return err
 			}
-
-			path := target
-			if path == "" {
-				p, err := defaultSkillTarget()
-				if err != nil {
-					return err
-				}
-				path = p
-			}
-
-			if dir := filepath.Dir(path); dir != "." && dir != "" {
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					return fmt.Errorf("create directory: %w", err)
-				}
-			}
-			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-				return fmt.Errorf("write skill: %w", err)
-			}
-
-			fmt.Fprintf(app.IO.ErrOut, "%s Wrote %d bytes to %s\n",
-				paletteFor(app.IO).Green("✓"), len(body), path)
-			return nil
+			return writeSkillBundle(app, dir, RenderSkillBundle(RootDoc(app)))
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&target, "target", "", "Output path (default: ~/.agents/skills/extend/SKILL.md; pass '-' for stdout)")
+			cmd.Flags().StringVar(&target, "target", "", "Target directory; resolved permissively so ~/.agents, ~/.agents/skills, and ~/.agents/skills/extend all install to the same place (default: ~/.agents/skills/extend)")
 		},
 	}
+}
+
+// resolveSkillInstallDir normalizes a user-supplied --target into the
+// final install directory. The user might pass any of:
+//
+//   - ""                             (default to ~/.agents/skills/<name>)
+//   - "~/.agents"                    (a parent two levels up)
+//   - "~/.agents/skills"             (a parent one level up)
+//   - "~/.agents/skills/extend"      (the exact final directory)
+//
+// All four resolve to ".../skills/<name>". This lets us steer agents
+// towards the agentskills.io convention without making them remember
+// the exact path depth.
+func resolveSkillInstallDir(input string) (string, error) {
+	if input == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("locate home directory: %w", err)
+		}
+		return filepath.Join(home, ".agents", "skills", skillName), nil
+	}
+	abs, err := filepath.Abs(input)
+	if err != nil {
+		return "", fmt.Errorf("resolve target %q: %w", input, err)
+	}
+	clean := filepath.Clean(abs)
+	base := filepath.Base(clean)
+	switch base {
+	case skillName:
+		return clean, nil
+	case "skills":
+		return filepath.Join(clean, skillName), nil
+	default:
+		return filepath.Join(clean, "skills", skillName), nil
+	}
+}
+
+// writeSkillBundle writes SKILL.md plus every references/<name>.md file
+// to dir, creating subdirectories as needed. Returns on the first
+// error; partial writes are left on disk for the user to inspect.
+func writeSkillBundle(app *App, dir string, bundle SkillBundle) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	skillPath := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(bundle.SkillMD), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", skillPath, err)
+	}
+
+	refsDir := filepath.Join(dir, "references")
+	if len(bundle.References) > 0 {
+		if err := os.MkdirAll(refsDir, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", refsDir, err)
+		}
+	}
+	// Stable order so success output is deterministic in tests.
+	names := make([]string, 0, len(bundle.References))
+	for name := range bundle.References {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		path := filepath.Join(refsDir, name)
+		if err := os.WriteFile(path, []byte(bundle.References[name]), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+
+	pal := paletteFor(app.IO)
+	fmt.Fprintf(app.IO.ErrOut, "%s Installed %d file%s under %s\n",
+		pal.Green("✓"), 1+len(bundle.References), pluralS(len(bundle.References)), dir)
+	return nil
+}
+
+// pluralS returns "s" if n+1 != 1 (i.e. references count makes total > 1).
+func pluralS(refs int) string {
+	if 1+refs == 1 {
+		return ""
+	}
+	return "s"
 }

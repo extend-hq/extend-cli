@@ -37,7 +37,7 @@ catch this before the binary is shipped.
 
 ## Field-level rules
 
-**`Summary`** — 10–80 characters, starts with a capital, no trailing period.
+**`Summary`** — 10–140 characters, starts with a capital, no trailing period. Keep it concise (one line is the convention); the upper bound is loose enough to fit accurate multi-flag summaries without forcing truncation.
 Becomes cobra's `Short` and the first line of the SKILL.md catalog entry
 for this command. Keep it action-oriented and specific.
 

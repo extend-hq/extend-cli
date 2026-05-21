@@ -37,23 +37,25 @@ func TestEditHelpDoesNotPrescribeDefaultField(t *testing.T) {
 	}
 }
 
-// TestSkillFillPDFRecipeMatchesEditHelp ensures the skill's "Fill a PDF
-// form" recipe stays consistent with the edit command's help: both must
-// mention the two supported paths (--instructions for simple fills,
-// --schema for structured fills). Drift between these two surfaces is
-// what tripped up agents in the May 2026 agent-experience transcripts.
-func TestSkillFillPDFRecipeMatchesEditHelp(t *testing.T) {
+// TestEditHelpCoversFillPaths is the regression that protects the
+// three documented fill paths (instructions-only, schema, source-doc)
+// from drifting out of `extend edit --help`. The third path —
+// reading values from a source document and writing the target — is
+// the W-5 eval's discriminating expectation.
+func TestEditHelpCoversFillPaths(t *testing.T) {
 	app := &App{}
-	skill := RenderSkill(RootDoc(app))
-	// Recipe must cover both paths the edit help describes.
+	doc := newEditDoc(app)
 	for _, want := range []string{
-		"### Fill a PDF form",
+		"Instructions-only",
+		"Schema + values",
+		"From values in another document",
 		"--instructions",
 		"--schema",
-		"### Fill a PDF form from values in another document",
+		"target",
+		"source",
 	} {
-		if !strings.Contains(skill, want) {
-			t.Errorf("skill missing %q", want)
+		if !strings.Contains(doc.Details, want) {
+			t.Errorf("edit Details missing %q; the three fill paths should all be documented:\n%s", want, doc.Details)
 		}
 	}
 }

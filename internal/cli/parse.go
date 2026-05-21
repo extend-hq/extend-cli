@@ -60,14 +60,16 @@ Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
 --block-options as inline JSON, a plain file path, an absolute file:// URI,
 or '-' to read from stdin. --advanced-options accepts the remaining tuning
-knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.`,
+knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.
+
+For the field-by-field schema of all three, run 'extend help parse-options'.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend parse contract.pdf"},
 			{Label: "Save raw markdown", Cmd: "extend parse contract.pdf -o markdown > contract.md"},
 			{Label: "Count chunks via jq", Cmd: "extend parse contract.pdf -o json | jq '.output.chunks | length'"},
 			{Label: "Specific engine", Cmd: "extend parse contract.pdf --engine parse_performance --engine-version 1.0.1"},
 			{Label: "Section chunking", Cmd: "extend parse contract.pdf --chunk-strategy section --chunk-max-chars 4000"},
-			{Label: "Inline advanced options", Cmd: `extend parse contract.pdf --advanced-options '{"pageRanges":"1-3"}'`},
+			{Label: "Inline advanced options", Cmd: `extend parse contract.pdf --advanced-options '{"pageRanges":[{"start":1,"end":3}]}'`},
 			{Label: "Block options from file", Cmd: "extend parse contract.pdf --block-options block-opts.json"},
 			{Label: "Absolute file URI", Cmd: "extend parse contract.pdf --advanced-options file:///absolute/path/advanced.json"},
 		},
@@ -109,8 +111,8 @@ knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.`,
 			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
 			cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
-			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "blockOptions for fine-grained block detection (figures/tables/text/barcodes/keyValue/formulas). Source: inline JSON, path, file:// URI, or '-' for stdin.")
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "advancedOptions for parse tuning (returnOcr, pageRanges, etc.). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "blockOptions for per-block-type detection (figures/tables/text/keyValue/barcodes/formulas). Schema is nested — run 'extend help parse-options' before authoring; e.g. {\"barcodes\":{\"readingEnabled\":true}}, NOT {\"barcodes\":true}. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "advancedOptions for parse-engine tuning (returnOcr, pageRanges, Excel options, etc.). Schema is nested — run 'extend help parse-options' before authoring; e.g. {\"pageRanges\":[{\"start\":1,\"end\":3}]}, NOT {\"pageRanges\":\"1-3\"}. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")

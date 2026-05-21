@@ -87,23 +87,27 @@ Run `extend <command> --help` for flags.
 
 ## Use with coding agents
 
-The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
-agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, etc.)
-to use `extend` correctly without you having to spell out every command.
+The CLI ships an [agentskills.io](https://agentskills.io) skill —
+`SKILL.md` plus a `references/` directory of detail topics — that
+teaches agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose,
+etc.) to use `extend` correctly without you having to spell out every
+command.
 
 Install to the cross-client default path:
 
     extend skill install
 
-This writes `~/.agents/skills/extend/SKILL.md`, the path Codex,
-OpenCode, Cursor, and most other harnesses look at. Claude Code reads
-from `~/.claude/skills/` instead, so point `--target` at it:
+This writes `~/.agents/skills/extend/SKILL.md` and
+`~/.agents/skills/extend/references/*.md`. Codex, OpenCode, Cursor,
+and most other harnesses read from there. Claude Code reads from
+`~/.claude/` instead — `--target` is permissive about the depth, so
+any of these works:
 
-    extend skill install --target ~/.claude/skills/extend/SKILL.md
+    extend skill install --target ~/.claude
+    extend skill install --target ~/.claude/skills
+    extend skill install --target ~/.claude/skills/extend
 
-Or print the body to stdout and redirect wherever you want:
-
-    extend skill > /path/to/SKILL.md
+All three resolve to the same directory and lay down the full tree.
 
 The skill is a pure function of the CLI's doc tree, so re-run
 `extend skill install` after upgrading to pick up new commands and

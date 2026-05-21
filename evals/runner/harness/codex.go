@@ -163,13 +163,11 @@ func hasChatGPTLogin() bool {
 	return len(probe.Tokens) > 0
 }
 
-// installSkillForCodex generates the SKILL.md and writes it to the
-// per-harness path under HomeDir. Codex reads from
-// $HOME/.agents/skills/<name>/SKILL.md (the agentskills.io standard
-// path; see https://developers.openai.com/codex/skills/).
+// installSkillForCodex lays down SKILL.md and the references/ tree at
+// $HOME/.agents/skills/extend/, the agentskills.io standard path Codex
+// reads from (https://developers.openai.com/codex/skills/).
 func installSkillForCodex(homeDir string) error {
-	dst := filepath.Join(homeDir, ".agents", "skills", "extend", "SKILL.md")
-	return generateSkillTo(dst)
+	return installSkillTo(filepath.Join(homeDir, ".agents", "skills", "extend"))
 }
 
 // codexFinalMessage walks the JSONL for the final assistant message.

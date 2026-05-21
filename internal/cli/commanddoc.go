@@ -222,8 +222,11 @@ func validateNode(e Entry) []error {
 	if strings.TrimSpace(d.Use) == "" {
 		errs = append(errs, fmt.Errorf("%s: Use is empty", e.Path))
 	}
-	if got := len(d.Summary); got < 10 || got > 80 {
-		errs = append(errs, fmt.Errorf("%s: Summary length %d, want 10..80 (%q)", e.Path, got, d.Summary))
+	// Loose 140-char cap to catch runaway summaries (paragraphs masquerading
+	// as one-liners) without forcing accurate multi-flag summaries to drop
+	// information the catalog actually needs.
+	if got := len(d.Summary); got < 10 || got > 140 {
+		errs = append(errs, fmt.Errorf("%s: Summary length %d, want 10..140 (%q)", e.Path, got, d.Summary))
 	}
 	if d.Summary != "" {
 		first := rune(d.Summary[0])

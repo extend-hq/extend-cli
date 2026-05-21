@@ -46,10 +46,9 @@ fills, or pass --schema with a scaffolded schema for structured fills.
 For schema scaffolding only, use 'extend edit schema generate'.`,
 		Details: `Fill PDF form fields and produce a filled PDF.
 
-There are two ways to provide values:
+There are three ways to provide values:
 
-  1. Instructions-only (simplest; recommended when chaining from
-     other commands or for one-off fills):
+  1. Instructions-only (simplest; recommended for one-off fills):
 
          extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15"
 
@@ -67,6 +66,20 @@ There are two ways to provide values:
      'single', leave the spouse section blank"), or disambiguation
      between similarly-named fields the schema cannot express.
 
+  3. From values in another document (e.g. fill a 1040 from a W-2).
+     Read the source values first, then pass them to edit. Make sure
+     the file you pass to 'extend edit' is the *target* (the form to
+     fill), not the *source* (the document to read from):
+
+         extend parse w2.pdf -o markdown > w2-content.md
+         extend edit form1040.pdf \
+             --instructions "$(cat w2-content.md). Map W-2 Box 1 to 1040 line 1a; W-2 Box 2 to 1040 line 25a." \
+             --output-file filled.pdf
+
+     For a schema-driven version, scaffold form1040.pdf's schema with
+     'extend edit schema generate', populate values from the parsed
+     source, then run 'extend edit form1040.pdf --schema ...'.
+
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
@@ -76,6 +89,7 @@ files download'.`,
 			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
 			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
 			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
+			{Label: "Fill target form from a source document", Cmd: `extend parse w2.pdf -o markdown | xargs -0 -I{} extend edit form1040.pdf --instructions "{}" --output-file filled.pdf`, Note: "Reads values from w2.pdf, passes them as instructions to edit form1040.pdf. The edit target is form1040.pdf (the form), not w2.pdf (the source)."},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
 		},
 		Gotchas: []string{

@@ -98,6 +98,8 @@ respective env vars.`,
 			newOutputTopicDoc(),
 			newLifecycleTopicDoc(),
 			newErrorsTopicDoc(),
+			newParseOptionsTopicDoc(),
+			newCommandsTopicDoc(),
 		},
 	}
 }
