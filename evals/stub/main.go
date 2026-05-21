@@ -315,7 +315,7 @@ Common commands:
   extract <input>     Run extraction on a document.
                         --using <id>           extractor ID
                         --config <json>        inline config (instead of --using)
-                        --override-config      vary the persisted config for one run
+                        --patch <json>         per-run patch onto the saved config (requires --using)
                         --wait[=true|false]    block until terminal (default: true)
                         --priority <0-100>     lower = higher priority
                         --metadata key=value   repeatable

@@ -19,15 +19,15 @@ import (
 // consumer reads from this CommandDoc directly via Walk.
 func newExtractDoc(app *App) *CommandDoc {
 	var (
-		extractorID        string
-		version            string
-		overrideConfigPath string
-		configPath         string
-		password           string
-		wait               bool
-		priority           int
-		timeout            time.Duration
-		meta               metaFlags
+		extractorID string
+		version     string
+		patchPath   string
+		configPath  string
+		password    string
+		wait        bool
+		priority    int
+		timeout     time.Duration
+		meta        metaFlags
 	)
 
 	return &CommandDoc{
@@ -55,30 +55,30 @@ of --using or --config is required:
   # Run a saved extractor as-is.
   extend extract <input> --using ex_xxx
 
-  # Run a saved extractor, merging per-run tweaks onto its saved config.
-  extend extract <input> --using ex_xxx --override-config patch.json
+  # Run a saved extractor, applying per-run tweaks on top of its saved config.
+  extend extract <input> --using ex_xxx --patch patch.json
 
   # Run a one-off config without a saved extractor (good for prototyping
   # or short-lived agent workflows).
   extend extract <input> --config inline-config.json
 
-For both --override-config and --config, the value may be inline JSON,
-a path, a file:// URI, or '-' to read from stdin. They are NOT
-interchangeable: --override-config merges onto a --using extractor;
---config replaces the need for one entirely.`,
+For both --patch and --config, the value may be inline JSON, a path,
+a file:// URI, or '-' to read from stdin. They are NOT interchangeable:
+--patch is a partial merge onto a --using extractor; --config is a
+complete standalone config that replaces the need for one entirely.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
 			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},
 			{Label: "Async", Cmd: "extend extract file_xK9mLPq --using ex_abc --wait=false", Note: "Returns the run ID immediately; poll with `extend runs watch`."},
-			{Label: "Merge per-run tweaks onto a saved extractor", Cmd: "extend extract invoice.pdf --using ex_abc --override-config override.json"},
-			{Label: "Inline per-run override", Cmd: `extend extract invoice.pdf --using ex_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Patch a saved extractor for this run", Cmd: "extend extract invoice.pdf --using ex_abc --patch tweaks.json"},
+			{Label: "Inline patch", Cmd: `extend extract invoice.pdf --using ex_abc --patch '{"foo":"bar"}'`},
 			{Label: "One-off run with no saved extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
 			{Label: "Filter output with jq", Cmd: "extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw"},
 		},
 		Gotchas: []string{
-			"--config and --override-config are different: --config runs without a saved extractor, --override-config merges onto a --using extractor.",
+			"--config and --patch are different: --config runs without a saved extractor; --patch merges onto a --using extractor.",
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
-			"--override-config requires --using; passing it alongside --config is rejected.",
+			"--patch requires --using; for a standalone config use --config instead.",
 		},
 		SeeAlso:  []string{"parse", "classify", "extract batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
@@ -91,28 +91,28 @@ interchangeable: --override-config merges onto a --using extractor;
 				return err
 			}
 			if (extractorID == "") == (configPath == "") {
-				return errors.New("exactly one of --using or --config is required (server schema rejects both or neither)")
+				return errors.New("exactly one of --using or --config is required: --using <id> runs a saved extractor; --config <json> provides a standalone inline config")
 			}
-			if configPath != "" && overrideConfigPath != "" {
-				return errors.New("--override-config requires --using; it has no effect on inline --config")
+			if configPath != "" && patchPath != "" {
+				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
 			}
 			return runExtract(cmd.Context(), app, extractParams{
-				input:              args[0],
-				extractorID:        extractorID,
-				version:            version,
-				overrideConfigPath: overrideConfigPath,
-				configPath:         configPath,
-				password:           password,
-				wait:               wait,
-				priority:           priority,
-				timeout:            timeout,
-				metadata:           md,
+				input:       args[0],
+				extractorID: extractorID,
+				version:     version,
+				patchPath:   patchPath,
+				configPath:  configPath,
+				password:    password,
+				wait:        wait,
+				priority:    priority,
+				timeout:     timeout,
+				metadata:    md,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&extractorID, "using", "", "Saved extractor ID (mutually exclusive with --config)")
 			cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using extractor's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using extractor's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off extract config used INSTEAD of a saved extractor. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
@@ -125,16 +125,16 @@ interchangeable: --override-config merges onto a --using extractor;
 }
 
 type extractParams struct {
-	input              string
-	extractorID        string
-	version            string
-	overrideConfigPath string
-	configPath         string
-	password           string
-	wait               bool
-	priority           int
-	timeout            time.Duration
-	metadata           map[string]any
+	input       string
+	extractorID string
+	version     string
+	patchPath   string
+	configPath  string
+	password    string
+	wait        bool
+	priority    int
+	timeout     time.Duration
+	metadata    map[string]any
 }
 
 func runExtract(ctx context.Context, app *App, p extractParams) error {
@@ -161,8 +161,8 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 		in.Config = raw
 	case p.extractorID != "":
 		extractor := &client.ExtractorRef{ID: p.extractorID, Version: p.version}
-		if p.overrideConfigPath != "" {
-			raw, err := readJSONFile(p.overrideConfigPath, "--override-config")
+		if p.patchPath != "" {
+			raw, err := readJSONFile(p.patchPath, "--patch")
 			if err != nil {
 				return err
 			}

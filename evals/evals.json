@@ -526,7 +526,7 @@
         "invoice.pdf",
         "extractor.json"
       ],
-      "expected_output": "Agent runs `extend extract invoice.pdf --config extractor.json` (note: `--config`, the standalone-config flag, NOT `--override-config` which requires `--using`). Agent does NOT call `extractors create` or `extractors versions create`.",
+      "expected_output": "Agent runs `extend extract invoice.pdf --config extractor.json` (note: `--config`, the standalone-config flag, NOT `--patch` which requires `--using`). Agent does NOT call `extractors create` or `extractors versions create`.",
       "expectations": [
         {
           "type": "extend_call",
@@ -545,13 +545,13 @@
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT use --override-config (which requires --using)",
+          "text": "agent did NOT use --patch (which requires --using)",
           "must_not_contain": [
             {
               "argv_prefix": [
                 "extract"
               ],
-              "flag": "override-config"
+              "flag": "patch"
             }
           ]
         },

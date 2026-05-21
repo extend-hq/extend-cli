@@ -15,14 +15,14 @@ import (
 // `extend split batch` subcommand.
 func newSplitDoc(app *App) *CommandDoc {
 	var (
-		splitterID         string
-		version            string
-		overrideConfigPath string
-		password           string
-		wait               bool
-		priority           int
-		timeout            time.Duration
-		meta               metaFlags
+		splitterID string
+		version    string
+		patchPath  string
+		password   string
+		wait       bool
+		priority   int
+		timeout    time.Duration
+		meta       metaFlags
 	)
 
 	return &CommandDoc{
@@ -47,17 +47,16 @@ when the input is a single document and you only need its category.`,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
---override-config merges per-run tweaks onto the --using splitter's
-saved config, just for this one run. Source: inline JSON, a plain file
-path, an absolute file:// URI, or '-' to read from stdin. It does NOT
-replace the splitter; pass --using to pick the splitter and
---override-config to vary it without modifying
-the persisted splitter.`,
+--patch applies a per-run partial merge onto the --using splitter's
+saved config. Source: inline JSON, a plain file path, an absolute
+file:// URI, or '-' to read from stdin. --patch does NOT replace the
+splitter; pass --using to pick the splitter and --patch to vary it
+without modifying the persisted version.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend split combined.pdf --using spl_abc"},
 			{Label: "JSON output", Cmd: "extend split combined.pdf --using spl_abc -o json"},
-			{Label: "Merge per-run tweaks onto a saved splitter", Cmd: "extend split combined.pdf --using spl_abc --override-config override.json"},
-			{Label: "Inline per-run override", Cmd: `extend split combined.pdf --using spl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Patch a saved splitter for this run", Cmd: "extend split combined.pdf --using spl_abc --patch tweaks.json"},
+			{Label: "Inline patch", Cmd: `extend split combined.pdf --using spl_abc --patch '{"foo":"bar"}'`},
 			{Label: "Count segments via jq", Cmd: "extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw"},
 		},
 		Gotchas: []string{
@@ -74,21 +73,21 @@ the persisted splitter.`,
 				return err
 			}
 			return runSplit(cmd.Context(), app, splitParams{
-				input:              args[0],
-				splitterID:         splitterID,
-				version:            version,
-				overrideConfigPath: overrideConfigPath,
-				password:           password,
-				wait:               wait,
-				priority:           priority,
-				timeout:            timeout,
-				metadata:           md,
+				input:      args[0],
+				splitterID: splitterID,
+				version:    version,
+				patchPath:  patchPath,
+				password:   password,
+				wait:       wait,
+				priority:   priority,
+				timeout:    timeout,
+				metadata:   md,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
 			cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using splitter's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using splitter's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -101,15 +100,15 @@ the persisted splitter.`,
 }
 
 type splitParams struct {
-	input              string
-	splitterID         string
-	version            string
-	overrideConfigPath string
-	password           string
-	wait               bool
-	priority           int
-	timeout            time.Duration
-	metadata           map[string]any
+	input      string
+	splitterID string
+	version    string
+	patchPath  string
+	password   string
+	wait       bool
+	priority   int
+	timeout    time.Duration
+	metadata   map[string]any
 }
 
 func runSplit(ctx context.Context, app *App, p splitParams) error {
@@ -124,8 +123,8 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 	}
 
 	splitter := &client.SplitterRef{ID: p.splitterID, Version: p.version}
-	if p.overrideConfigPath != "" {
-		raw, err := readJSONFile(p.overrideConfigPath, "--override-config")
+	if p.patchPath != "" {
+		raw, err := readJSONFile(p.patchPath, "--patch")
 		if err != nil {
 			return err
 		}

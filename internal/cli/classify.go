@@ -15,14 +15,14 @@ import (
 // and its `extend classify batch` subcommand.
 func newClassifyDoc(app *App) *CommandDoc {
 	var (
-		classifierID       string
-		version            string
-		overrideConfigPath string
-		password           string
-		wait               bool
-		priority           int
-		timeout            time.Duration
-		meta               metaFlags
+		classifierID string
+		version      string
+		patchPath    string
+		password     string
+		wait         bool
+		priority     int
+		timeout      time.Duration
+		meta         metaFlags
 	)
 
 	return &CommandDoc{
@@ -47,17 +47,16 @@ with a confidence score.
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
---override-config merges per-run tweaks onto the --using classifier's
-saved config, just for this one run. Source: inline JSON, a plain file
-path, an absolute file:// URI, or '-' to read from stdin. It does NOT
-replace the classifier; pass --using to pick the classifier and
---override-config to vary it without modifying
-the persisted classifier.`,
+--patch applies a per-run partial merge onto the --using classifier's
+saved config. Source: inline JSON, a plain file path, an absolute
+file:// URI, or '-' to read from stdin. --patch does NOT replace the
+classifier; pass --using to pick the classifier and --patch to vary it
+without modifying the persisted version.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend classify invoice.pdf --using cl_abc"},
 			{Label: "URL with JSON output", Cmd: "extend classify https://example.com/x.pdf --using cl_abc -o json"},
-			{Label: "Merge per-run tweaks onto a saved classifier", Cmd: "extend classify invoice.pdf --using cl_abc --override-config override.json"},
-			{Label: "Inline per-run override", Cmd: `extend classify invoice.pdf --using cl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Patch a saved classifier for this run", Cmd: "extend classify invoice.pdf --using cl_abc --patch tweaks.json"},
+			{Label: "Inline patch", Cmd: `extend classify invoice.pdf --using cl_abc --patch '{"foo":"bar"}'`},
 			{Label: "Filter via jq", Cmd: "extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw"},
 		},
 		Gotchas: []string{
@@ -74,21 +73,21 @@ the persisted classifier.`,
 				return err
 			}
 			return runClassify(cmd.Context(), app, classifyParams{
-				input:              args[0],
-				classifierID:       classifierID,
-				version:            version,
-				overrideConfigPath: overrideConfigPath,
-				password:           password,
-				wait:               wait,
-				priority:           priority,
-				timeout:            timeout,
-				metadata:           md,
+				input:        args[0],
+				classifierID: classifierID,
+				version:      version,
+				patchPath:    patchPath,
+				password:     password,
+				wait:         wait,
+				priority:     priority,
+				timeout:      timeout,
+				metadata:     md,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
 			cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using classifier's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using classifier's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -101,15 +100,15 @@ the persisted classifier.`,
 }
 
 type classifyParams struct {
-	input              string
-	classifierID       string
-	version            string
-	overrideConfigPath string
-	password           string
-	wait               bool
-	priority           int
-	timeout            time.Duration
-	metadata           map[string]any
+	input        string
+	classifierID string
+	version      string
+	patchPath    string
+	password     string
+	wait         bool
+	priority     int
+	timeout      time.Duration
+	metadata     map[string]any
 }
 
 func runClassify(ctx context.Context, app *App, p classifyParams) error {
@@ -124,8 +123,8 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 	}
 
 	classifier := &client.ClassifierRef{ID: p.classifierID, Version: p.version}
-	if p.overrideConfigPath != "" {
-		raw, err := readJSONFile(p.overrideConfigPath, "--override-config")
+	if p.patchPath != "" {
+		raw, err := readJSONFile(p.patchPath, "--patch")
 		if err != nil {
 			return err
 		}
