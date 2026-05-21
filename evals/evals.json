@@ -518,6 +518,134 @@
       ]
     },
     {
+      "id": "S-6",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Use the config in extractor.json directly to extract from invoice.pdf — don't create a saved extractor first.",
+      "files": [
+        "invoice.pdf",
+        "extractor.json"
+      ],
+      "expected_output": "Agent runs `extend extract invoice.pdf --config extractor.json` (note: `--config`, the standalone-config flag, NOT `--override-config` which requires `--using`). Agent does NOT call `extractors create` or `extractors versions create`.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend extract --config`",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "args": [
+                "invoice.pdf",
+                "--config"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did NOT use --override-config (which requires --using)",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag": "override-config"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did NOT create a saved extractor",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "create"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "extractors",
+                "versions",
+                "create"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate extractor IDs",
+          "patterns": [
+            "ex_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-7",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Parse receipt.pdf and decode any barcodes or QR codes printed on it.",
+      "files": [
+        "receipt.pdf"
+      ],
+      "expected_output": "Agent runs `extend parse receipt.pdf` with `--block-options` enabling barcode reading (e.g. `{\"barcodes\":{\"readingEnabled\":true}}`). Without that flag, the parser detects barcode locations but does not decode the values.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend parse` with --block-options",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "args": [
+                "receipt.pdf",
+                "--block-options"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "The agent's `--block-options` JSON enables barcode reading: it sets `barcodes.readingEnabled` (or equivalent agentic table/barcode reading) to true. Setting only `imageClippingEnabled` without `readingEnabled` does not actually decode the values, so that alone does not satisfy this criterion."
+        }
+      ]
+    },
+    {
+      "id": "S-8",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Use `extend parse` to extract the content of just pages 1 through 3 of contract.pdf — I don't need the rest of the document.",
+      "files": [
+        "contract.pdf"
+      ],
+      "expected_output": "Agent runs `extend parse contract.pdf` with `--advanced-options` scoping `pageRanges` to pages 1-3, e.g. `{\"pageRanges\":[{\"start\":1,\"end\":3}]}`. Agent does NOT parse the whole document.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend parse` with --advanced-options",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "args": [
+                "contract.pdf",
+                "--advanced-options"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "judge",
+          "criterion": "The agent's `--advanced-options` JSON limits processing to pages 1-3 via `pageRanges` (e.g. `[{\"start\":1,\"end\":3}]`). A bare `extend parse contract.pdf` with no page range, or page-range filtering done client-side after a full parse, does not satisfy this criterion."
+        }
+      ]
+    },
+    {
       "id": "F-1",
       "category": "output-format",
       "path": "B",
@@ -1174,6 +1302,31 @@
           "count_under": {
             "extract.invoice.pdf": 1
           }
+        }
+      ]
+    },
+    {
+      "id": "H-2",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "What does the `excelParsingMode` advanced option do on `extend parse`? Explain when I would change the default.",
+      "files": [],
+      "expected_output": "Agent consults the installed skill's references/parse-options.md (or `extend help parse-options`) and explains both modes: basic = fast cell-by-cell read; advanced = layout-block detection for spreadsheets with merged cells / multiple side-by-side tables / report-like layouts. Does NOT invent fields or guess. The eval intentionally avoids requiring a specific *route* to the answer — the discriminating signal is whether the right information lands in the final message.",
+      "expectations": [
+        {
+          "type": "stable_answer",
+          "text": "answer mentions both basic and advanced parsing modes",
+          "answer_pattern": "basic.*advanced|advanced.*basic"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer references layout, merged cells, or complex spreadsheets",
+          "answer_pattern": "merged cell|layout|complex spreadsheet|side.by.side"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions Excel/spreadsheet context",
+          "answer_pattern": "Excel|xlsx|spreadsheet|workbook"
         }
       ]
     },
