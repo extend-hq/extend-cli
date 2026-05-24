@@ -171,11 +171,11 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 			rows = append(rows, []string{
 				f.ID,
 				truncate(f.Name, 40),
-				string(extendx.Deref(f.Type)),
+				string(deref(f.Type)),
 				relTime(f.CreatedAt),
 			})
 		}
-		next := extendx.Deref(page.NextPageToken)
+		next := deref(page.NextPageToken)
 		if paginationDone(all, max, len(rows), next) {
 			break
 		}

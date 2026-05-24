@@ -246,16 +246,16 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 				}
 				items[i] = &extend.ExtractRunsCreateBatchRequestInputsItem{
 					File:     file,
-					Metadata: extendx.MetadataPtr(prep.Metadata),
+					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
 			br, err := prep.Client.ExtractRuns.CreateBatch(cmd.Context(), &extend.ExtractRunsCreateBatchRequest{
 				Extractor: &extend.ExtractRunsCreateBatchRequestExtractor{
 					ID:      f.using,
-					Version: extendx.VersionPtr(f.version),
+					Version: versionPtr(f.version),
 				},
 				Inputs:   items,
-				Priority: extendx.PriorityPtr(f.priority),
+				Priority: priorityPtr(f.priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -316,16 +316,16 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 				}
 				items[i] = &extend.ClassifyRunsCreateBatchRequestInputsItem{
 					File:     file,
-					Metadata: extendx.MetadataPtr(prep.Metadata),
+					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
 			br, err := prep.Client.ClassifyRuns.CreateBatch(cmd.Context(), &extend.ClassifyRunsCreateBatchRequest{
 				Classifier: &extend.ClassifyRunsCreateBatchRequestClassifier{
 					ID:      f.using,
-					Version: extendx.VersionPtr(f.version),
+					Version: versionPtr(f.version),
 				},
 				Inputs:   items,
-				Priority: extendx.PriorityPtr(f.priority),
+				Priority: priorityPtr(f.priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -384,16 +384,16 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 				}
 				items[i] = &extend.SplitRunsCreateBatchRequestInputsItem{
 					File:     file,
-					Metadata: extendx.MetadataPtr(prep.Metadata),
+					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
 			br, err := prep.Client.SplitRuns.CreateBatch(cmd.Context(), &extend.SplitRunsCreateBatchRequest{
 				Splitter: &extend.SplitRunsCreateBatchRequestSplitter{
 					ID:      f.using,
-					Version: extendx.VersionPtr(f.version),
+					Version: versionPtr(f.version),
 				},
 				Inputs:   items,
-				Priority: extendx.PriorityPtr(f.priority),
+				Priority: priorityPtr(f.priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -460,7 +460,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 				}
 				items[i] = &extend.ParseRunsCreateBatchRequestInputsItem{
 					File:     file,
-					Metadata: extendx.MetadataPtr(prep.Metadata),
+					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
 			cfg := &extend.ParseConfig{}
@@ -484,7 +484,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			br, err := prep.Client.ParseRuns.CreateBatch(cmd.Context(), &extend.ParseRunsCreateBatchRequest{
 				Inputs:   items,
 				Config:   cfg,
-				Priority: extendx.PriorityPtr(priority),
+				Priority: priorityPtr(priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -565,7 +565,7 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 			resp, err := prep.Client.WorkflowRuns.CreateBatch(cmd.Context(), &extend.WorkflowRunsCreateBatchRequest{
 				Workflow: &extend.WorkflowReference{
 					ID:      f.using,
-					Version: extendx.VersionPtr(f.version),
+					Version: versionPtr(f.version),
 				},
 				Inputs: items,
 			})

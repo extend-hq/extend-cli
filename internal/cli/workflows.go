@@ -7,8 +7,6 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
-
-	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // workflowAccessor wires the generic processorAccessor structure
@@ -39,7 +37,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Workflow, error) {
 			// Workflows.Retrieve takes no request struct (no workspace
@@ -58,7 +56,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.WorkflowVersion, error) {
 			return c.WorkflowVersions.Retrieve(ctx, id, ver)

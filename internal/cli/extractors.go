@@ -7,8 +7,6 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
-
-	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // extractorAccessor wires the generic processorAccessor structure
@@ -35,7 +33,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Extractor, error) {
 			return c.Extractors.Retrieve(ctx, id, &extend.ExtractorsRetrieveRequest{})
@@ -51,7 +49,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.ExtractorVersion, error) {
 			return c.ExtractorVersions.Retrieve(ctx, id, ver, &extend.ExtractorVersionsRetrieveRequest{})

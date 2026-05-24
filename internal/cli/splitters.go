@@ -7,8 +7,6 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
-
-	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // splitterAccessor wires the generic processorAccessor structure
@@ -35,7 +33,7 @@ func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSumm
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Splitter, error) {
 			return c.Splitters.Retrieve(ctx, id, &extend.SplittersRetrieveRequest{})
@@ -51,7 +49,7 @@ func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSumm
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, extendx.Deref(r.NextPageToken), nil
+			return r, r.Data, deref(r.NextPageToken), nil
 		},
 		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.SplitterVersion, error) {
 			return c.SplitterVersions.Retrieve(ctx, id, ver, &extend.SplitterVersionsRetrieveRequest{})

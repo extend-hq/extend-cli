@@ -3,8 +3,6 @@ package cli
 import (
 	"testing"
 	"time"
-
-	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // TestHTTPTimeoutFlagRegistered checks the persistent --http-timeout
@@ -27,20 +25,20 @@ func TestHTTPTimeoutFlagRegistered(t *testing.T) {
 
 // TestEnvHTTPTimeoutInEnvVarRegistry guards against drift in the
 // canonical env-var list. Help rendering (`extend help auth`) and the
-// SKILL.md catalog both read EnvVars to produce their tables; a new
+// SKILL.md catalog both read envVars to produce their tables; a new
 // env var added without an entry here renders incomplete help.
 func TestEnvHTTPTimeoutInEnvVarRegistry(t *testing.T) {
 	var found bool
-	for _, ev := range extendx.EnvVars {
-		if ev.Name == extendx.EnvHTTPTimeout {
+	for _, ev := range envVars {
+		if ev.Name == envHTTPTimeout {
 			found = true
 			if ev.Description == "" {
-				t.Errorf("EnvHTTPTimeout entry has empty Description")
+				t.Errorf("envHTTPTimeout entry has empty Description")
 			}
 		}
 	}
 	if !found {
-		t.Errorf("EnvHTTPTimeout must appear in extendx.EnvVars so 'extend help auth' documents it")
+		t.Errorf("envHTTPTimeout must appear in envVars so 'extend help auth' documents it")
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 
-	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -116,7 +115,7 @@ processor accuracy via 'extend evaluations runs get'.
 				for _, s := range page.Data {
 					rows = append(rows, []string{s.ID, s.Name, relTime(s.CreatedAt)})
 				}
-				next := extendx.Deref(page.NextPageToken)
+				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
@@ -319,7 +318,7 @@ accuracy score.
 					}
 					rows = append(rows, []string{it.ID, name})
 				}
-				next := extendx.Deref(page.NextPageToken)
+				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}

@@ -90,12 +90,12 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("  export EXTEND_API_KEY=sk_xxx\n\n")
 	b.WriteString("Environment variables:\n\n")
 	maxNameLen := 0
-	for _, ev := range extendx.EnvVars {
+	for _, ev := range envVars {
 		if len(ev.Name) > maxNameLen {
 			maxNameLen = len(ev.Name)
 		}
 	}
-	for _, ev := range extendx.EnvVars {
+	for _, ev := range envVars {
 		fmt.Fprintf(&b, "  %-*s  %s\n", maxNameLen, ev.Name, ev.Description)
 	}
 	b.WriteString("\nRegions:\n\n")

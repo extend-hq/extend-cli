@@ -640,7 +640,7 @@ func listExtractPage(ctx context.Context, cli *sdkclient.Client, p runsListParam
 	for _, r := range resp.Data {
 		rows = append(rows, extractSummaryRow(r))
 	}
-	return rows, resp, extendx.Deref(resp.NextPageToken), nil
+	return rows, resp, deref(resp.NextPageToken), nil
 }
 
 func listParsePage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
@@ -672,7 +672,7 @@ func listParsePage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 	for _, r := range resp.Data {
 		rows = append(rows, parseRow(r))
 	}
-	return rows, resp, extendx.Deref(resp.NextPageToken), nil
+	return rows, resp, deref(resp.NextPageToken), nil
 }
 
 func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
@@ -705,7 +705,7 @@ func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListPara
 	for _, r := range resp.Data {
 		rows = append(rows, classifySummaryRow(r))
 	}
-	return rows, resp, extendx.Deref(resp.NextPageToken), nil
+	return rows, resp, deref(resp.NextPageToken), nil
 }
 
 func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
@@ -738,7 +738,7 @@ func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 	for _, r := range resp.Data {
 		rows = append(rows, splitSummaryRow(r))
 	}
-	return rows, resp, extendx.Deref(resp.NextPageToken), nil
+	return rows, resp, deref(resp.NextPageToken), nil
 }
 
 func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
@@ -770,7 +770,7 @@ func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListPara
 	for _, r := range resp.Data {
 		rows = append(rows, workflowSummaryRow(r))
 	}
-	return rows, resp, extendx.Deref(resp.NextPageToken), nil
+	return rows, resp, deref(resp.NextPageToken), nil
 }
 
 func extractSummaryRow(r *extend.ExtractRunSummary) []string {

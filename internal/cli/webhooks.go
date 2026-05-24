@@ -131,7 +131,7 @@ subscriptions list' to see what each endpoint is subscribed to.
 				for _, ep := range page.Data {
 					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt)})
 				}
-				next := extendx.Deref(page.NextPageToken)
+				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
@@ -319,7 +319,7 @@ returned signing secret.`,
 			cmd.Flags().StringVar(&name, "name", "", "Display name (required)")
 			cmd.Flags().BoolVar(&disable, "disabled", false, "Create the endpoint in 'disabled' state (defaults to 'enabled')")
 			cmd.Flags().StringArrayVar(&events, "events", nil, "Enabled events (comma-separated or repeated; required)")
-			cmd.Flags().StringVar(&apiVersion, "api-version", extendx.DefaultAPIVersion, "API version for events")
+			cmd.Flags().StringVar(&apiVersion, "api-version", defaultAPIVersion, "API version for events")
 			advanced.attach(cmd)
 		},
 	}
@@ -571,7 +571,7 @@ classifier, splitter, or workflow) and a set of event types. Use
 				for _, s := range page.Data {
 					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt)})
 				}
-				next := extendx.Deref(page.NextPageToken)
+				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
@@ -828,10 +828,10 @@ The body is read from --body-file or stdin. The signing secret can come from
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if secret == "" {
-				secret = os.Getenv(extendx.EnvWebhookSecret)
+				secret = os.Getenv(envWebhookSecret)
 			}
 			if secret == "" {
-				return fmt.Errorf("signing secret required (--secret or %s env)", extendx.EnvWebhookSecret)
+				return fmt.Errorf("signing secret required (--secret or %s env)", envWebhookSecret)
 			}
 			body, err := readBody(app, bodyFile)
 			if err != nil {

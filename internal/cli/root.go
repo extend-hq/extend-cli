@@ -153,28 +153,28 @@ func NewRoot() *cobra.Command {
 			UserAgent:   userAgent(),
 		}
 		if cfg.Region == "" {
-			cfg.Region = os.Getenv(extendx.EnvRegion)
+			cfg.Region = os.Getenv(envRegion)
 		}
 		if cfg.WorkspaceID == "" {
-			cfg.WorkspaceID = os.Getenv(extendx.EnvWorkspaceID)
+			cfg.WorkspaceID = os.Getenv(envWorkspaceID)
 		}
 		// EXTEND_BASE_URL always wins over region.
-		if v := os.Getenv(extendx.EnvBaseURL); v != "" {
+		if v := os.Getenv(envBaseURL); v != "" {
 			cfg.BaseURL = v
 		}
-		if v := os.Getenv(extendx.EnvAPIVersion); v != "" {
+		if v := os.Getenv(envAPIVersion); v != "" {
 			cfg.APIVersion = v
 		}
 
 		// Debug logging: --debug flag wins; otherwise honor EXTEND_DEBUG.
 		// Truthy values: "1", "true", "yes", "on" (case-insensitive).
-		if app.Debug || debugEnvTruthy(os.Getenv(extendx.EnvDebug)) {
+		if app.Debug || debugEnvTruthy(os.Getenv(envDebug)) {
 			cfg.Debug = app.IO.ErrOut
 		}
 
 		// Per-HTTP-request timeout: --http-timeout flag wins; otherwise
 		// honor EXTEND_HTTP_TIMEOUT. Both override the SDK default.
-		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(extendx.EnvHTTPTimeout)); ok {
+		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(envHTTPTimeout)); ok {
 			// A flag value of 0 is impossible to express to extendx
 			// (0 means "leave default"). We use -1 as a sentinel for
 			// "explicitly disable timeout" so the underlying http.Client
@@ -235,10 +235,10 @@ func resolveHTTPTimeout(flag time.Duration, env string) (time.Duration, bool) {
 // label apply to every command, so their fallbacks live here.
 func applyEnvDefaults(app *App) {
 	if app.Format == "" {
-		app.Format = os.Getenv(extendx.EnvOutput)
+		app.Format = os.Getenv(envOutput)
 	}
 	if app.Env == "" {
-		app.Env = os.Getenv(extendx.EnvEnv)
+		app.Env = os.Getenv(envEnv)
 	}
 }
 
@@ -251,7 +251,7 @@ func applyEnvDefaults(app *App) {
 func apiKeyEnvVar(envLabel string) string {
 	envLabel = strings.TrimSpace(envLabel)
 	if envLabel == "" {
-		return extendx.EnvAPIKey
+		return envAPIKey
 	}
 	upper := strings.Map(func(r rune) rune {
 		switch {
@@ -267,7 +267,7 @@ func apiKeyEnvVar(envLabel string) string {
 		return -1
 	}, envLabel)
 	if upper == "" {
-		return extendx.EnvAPIKey
+		return envAPIKey
 	}
 	return "EXTEND_" + upper + "_API_KEY"
 }
