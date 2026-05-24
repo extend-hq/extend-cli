@@ -565,7 +565,7 @@ func cancelRun(ctx context.Context, c *sdkclient.Client, id string) error {
 		_, err := c.WorkflowRuns.Cancel(ctx, id, &extend.WorkflowRunsCancelRequest{})
 		return err
 	case extendx.KindParse, extendx.KindEdit:
-		return extendx.ErrNotCancellable
+		return fmt.Errorf("%s runs are not cancellable: %w", kind, extendx.ErrNotCancellable)
 	default:
 		return fmt.Errorf("unsupported run kind: %s", kind)
 	}

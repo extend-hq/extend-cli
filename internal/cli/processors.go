@@ -679,16 +679,20 @@ const maxBodyFileBytes = 5 << 20
 
 // readJSONFile accepts inline JSON, a path, stdin (-), or an absolute
 // file:// URI, then validates JSON syntax. The error message names the
-// flag for clarity ("--config: invalid JSON: ..."). Returns the raw
-// bytes as json.RawMessage so callers can plug it directly into a
-// struct field.
+// flag for clarity ("--config: invalid JSON at offset 42: ..."). We
+// use json.Unmarshal rather than json.Valid so a malformed body
+// surfaces the offset of the syntax error; json.Valid only returns
+// bool, which forces a "somewhere in the body" error message that's
+// hard to act on. Returns the raw bytes as json.RawMessage so callers
+// can plug it directly into a struct field.
 func readJSONFile(path, flag string) (json.RawMessage, error) {
 	data, err := readJSONSource(path)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", flag, err)
 	}
-	if !json.Valid(data) {
-		return nil, fmt.Errorf("%s: not valid JSON", flag)
+	var probe json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("%s: invalid JSON: %w", flag, err)
 	}
 	return data, nil
 }
@@ -714,7 +718,7 @@ func pathFromFileURI(source string) (string, error) {
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse file URI %q: %w", source, err)
 	}
 	if u.Scheme != "file" {
 		return "", nil

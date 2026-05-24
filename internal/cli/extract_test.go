@@ -344,7 +344,12 @@ func TestExtract_InvalidJSONPatchErrorsClearly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--patch") {
 		t.Errorf("expected --patch error, got %v", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+	// The error must mention "invalid JSON" so an agent can recognize
+	// the failure class. json.Unmarshal also surfaces the syntax
+	// position ("invalid character 'n' looking for ..."), which is
+	// strictly more actionable than the old json.Valid-based bare
+	// "not valid JSON" message.
+	if err == nil || !strings.Contains(err.Error(), "invalid JSON") {
 		t.Errorf("expected JSON validity message, got %v", err)
 	}
 }
