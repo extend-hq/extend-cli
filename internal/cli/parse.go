@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,7 +10,10 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -78,8 +82,8 @@ knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.`,
 		},
 		SeeAlso:  []string{"extract", "classify", "parse batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
@@ -152,12 +156,21 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		return err
 	}
 
-	in := client.CreateParseRunInput{
-		File:     ref,
-		Config:   cfg,
-		Metadata: p.metadata,
+	file, err := extendx.BuildParseFile(ref)
+	if err != nil {
+		return err
 	}
-	run, err := cli.CreateParseRun(ctx, in)
+
+	req := &extend.ParseRunsCreateRequest{
+		File:   file,
+		Config: cfg,
+	}
+	if p.metadata != nil {
+		md := extend.RunMetadata(p.metadata)
+		req.Metadata = &md
+	}
+
+	run, err := cli.ParseRuns.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
@@ -167,7 +180,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForParseRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.ParseRun) {
+	final, err := waitForParseRun(ctx, cli, run.ID, extendx.WaitProfileOptions(extendx.ProfileShort, p.timeout), func(r *extend.ParseRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")
@@ -178,28 +191,46 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	if err := renderParseResult(app, final, p.target); err != nil {
 		return err
 	}
-	if final.Status == client.StatusFailed {
-		if final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, final.FailureMessage)
+	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
+		if final.FailureMessage != nil && *final.FailureMessage != "" {
+			return fmt.Errorf("run %s failed: %s", final.ID, *final.FailureMessage)
 		}
 		return fmt.Errorf("run %s failed", final.ID)
 	}
 	return nil
 }
 
+func waitForParseRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.ParseRun)) (*extend.ParseRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.ParseRun, error) {
+			return c.ParseRuns.Retrieve(ctx, id, &extend.ParseRunsRetrieveRequest{})
+		},
+		func(r *extend.ParseRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
+}
+
 // buildParseConfig assembles a ParseConfig from CLI parseParams. Returns
-// nil when no config-relevant flags are set so the on-the-wire body omits
-// `config` entirely (server falls back to defaults).
-func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
-	cfg := &client.ParseConfig{}
+// nil when no config-relevant flags are set so the on-the-wire body
+// omits `config` entirely (server falls back to defaults).
+func buildParseConfig(p parseParams) (*extend.ParseConfig, error) {
+	cfg := &extend.ParseConfig{}
 	if p.target != "" {
-		cfg.Target = p.target
+		t, err := extend.NewParseConfigTargetFromString(p.target)
+		if err != nil {
+			return nil, fmt.Errorf("--target: %w", err)
+		}
+		cfg.Target = &t
 	}
 	if p.engine != "" {
-		cfg.Engine = p.engine
+		e, err := extend.NewParseConfigEngineFromString(p.engine)
+		if err != nil {
+			return nil, fmt.Errorf("--engine: %w", err)
+		}
+		cfg.Engine = &e
 	}
 	if p.engineVersion != "" {
-		cfg.EngineVersion = p.engineVersion
+		cfg.EngineVersion = extend.String(p.engineVersion)
 	}
 	chunkStrategy := p.chunkStrategy
 	if chunkStrategy == "none" {
@@ -215,16 +246,23 @@ func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
 		return nil, fmt.Errorf("--chunk-strategy section is not supported with --target spatial")
 	}
 	if chunkStrategy != "" || p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
-		cs := &client.ChunkingStrategy{Type: chunkStrategy}
+		cs := &extend.ParseConfigChunkingStrategy{}
+		if chunkStrategy != "" {
+			st, err := extend.NewParseConfigChunkingStrategyTypeFromString(chunkStrategy)
+			if err != nil {
+				return nil, fmt.Errorf("--chunk-strategy: %w", err)
+			}
+			cs.Type = &st
+		}
 		if p.chunkMinChars > 0 || p.chunkMaxChars > 0 {
-			opts := &client.ChunkingStrategyOptions{}
+			opts := &extend.ParseConfigChunkingStrategyOptions{}
 			if p.chunkMinChars > 0 {
-				min := p.chunkMinChars
-				opts.MinCharacters = &min
+				m := p.chunkMinChars
+				opts.MinCharacters = &m
 			}
 			if p.chunkMaxChars > 0 {
-				max := p.chunkMaxChars
-				opts.MaxCharacters = &max
+				m := p.chunkMaxChars
+				opts.MaxCharacters = &m
 			}
 			cs.Options = opts
 		}
@@ -235,18 +273,23 @@ func buildParseConfig(p parseParams) (*client.ParseConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		cfg.BlockOptions = raw
+		var bo extend.ParseConfigBlockOptions
+		if err := json.Unmarshal(raw, &bo); err != nil {
+			return nil, fmt.Errorf("--block-options: %w", err)
+		}
+		cfg.BlockOptions = &bo
 	}
 	if p.advancedOptionsPath != "" {
 		raw, err := readJSONFile(p.advancedOptionsPath, "--advanced-options")
 		if err != nil {
 			return nil, err
 		}
-		cfg.AdvancedOptions = raw
+		var ao extend.ParseConfigAdvancedOptions
+		if err := json.Unmarshal(raw, &ao); err != nil {
+			return nil, fmt.Errorf("--advanced-options: %w", err)
+		}
+		cfg.AdvancedOptions = &ao
 	}
-	// If only Target is set with the default value and no other knobs were
-	// touched, the config is effectively a no-op; still return it because
-	// the existing CLI behavior was to send {target:"markdown"} explicitly.
 	return cfg, nil
 }
 
@@ -259,7 +302,7 @@ func validateParseChunkStrategy(strategy string) error {
 	}
 }
 
-func renderParseResult(app *App, run *client.ParseRun, target string) error {
+func renderParseResult(app *App, run *extend.ParseRun, target string) error {
 	if app.JQ != "" {
 		if app.Format == string(output.FormatMarkdown) || app.Format == "md" {
 			return fmt.Errorf("--jq cannot be combined with -o markdown")
@@ -275,7 +318,7 @@ func renderParseResult(app *App, run *client.ParseRun, target string) error {
 	return renderMarkdown(app, run)
 }
 
-func renderMarkdown(app *App, run *client.ParseRun) error {
+func renderMarkdown(app *App, run *extend.ParseRun) error {
 	md := concatChunks(run)
 	if md == "" {
 		return nil
@@ -298,7 +341,7 @@ func renderMarkdown(app *App, run *client.ParseRun) error {
 	return err
 }
 
-func concatChunks(run *client.ParseRun) string {
+func concatChunks(run *extend.ParseRun) string {
 	if run.Output == nil {
 		return ""
 	}

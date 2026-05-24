@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
 )
 
 func TestRunsGet_DispatchesByPrefix(t *testing.T) {
@@ -95,7 +95,7 @@ func TestRunsCancel_RejectsParseRuns(t *testing.T) {
 
 func TestRunsDelete_DispatchesByPrefix(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(204)
+		writeJSON(w, 200, map[string]any{"id": "clr_abc"})
 	})
 	ta := newTestApp(t, srv)
 	if err := runRunsDelete(context.Background(), ta.app, "clr_abc", true); err != nil {
@@ -145,21 +145,49 @@ func TestRunsList_AllAutoPaginates(t *testing.T) {
 func TestRenderWorkflow_MultiStepTable(t *testing.T) {
 	ios, _, out, _ := newTTYStreams(t)
 	app := &App{IO: ios}
-	run := &client.WorkflowRun{
+	// The SDK models step runs as a discriminated union (*extend.StepRun)
+	// keyed on StepType. Each variant has its own typed Step substruct.
+	// We build the union members by hand here to mirror what the SDK
+	// would unmarshal off the wire.
+	parseType := "PARSE"
+	extractType := "EXTRACT"
+	validateType := "RULE_VALIDATION"
+	run := &extend.WorkflowRun{
 		ID:           "workflow_run_x",
-		Status:       client.StatusProcessed,
+		Status:       extend.WorkflowRunStatusProcessed,
 		DashboardURL: "http://dash",
-		StepRuns: []client.WorkflowStepRun{
-			{ID: "sr_1", Status: client.StatusProcessed, Step: &client.WorkflowStep{Name: "parse1", Type: "PARSE"}},
-			{ID: "sr_2", Status: client.StatusProcessed, Step: &client.WorkflowStep{Name: "extract2", Type: "EXTRACT"}},
-			{ID: "sr_3", Status: client.StatusFailed, Step: &client.WorkflowStep{Name: "validate3", Type: "VALIDATE"}},
+		StepRuns: []*extend.StepRun{
+			{
+				StepType: "PARSE",
+				Parse: &extend.ParseStepRun{
+					ID:     "sr_1",
+					Status: extend.StepRunBaseStatusProcessed,
+					Step:   &extend.ParseStepRunStep{Name: "parse1", Type: &parseType},
+				},
+			},
+			{
+				StepType: "EXTRACT",
+				Extract: &extend.ExtractStepRun{
+					ID:     "sr_2",
+					Status: extend.StepRunBaseStatusProcessed,
+					Step:   &extend.ExtractStepRunStep{Name: "extract2", Type: &extractType},
+				},
+			},
+			{
+				StepType: "RULE_VALIDATION",
+				RuleValidation: &extend.RuleValidationStepRun{
+					ID:     "sr_3",
+					Status: extend.StepRunBaseStatusFailed,
+					Step:   &extend.RuleValidationStepRunStep{Name: "validate3", Type: &validateType},
+				},
+			},
 		},
 	}
 	if err := renderWorkflowResult(app, run); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"parse1", "extract2", "validate3", "PARSE", "EXTRACT", "VALIDATE", "FAILED"} {
+	for _, want := range []string{"parse1", "extract2", "validate3", "PARSE", "EXTRACT", "RULE_VALIDATION", "FAILED"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("multi-step output missing %q:\n%s", want, got)
 		}
@@ -191,9 +219,8 @@ func TestRunsList_TypeRoutesToCorrectEndpoint(t *testing.T) {
 }
 
 // TestRunsList_AllFiltersOnExtract asserts every new filter flag flows
-// through to the wire as the right query param. Belt-and-braces against the
-// path-aware ListRunsOptions.query() — extractor uses extractorId, includes
-// source/sourceId, fileNameContains, sortBy/sortDir.
+// through to the wire as the right query param. Belt-and-braces against
+// the per-kind list request building in listExtractPage et al.
 func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
@@ -227,11 +254,11 @@ func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 	}
 }
 
-// TestRunsList_ParseUsesLimitAndDropsSort exercises the parse-runs quirks:
-// the wire param is `limit` (not `maxPageSize`), and the server doesn't
-// accept sortBy/sortDir/processorId. Regression against the previously-silent
-// bug where --limit was ignored on parse runs.
-func TestRunsList_ParseUsesLimitAndDropsSort(t *testing.T) {
+// TestRunsList_ParseDropsSort exercises the parse-runs quirks:
+// the server doesn't accept sortBy/sortDir/processorId, and the SDK's
+// typed ParseRunsListRequest omits those fields entirely so they can't
+// leak. Regression against the pre-SDK silent dropping behavior.
+func TestRunsList_ParseDropsSort(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
@@ -246,10 +273,10 @@ func TestRunsList_ParseUsesLimitAndDropsSort(t *testing.T) {
 		t.Fatalf("runRunsList: %v", err)
 	}
 	q := srv.lastRequest().Query
-	if !strings.Contains(q, "limit=3") {
-		t.Errorf("parse runs must use ?limit= (got %s)", q)
+	if !strings.Contains(q, "maxPageSize=3") {
+		t.Errorf("parse runs missing maxPageSize=3 (got %s)", q)
 	}
-	for _, leaked := range []string{"maxPageSize", "sortBy", "sortDir", "extractorId"} {
+	for _, leaked := range []string{"sortBy", "sortDir", "extractorId"} {
 		if strings.Contains(q, leaked+"=") {
 			t.Errorf("parse runs leaked unsupported param %q in query: %s", leaked, q)
 		}

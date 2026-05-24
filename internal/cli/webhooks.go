@@ -12,7 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -95,27 +97,45 @@ subscriptions list' to see what each endpoint is subscribed to.
 			if err != nil {
 				return err
 			}
-			opts := client.ListWebhookEndpointsOptions{
-				Status:    status,
-				SortDir:   sortDir,
-				Limit:     limit,
-				PageToken: pageToken,
+			req := &extend.WebhookEndpointsListRequest{}
+			if status != "" {
+				s, err := extend.NewWebhookEndpointStatusFromString(status)
+				if err != nil {
+					return fmt.Errorf("--status: %w", err)
+				}
+				req.Status = &s
 			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+
 			var rows [][]string
 			var pages []any
 			for {
-				page, err := cli.ListWebhookEndpoints(cmd.Context(), opts)
+				page, err := cli.WebhookEndpoints.List(cmd.Context(), req)
 				if err != nil {
 					return err
 				}
 				pages = append(pages, page)
 				for _, ep := range page.Data {
-					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt)})
+					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt.Format(time.RFC3339))})
 				}
-				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
+				next := derefString(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
-				opts.PageToken = page.NextPageToken
+				req.NextPageToken = extend.String(next)
 			}
 			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "url", "created"}, rows, "No webhook endpoints.")
@@ -160,7 +180,7 @@ delete and recreate the endpoint.`,
 			if err != nil {
 				return err
 			}
-			ep, err := cli.GetWebhookEndpoint(cmd.Context(), args[0])
+			ep, err := cli.WebhookEndpoints.Retrieve(cmd.Context(), args[0], &extend.WebhookEndpointsRetrieveRequest{})
 			if err != nil {
 				return err
 			}
@@ -183,13 +203,13 @@ func (f *webhookAdvancedFlags) attach(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&f.urlThresholdBytes, "url-threshold-bytes", 0, "When --payload-format=url, swap to URL delivery once the body exceeds this many bytes (server default if 0)")
 }
 
-// build returns nil when no flags were set, so omitempty drops the whole
-// advancedOptions object on the wire.
-func (f *webhookAdvancedFlags) build() (*client.WebhookAdvancedOptions, error) {
+// build returns nil when no flags were set, so omitempty drops the
+// whole advancedOptions object on the wire.
+func (f *webhookAdvancedFlags) build() (*extend.WebhookAdvancedOptions, error) {
 	if len(f.headers) == 0 && f.payloadFormat == "" && f.urlThresholdBytes == 0 {
 		return nil, nil
 	}
-	opts := &client.WebhookAdvancedOptions{}
+	opts := &extend.WebhookAdvancedOptions{}
 	if len(f.headers) > 0 {
 		hdrs, err := parseKVPairs("--header", f.headers)
 		if err != nil {
@@ -198,15 +218,16 @@ func (f *webhookAdvancedFlags) build() (*client.WebhookAdvancedOptions, error) {
 		opts.Headers = hdrs
 	}
 	if f.payloadFormat != "" {
-		if f.payloadFormat != "json" && f.payloadFormat != "url" {
-			return nil, fmt.Errorf("--payload-format: %q is not one of json|url", f.payloadFormat)
+		pf, err := extend.NewWebhookPayloadFormatFromString(f.payloadFormat)
+		if err != nil {
+			return nil, fmt.Errorf("--payload-format: %w", err)
 		}
-		opts.Payload = &client.WebhookPayloadOptions{Format: f.payloadFormat}
+		opts.Payload = &extend.WebhookPayloadOptions{Format: pf}
 		if f.urlThresholdBytes > 0 {
-			if f.payloadFormat != "url" {
+			if pf != extend.WebhookPayloadFormatURL {
 				return nil, errors.New("--url-threshold-bytes only applies when --payload-format=url")
 			}
-			opts.Payload.UrlThresholdBytes = &f.urlThresholdBytes
+			opts.Payload.URLThresholdBytes = &f.urlThresholdBytes
 		}
 	} else if f.urlThresholdBytes > 0 {
 		return nil, errors.New("--url-threshold-bytes requires --payload-format=url")
@@ -218,7 +239,6 @@ func newWebhookEndpointsCreateDoc(app *App) *CommandDoc {
 	var (
 		url        string
 		name       string
-		status     string
 		events     []string
 		apiVersion string
 		disable    bool
@@ -262,9 +282,6 @@ returned signing secret.`,
 			if len(events) == 0 {
 				return errors.New("--events is required")
 			}
-			if disable {
-				status = "disabled"
-			}
 			adv, err := advanced.build()
 			if err != nil {
 				return err
@@ -273,14 +290,18 @@ returned signing secret.`,
 			if err != nil {
 				return err
 			}
-			ep, err := cli.CreateWebhookEndpoint(cmd.Context(), client.CreateWebhookEndpointInput{
+			req := &extend.WebhookEndpointsCreateRequest{
 				URL:             url,
 				Name:            name,
-				Status:          status,
-				EnabledEvents:   splitCSV(events),
+				EnabledEvents:   toWebhookEventTypes(splitCSV(events)),
 				APIVersion:      apiVersion,
 				AdvancedOptions: adv,
-			})
+			}
+			if disable {
+				s := extend.WebhookEndpointStatusDisabled
+				req.Status = &s
+			}
+			ep, err := cli.WebhookEndpoints.Create(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
@@ -298,17 +319,45 @@ returned signing secret.`,
 			cmd.Flags().StringVar(&name, "name", "", "Display name (required)")
 			cmd.Flags().BoolVar(&disable, "disabled", false, "Create the endpoint in 'disabled' state (defaults to 'enabled')")
 			cmd.Flags().StringArrayVar(&events, "events", nil, "Enabled events (comma-separated or repeated; required)")
-			cmd.Flags().StringVar(&apiVersion, "api-version", client.DefaultAPIVersion, "API version for events")
+			cmd.Flags().StringVar(&apiVersion, "api-version", extendx.DefaultAPIVersion, "API version for events")
 			advanced.attach(cmd)
 		},
 	}
+}
+
+// toWebhookEventTypes casts a []string of event names into the SDK's
+// typed []WebhookEndpointEventType slice. The SDK alias is a `string`
+// underlying type so this is a zero-cost cast; we keep it in a helper
+// because the conversion is needed in create + update.
+func toWebhookEventTypes(in []string) []extend.WebhookEndpointEventType {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]extend.WebhookEndpointEventType, len(in))
+	for i, s := range in {
+		out[i] = extend.WebhookEndpointEventType(s)
+	}
+	return out
+}
+
+// toWebhookSubscriptionEvents is the subscriptions-side equivalent of
+// toWebhookEventTypes. Kept separate because the SDK uses distinct
+// typed slices for endpoint events vs. subscription events.
+func toWebhookSubscriptionEvents(in []string) []extend.WebhookSubscriptionEventType {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]extend.WebhookSubscriptionEventType, len(in))
+	for i, s := range in {
+		out[i] = extend.WebhookSubscriptionEventType(s)
+	}
+	return out
 }
 
 func newWebhookEndpointsUpdateDoc(app *App) *CommandDoc {
 	var (
 		url      string
 		name     string
-		status   string
 		events   []string
 		enable   bool
 		disable  bool
@@ -348,12 +397,6 @@ endpoint without --header instead.`,
 			if enable && disable {
 				return errors.New("--enable and --disable are mutually exclusive")
 			}
-			if enable {
-				status = "enabled"
-			}
-			if disable {
-				status = "disabled"
-			}
 			adv, err := advanced.build()
 			if err != nil {
 				return err
@@ -362,13 +405,24 @@ endpoint without --header instead.`,
 			if err != nil {
 				return err
 			}
-			ep, err := cli.UpdateWebhookEndpoint(cmd.Context(), args[0], client.UpdateWebhookEndpointInput{
-				URL:             url,
-				Name:            name,
-				Status:          status,
-				EnabledEvents:   splitCSV(events),
+			req := &extend.WebhookEndpointsUpdateRequest{
 				AdvancedOptions: adv,
-			})
+			}
+			if url != "" {
+				req.URL = extend.String(url)
+			}
+			if name != "" {
+				req.Name = extend.String(name)
+			}
+			if enable {
+				s := extend.WebhookEndpointStatusEnabled
+				req.Status = &s
+			} else if disable {
+				s := extend.WebhookEndpointStatusDisabled
+				req.Status = &s
+			}
+			req.EnabledEvents = toWebhookEventTypes(splitCSV(events))
+			ep, err := cli.WebhookEndpoints.Update(cmd.Context(), args[0], req)
 			if err != nil {
 				return err
 			}
@@ -418,7 +472,8 @@ prompt (required in non-interactive scripts).`,
 					if err != nil {
 						return err
 					}
-					return c.DeleteWebhookEndpoint(ctx, id)
+					_, err = c.WebhookEndpoints.Delete(ctx, id, &extend.WebhookEndpointsDeleteRequest{})
+					return err
 				})
 		},
 		Configure: func(cmd *cobra.Command) {
@@ -483,28 +538,44 @@ classifier, splitter, or workflow) and a set of event types. Use
 			if err != nil {
 				return err
 			}
-			opts := client.ListWebhookSubscriptionsOptions{
-				WebhookEndpointID: endpointID,
-				ResourceID:        resourceID,
-				SortDir:           sortDir,
-				Limit:             limit,
-				PageToken:         pageToken,
+			req := &extend.WebhookSubscriptionsListRequest{}
+			if endpointID != "" {
+				req.WebhookEndpointID = extend.String(endpointID)
 			}
+			if resourceID != "" {
+				req.ResourceID = extend.String(resourceID)
+			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+
 			var rows [][]string
 			var pages []any
 			for {
-				page, err := cli.ListWebhookSubscriptions(cmd.Context(), opts)
+				page, err := cli.WebhookSubscriptions.List(cmd.Context(), req)
 				if err != nil {
 					return err
 				}
 				pages = append(pages, page)
 				for _, s := range page.Data {
-					rows = append(rows, []string{s.ID, s.WebhookEndpointID, s.ResourceType, s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt)})
+					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt.Format(time.RFC3339))})
 				}
-				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
+				next := derefString(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
-				opts.PageToken = page.NextPageToken
+				req.NextPageToken = extend.String(next)
 			}
 			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "endpoint", "type", "resource", "events", "created"}, rows, "No webhook subscriptions.")
@@ -544,7 +615,7 @@ target resource, and the list of enabled event types.`,
 			if err != nil {
 				return err
 			}
-			s, err := cli.GetWebhookSubscription(cmd.Context(), args[0])
+			s, err := cli.WebhookSubscriptions.Retrieve(cmd.Context(), args[0], &extend.WebhookSubscriptionsRetrieveRequest{})
 			if err != nil {
 				return err
 			}
@@ -594,20 +665,24 @@ pass --resource-type to override or for unknown prefixes.`,
 				return errors.New("--events is required")
 			}
 			if resourceType == "" {
-				resourceType = client.WebhookSubscriptionResourceTypeFromID(resourceID)
+				resourceType = extendx.WebhookSubscriptionResourceTypeFromID(resourceID)
 				if resourceType == "" {
 					return fmt.Errorf("could not infer resource type from %q; pass --resource-type explicitly (extractor|classifier|splitter|workflow)", resourceID)
 				}
+			}
+			rt, err := extend.NewWebhookSubscriptionResourceTypeFromString(resourceType)
+			if err != nil {
+				return fmt.Errorf("--resource-type: %w", err)
 			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			s, err := cli.CreateWebhookSubscription(cmd.Context(), client.CreateWebhookSubscriptionInput{
+			s, err := cli.WebhookSubscriptions.Create(cmd.Context(), &extend.WebhookSubscriptionsCreateRequest{
 				WebhookEndpointID: endpointID,
-				ResourceType:      resourceType,
+				ResourceType:      rt,
 				ResourceID:        resourceID,
-				EnabledEvents:     splitCSV(events),
+				EnabledEvents:     toWebhookSubscriptionEvents(splitCSV(events)),
 			})
 			if err != nil {
 				return err
@@ -656,8 +731,8 @@ delete and recreate the subscription.`,
 			if err != nil {
 				return err
 			}
-			s, err := cli.UpdateWebhookSubscription(cmd.Context(), args[0], client.UpdateWebhookSubscriptionInput{
-				EnabledEvents: splitCSV(events),
+			s, err := cli.WebhookSubscriptions.Update(cmd.Context(), args[0], &extend.WebhookSubscriptionsUpdateRequest{
+				EnabledEvents: toWebhookSubscriptionEvents(splitCSV(events)),
 			})
 			if err != nil {
 				return err
@@ -705,7 +780,8 @@ prompt (required in non-interactive scripts).`,
 					if err != nil {
 						return err
 					}
-					return c.DeleteWebhookSubscription(ctx, id)
+					_, err = c.WebhookSubscriptions.Delete(ctx, id, &extend.WebhookSubscriptionsDeleteRequest{})
+					return err
 				})
 		},
 		Configure: func(cmd *cobra.Command) {
@@ -752,17 +828,17 @@ The body is read from --body-file or stdin. The signing secret can come from
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if secret == "" {
-				secret = os.Getenv(client.EnvWebhookSecret)
+				secret = os.Getenv(extendx.EnvWebhookSecret)
 			}
 			if secret == "" {
-				return fmt.Errorf("signing secret required (--secret or %s env)", client.EnvWebhookSecret)
+				return fmt.Errorf("signing secret required (--secret or %s env)", extendx.EnvWebhookSecret)
 			}
 			body, err := readBody(app, bodyFile)
 			if err != nil {
 				return err
 			}
 			pal := paletteFor(app.IO)
-			if err := client.VerifyWebhookSignature(secret, signature, timestamp, body, maxAge); err != nil {
+			if err := extendx.VerifyWebhookSignature(secret, signature, timestamp, body, maxAge); err != nil {
 				fmt.Fprintf(app.IO.ErrOut, "%s %v\n", pal.Red("✗"), err)
 				return fmt.Errorf("signature invalid")
 			}

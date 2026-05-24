@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
 
@@ -90,10 +93,11 @@ func newTestApp(t *testing.T, srv *fakeServer) *testApp {
 	ios.SetColorEnabled(false)
 	app := &App{
 		IO: ios,
-		NewClient: func() (*client.Client, error) {
-			c := client.New("test-key")
-			c.BaseURL = srv.URL()
-			return c, nil
+		NewClient: func() (*sdkclient.Client, error) {
+			return extendx.NewClient(extendx.Config{
+				APIKey:  "test-key",
+				BaseURL: srv.URL(),
+			})
 		},
 	}
 	return &testApp{app: app, out: out, errOut: errOut, in: in}
@@ -148,9 +152,111 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// The Fern-generated SDK validates a discriminator literal
+	// (`"object": "extract_run"` and friends) on every typed
+	// UnmarshalJSON. Test fixtures historically didn't bother
+	// setting it because the hand-rolled client never validated.
+	// To keep the tests focused on behavior rather than serialization
+	// minutiae, we inject the discriminator here based on the ID
+	// prefix when the caller didn't provide one. A test that wants a
+	// non-default object literal (e.g. explicitly testing the SDK
+	// rejection path) can still pass `"object"` in the map directly.
+	if m, ok := v.(map[string]any); ok {
+		if _, has := m["object"]; !has {
+			if obj := inferObjectFromMap(m); obj != "" {
+				m["object"] = obj
+			}
+		}
+		// List responses always have object="list" plus a Data
+		// slice whose elements need their own discriminator. Walk
+		// the slice once when present so individual list items
+		// also pass SDK validation.
+		if data, ok := m["data"].([]any); ok {
+			for _, item := range data {
+				if im, ok := item.(map[string]any); ok {
+					if _, has := im["object"]; !has {
+						if obj := inferObjectFromMap(im); obj != "" {
+							im["object"] = obj
+						}
+					}
+				}
+			}
+		}
+		if data, ok := m["data"].([]map[string]any); ok {
+			for _, im := range data {
+				if _, has := im["object"]; !has {
+					if obj := inferObjectFromMap(im); obj != "" {
+						im["object"] = obj
+					}
+				}
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// inferObjectFromMap maps a response object back to its SDK
+// discriminator literal based on the `id` field's prefix. Returns ""
+// when no rule matches; the caller is then responsible for setting
+// `object` explicitly (or accepting that the SDK will refuse to
+// unmarshal the response).
+func inferObjectFromMap(m map[string]any) string {
+	id, _ := m["id"].(string)
+	if id == "" {
+		// Some responses have no id (list envelopes etc.); check
+		// for marker fields the caller could plausibly mean.
+		if _, ok := m["data"]; ok {
+			return "list"
+		}
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(id, "exr_"):
+		return "extract_run"
+	case strings.HasPrefix(id, "pr_"):
+		return "parse_run"
+	case strings.HasPrefix(id, "clr_"):
+		return "classify_run"
+	case strings.HasPrefix(id, "splr_"):
+		return "split_run"
+	case strings.HasPrefix(id, "workflow_run_"):
+		return "workflow_run"
+	case strings.HasPrefix(id, "edr_"):
+		return "edit_run"
+	case strings.HasPrefix(id, "bpr_"), strings.HasPrefix(id, "bpar_"):
+		return "batch_run"
+	case strings.HasPrefix(id, "file_"):
+		return "file"
+	case strings.HasPrefix(id, "ex_"), strings.HasPrefix(id, "ext_"):
+		return "extractor"
+	case strings.HasPrefix(id, "exv_"):
+		return "extractor_version"
+	case strings.HasPrefix(id, "cl_"):
+		return "classifier"
+	case strings.HasPrefix(id, "clv_"):
+		return "classifier_version"
+	case strings.HasPrefix(id, "spl_"):
+		return "splitter"
+	case strings.HasPrefix(id, "splv_"):
+		return "splitter_version"
+	case strings.HasPrefix(id, "workflow_version_"):
+		return "workflow_version"
+	case strings.HasPrefix(id, "workflow_"):
+		return "workflow"
+	case strings.HasPrefix(id, "whe_"), strings.HasPrefix(id, "we_"), strings.HasPrefix(id, "wh_"):
+		return "webhook_endpoint"
+	case strings.HasPrefix(id, "whs_"), strings.HasPrefix(id, "ws_"):
+		return "webhook_subscription"
+	case strings.HasPrefix(id, "evs_"), strings.HasPrefix(id, "ev_"):
+		return "evaluation_set"
+	case strings.HasPrefix(id, "esi_"), strings.HasPrefix(id, "evi_"):
+		return "evaluation_set_item"
+	case strings.HasPrefix(id, "esr_"):
+		return "evaluation_set_run"
+	}
+	return ""
 }
 
 func writeAPIError(w http.ResponseWriter, status int, code, message string) {

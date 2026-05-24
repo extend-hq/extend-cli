@@ -35,7 +35,10 @@ func TestFilesDelete_WithYesFlag(t *testing.T) {
 		if r.Method != http.MethodDelete || r.URL.Path != "/files/file_abc" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
-		w.WriteHeader(204)
+		// The SDK's Files.Delete unmarshals a *FilesDeleteResponse
+		// from the body; a bare 204 trips its "expected a response,
+		// got nothing" guard. Return the documented envelope.
+		writeJSON(w, 200, map[string]any{"id": "file_abc"})
 	})
 	ta := newTestApp(t, srv)
 	if err := runFilesDelete(context.Background(), ta.app, "file_abc", true); err != nil {

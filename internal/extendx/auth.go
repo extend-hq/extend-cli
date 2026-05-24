@@ -1,4 +1,13 @@
-package client
+// Package extendx contains the CLI-side glue that wraps the
+// extend-hq/extend-go-sdk client: env var resolution, region selection,
+// run-status enums, polling helpers, file-input dispatch, webhook
+// signature verification, and HTTP debug logging.
+//
+// Code in this package never calls the Extend API directly; every
+// transport-level concern is delegated to the SDK. Helpers here exist
+// because they are CLI-specific (env vars, ID-prefix routing, polling
+// cadence) and have no equivalent in the SDK.
+package extendx
 
 // EnvVarSpec describes an environment variable consulted by the CLI. The
 // list is the canonical source for documentation; auth wiring reads names
@@ -31,6 +40,11 @@ const (
 	EnvOutput        = "EXTEND_OUTPUT"
 	EnvEnv           = "EXTEND_ENV"
 )
+
+// DefaultAPIVersion is the API version sent on every request unless the
+// caller overrides via EXTEND_API_VERSION. Mirrors the SDK's hard-coded
+// default; we surface it here so the auth help topic can render it.
+const DefaultAPIVersion = "2026-02-09"
 
 // EnvVars enumerates every environment variable the CLI consults. Order is
 // stable and matches the priority a user is most likely to care about

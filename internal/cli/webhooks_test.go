@@ -165,7 +165,11 @@ func TestWebhooksEndpointsCreate_RejectsInvalidPayloadFormat(t *testing.T) {
 		"--payload-format", "xml",
 	})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "json|url") {
+	// The SDK rejects with "is not a valid extend.WebhookPayloadFormat";
+	// the CLI wraps with "--payload-format: ...". We assert on the
+	// flag name + the rejected value rather than the SDK's enum-type
+	// text so this stays stable across SDK regenerations.
+	if err == nil || !strings.Contains(err.Error(), "--payload-format") || !strings.Contains(err.Error(), "xml") {
 		t.Errorf("expected payload-format error, got %v", err)
 	}
 }

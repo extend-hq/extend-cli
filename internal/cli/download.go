@@ -9,7 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // newDownloadDoc returns the typed documentation for `extend download`,
@@ -115,12 +118,12 @@ func runDownload(ctx context.Context, app *App, id, outputDir, outputFile string
 // resolveDownloadTargets returns the file IDs to download for the given
 // source ID. It makes at most one network call (to fetch the parent run)
 // and never to /files/ itself — that happens during the actual download.
-func resolveDownloadTargets(ctx context.Context, cli *client.Client, id string) ([]string, error) {
+func resolveDownloadTargets(ctx context.Context, cli *sdkclient.Client, id string) ([]string, error) {
 	switch {
 	case strings.HasPrefix(id, "file_"):
 		return []string{id}, nil
 	case strings.HasPrefix(id, "edr_"):
-		run, err := cli.GetEditRun(ctx, id)
+		run, err := cli.EditRuns.Retrieve(ctx, id, &extend.EditRunsRetrieveRequest{})
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +132,7 @@ func resolveDownloadTargets(ctx context.Context, cli *client.Client, id string) 
 		}
 		return []string{run.Output.EditedFile.ID}, nil
 	case strings.HasPrefix(id, "splr_"):
-		run, err := cli.GetSplitRun(ctx, id)
+		run, err := cli.SplitRuns.Retrieve(ctx, id, &extend.SplitRunsRetrieveRequest{})
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +147,7 @@ func resolveDownloadTargets(ctx context.Context, cli *client.Client, id string) 
 		}
 		return ids, nil
 	case strings.HasPrefix(id, "workflow_run_"):
-		run, err := cli.GetWorkflowRun(ctx, id)
+		run, err := cli.WorkflowRuns.Retrieve(ctx, id, &extend.WorkflowRunsRetrieveRequest{})
 		if err != nil {
 			return nil, err
 		}
@@ -159,15 +162,16 @@ func resolveDownloadTargets(ctx context.Context, cli *client.Client, id string) 
 }
 
 // collectWorkflowFiles walks the step runs for any file outputs. The
-// API surfaces per-step output files on StepRun.Files, so we don't need
-// to decode each step's typed Result here. Files are deduplicated by ID
-// in case the same file appears in multiple steps.
-func collectWorkflowFiles(run *client.WorkflowRun) []string {
+// SDK's *extend.StepRun is a discriminated union with one Files slice
+// per variant; we dispatch on StepType to read the right one. Files
+// are deduplicated by ID in case the same file appears in multiple
+// steps.
+func collectWorkflowFiles(run *extend.WorkflowRun) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, step := range run.StepRuns {
-		for _, f := range step.Files {
-			if f.ID == "" || seen[f.ID] {
+		for _, f := range stepRunFiles(step) {
+			if f == nil || f.ID == "" || seen[f.ID] {
 				continue
 			}
 			seen[f.ID] = true
@@ -177,14 +181,58 @@ func collectWorkflowFiles(run *client.WorkflowRun) []string {
 	return out
 }
 
-func downloadSingleFile(ctx context.Context, app *App, cli *client.Client, fileID, outputDir, outputFile string) error {
+// stepRunFiles returns the Files slice for whichever variant of the
+// StepRun union is populated. Returns nil for variants without files
+// or for unknown step types.
+func stepRunFiles(step *extend.StepRun) []*extend.FileSummary {
+	if step == nil {
+		return nil
+	}
+	switch step.StepType {
+	case "PARSE":
+		if step.Parse != nil {
+			return step.Parse.Files
+		}
+	case "EXTRACT":
+		if step.Extract != nil {
+			return step.Extract.Files
+		}
+	case "CLASSIFY":
+		if step.Classify != nil {
+			return step.Classify.Files
+		}
+	case "SPLIT":
+		if step.Split != nil {
+			return step.Split.Files
+		}
+	case "MERGE_EXTRACT":
+		if step.MergeExtract != nil {
+			return step.MergeExtract.Files
+		}
+	case "CONDITIONAL_EXTRACT":
+		if step.ConditionalExtract != nil {
+			return step.ConditionalExtract.Files
+		}
+	case "RULE_VALIDATION":
+		if step.RuleValidation != nil {
+			return step.RuleValidation.Files
+		}
+	case "EXTERNAL_DATA_VALIDATION":
+		if step.ExternalDataValidation != nil {
+			return step.ExternalDataValidation.Files
+		}
+	}
+	return nil
+}
+
+func downloadSingleFile(ctx context.Context, app *App, cli *sdkclient.Client, fileID, outputDir, outputFile string) error {
 	if outputFile == "-" {
-		_, err := cli.DownloadFile(ctx, fileID, app.IO.Out)
+		_, err := extendx.DownloadFile(ctx, cli, fileID, app.IO.Out)
 		return err
 	}
 	path := outputFile
 	if path == "" {
-		f, err := cli.GetFile(ctx, fileID)
+		f, err := cli.Files.Retrieve(ctx, fileID, &extend.FilesRetrieveRequest{})
 		if err != nil {
 			return err
 		}
@@ -206,7 +254,7 @@ func downloadSingleFile(ctx context.Context, app *App, cli *client.Client, fileI
 	return writeFileFromExtend(ctx, app, cli, fileID, path)
 }
 
-func downloadMultipleFiles(ctx context.Context, app *App, cli *client.Client, fileIDs []string, outputDir string) error {
+func downloadMultipleFiles(ctx context.Context, app *App, cli *sdkclient.Client, fileIDs []string, outputDir string) error {
 	dir := outputDir
 	if dir == "" {
 		dir = "."
@@ -216,7 +264,7 @@ func downloadMultipleFiles(ctx context.Context, app *App, cli *client.Client, fi
 	}
 	used := map[string]bool{}
 	for _, fid := range fileIDs {
-		f, err := cli.GetFile(ctx, fid)
+		f, err := cli.Files.Retrieve(ctx, fid, &extend.FilesRetrieveRequest{})
 		if err != nil {
 			return fmt.Errorf("get %s: %w", fid, err)
 		}
@@ -237,7 +285,7 @@ func downloadMultipleFiles(ctx context.Context, app *App, cli *client.Client, fi
 // writeFileFromExtend streams a file's bytes to outPath atomically via
 // a temp file in the same directory + rename. Matches the pattern used
 // by `extend edit --output-file`.
-func writeFileFromExtend(ctx context.Context, app *App, cli *client.Client, fileID, outPath string) error {
+func writeFileFromExtend(ctx context.Context, app *App, cli *sdkclient.Client, fileID, outPath string) error {
 	dir := filepath.Dir(outPath)
 	tmp, err := os.CreateTemp(dir, ".extend-dl-*")
 	if err != nil {
@@ -245,7 +293,7 @@ func writeFileFromExtend(ctx context.Context, app *App, cli *client.Client, file
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	n, err := cli.DownloadFile(ctx, fileID, tmp)
+	n, err := extendx.DownloadFile(ctx, cli, fileID, tmp)
 	tmp.Close()
 	if err != nil {
 		return err

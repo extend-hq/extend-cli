@@ -8,7 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -77,8 +80,8 @@ Repeatable.`,
 		},
 		SeeAlso:  []string{"extract", "run batch", "runs watch", "runs get", "webhooks subscriptions create"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileLong, DefaultsToWait: false},
-		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled, client.StatusRejected},
+		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: false},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled, extendx.StatusRejected},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
@@ -138,38 +141,53 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 		return err
 	}
 
-	in := client.CreateWorkflowRunInput{
-		Workflow: &client.WorkflowRef{ID: p.workflowID, Version: p.version},
-		File:     &ref,
-		Metadata: p.metadata,
+	file, err := extendx.BuildWorkflowFile(ref)
+	if err != nil {
+		return err
+	}
+
+	wf := &extend.WorkflowReference{ID: p.workflowID}
+	if p.version != "" {
+		v := extend.ProcessorVersionString(p.version)
+		wf.Version = &v
+	}
+
+	req := &extend.WorkflowRunsCreateRequest{
+		Workflow: wf,
+		File:     file,
+	}
+	if p.metadata != nil {
+		md := extend.RunMetadata(p.metadata)
+		req.Metadata = &md
 	}
 	if p.priority > 0 {
-		in.Priority = &p.priority
+		pr := extend.RunPriority(p.priority)
+		req.Priority = &pr
 	}
 	if p.outputsPath != "" {
 		raw, err := readJSONFile(p.outputsPath, "--outputs")
 		if err != nil {
 			return err
 		}
-		var outputs []client.WorkflowProvidedOutput
+		var outputs []*extend.WorkflowRunsCreateRequestOutputsItem
 		if err := json.Unmarshal(raw, &outputs); err != nil {
 			return fmt.Errorf("--outputs: %w (expected JSON array of {processorId, output})", err)
 		}
-		in.Outputs = outputs
+		req.Outputs = outputs
 	}
 	if len(p.secrets) > 0 {
 		pairs, err := parseKVPairs("--secret", p.secrets)
 		if err != nil {
 			return err
 		}
-		secrets := make(map[string]any, len(pairs))
+		secrets := make(extend.RunSecrets, len(pairs))
 		for k, v := range pairs {
 			secrets[k] = v
 		}
-		in.Secrets = secrets
+		req.Secrets = &secrets
 	}
 
-	run, err := cli.CreateWorkflowRun(ctx, in)
+	run, err := cli.WorkflowRuns.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
@@ -179,7 +197,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForWorkflowRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileLong, p.timeout), func(r *client.WorkflowRun) {
+	final, err := waitForWorkflowRun(ctx, cli, run.ID, extendx.WaitProfileOptions(extendx.ProfileLong, p.timeout), func(r *extend.WorkflowRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")
@@ -190,52 +208,57 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 	if err := renderWorkflowResult(app, final); err != nil {
 		return err
 	}
-	switch final.Status {
-	case client.StatusFailed:
-		if final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, final.FailureMessage)
+	switch extendx.RunStatus(final.Status) {
+	case extendx.StatusFailed:
+		if final.FailureMessage != nil && *final.FailureMessage != "" {
+			return fmt.Errorf("run %s failed: %s", final.ID, *final.FailureMessage)
 		}
 		return fmt.Errorf("run %s failed", final.ID)
-	case client.StatusCancelled:
+	case extendx.StatusCancelled:
 		return fmt.Errorf("run %s was cancelled", final.ID)
-	case client.StatusRejected:
+	case extendx.StatusRejected:
 		return fmt.Errorf("run %s was rejected", final.ID)
 	}
 	return nil
 }
 
-func renderWorkflowResult(app *App, run *client.WorkflowRun) error {
+func waitForWorkflowRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.WorkflowRun)) (*extend.WorkflowRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.WorkflowRun, error) {
+			return c.WorkflowRuns.Retrieve(ctx, id, &extend.WorkflowRunsRetrieveRequest{})
+		},
+		func(r *extend.WorkflowRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
+}
+
+func renderWorkflowResult(app *App, run *extend.WorkflowRun) error {
 	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	return renderWorkflowTTY(app, run)
 }
 
-func renderWorkflowTTY(app *App, run *client.WorkflowRun) error {
+func renderWorkflowTTY(app *App, run *extend.WorkflowRun) error {
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.Out, "%s %s (%s, %d step%s)\n",
-		statusIcon(pal, run.Status), run.ID, run.Status, len(run.StepRuns), pluralize(len(run.StepRuns)))
+		statusIcon(pal, extendx.RunStatus(run.Status)), run.ID, run.Status, len(run.StepRuns), pluralize(len(run.StepRuns)))
 	if run.DashboardURL != "" {
 		fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Dashboard: %s", run.DashboardURL))
 	}
-	if run.Status == client.StatusNeedsReview {
+	if extendx.RunStatus(run.Status) == extendx.StatusNeedsReview {
 		fmt.Fprintln(app.IO.Out, "  Awaiting human review at the dashboard URL above.")
 	}
 	if len(run.StepRuns) > 0 {
 		fmt.Fprintln(app.IO.Out)
 		rows := make([][]string, 0, len(run.StepRuns))
 		for i, step := range run.StepRuns {
-			name := ""
-			stepType := ""
-			if step.Step != nil {
-				name = step.Step.Name
-				stepType = step.Step.Type
-			}
+			name, stepType, status := stepRunInfo(step)
 			rows = append(rows, []string{
 				fmt.Sprintf("%d", i+1),
 				name,
 				stepType,
-				string(step.Status),
+				status,
 			})
 		}
 		return output.RenderTable(app.IO.Out, []string{"step", "name", "type", "status"}, rows)
@@ -243,17 +266,115 @@ func renderWorkflowTTY(app *App, run *client.WorkflowRun) error {
 	return nil
 }
 
-func statusIcon(p palette, s client.RunStatus) string {
+// stepRunInfo flattens the SDK's discriminated-union *extend.StepRun
+// into a (name, type, status) triple suitable for table rendering.
+// The union has one variant per workflow step type; each variant has
+// its own typed Step struct, but they all expose Name/Type fields with
+// the same names. We dispatch on StepType and reach into the matching
+// branch.
+func stepRunInfo(step *extend.StepRun) (name, stepType, status string) {
+	if step == nil {
+		return "", "", ""
+	}
+	switch step.StepType {
+	case "PARSE":
+		if step.Parse != nil {
+			status = string(step.Parse.Status)
+			if step.Parse.Step != nil {
+				name = step.Parse.Step.Name
+				if step.Parse.Step.Type != nil {
+					stepType = *step.Parse.Step.Type
+				}
+			}
+		}
+	case "EXTRACT":
+		if step.Extract != nil {
+			status = string(step.Extract.Status)
+			if step.Extract.Step != nil {
+				name = step.Extract.Step.Name
+				if step.Extract.Step.Type != nil {
+					stepType = *step.Extract.Step.Type
+				}
+			}
+		}
+	case "CLASSIFY":
+		if step.Classify != nil {
+			status = string(step.Classify.Status)
+			if step.Classify.Step != nil {
+				name = step.Classify.Step.Name
+				if step.Classify.Step.Type != nil {
+					stepType = *step.Classify.Step.Type
+				}
+			}
+		}
+	case "SPLIT":
+		if step.Split != nil {
+			status = string(step.Split.Status)
+			if step.Split.Step != nil {
+				name = step.Split.Step.Name
+				if step.Split.Step.Type != nil {
+					stepType = *step.Split.Step.Type
+				}
+			}
+		}
+	case "MERGE_EXTRACT":
+		if step.MergeExtract != nil {
+			status = string(step.MergeExtract.Status)
+			if step.MergeExtract.Step != nil {
+				name = step.MergeExtract.Step.Name
+				if step.MergeExtract.Step.Type != nil {
+					stepType = *step.MergeExtract.Step.Type
+				}
+			}
+		}
+	case "CONDITIONAL_EXTRACT":
+		if step.ConditionalExtract != nil {
+			status = string(step.ConditionalExtract.Status)
+			if step.ConditionalExtract.Step != nil {
+				name = step.ConditionalExtract.Step.Name
+				if step.ConditionalExtract.Step.Type != nil {
+					stepType = *step.ConditionalExtract.Step.Type
+				}
+			}
+		}
+	case "RULE_VALIDATION":
+		if step.RuleValidation != nil {
+			status = string(step.RuleValidation.Status)
+			if step.RuleValidation.Step != nil {
+				name = step.RuleValidation.Step.Name
+				if step.RuleValidation.Step.Type != nil {
+					stepType = *step.RuleValidation.Step.Type
+				}
+			}
+		}
+	case "EXTERNAL_DATA_VALIDATION":
+		if step.ExternalDataValidation != nil {
+			status = string(step.ExternalDataValidation.Status)
+			if step.ExternalDataValidation.Step != nil {
+				name = step.ExternalDataValidation.Step.Name
+				if step.ExternalDataValidation.Step.Type != nil {
+					stepType = *step.ExternalDataValidation.Step.Type
+				}
+			}
+		}
+	}
+	if stepType == "" {
+		stepType = step.StepType
+	}
+	return name, stepType, status
+}
+
+func statusIcon(p palette, s extendx.RunStatus) string {
 	switch s {
-	case client.StatusProcessed:
+	case extendx.StatusProcessed:
 		return p.Green("✓")
-	case client.StatusFailed, client.StatusRejected:
+	case extendx.StatusFailed, extendx.StatusRejected:
 		return p.Red("✗")
-	case client.StatusCancelled, client.StatusCancelling:
+	case extendx.StatusCancelled, extendx.StatusCancelling:
 		return p.Dim("○")
-	case client.StatusNeedsReview:
+	case extendx.StatusNeedsReview:
 		return p.Yellow("⏸")
-	case client.StatusPending, client.StatusProcessing:
+	case extendx.StatusPending, extendx.StatusProcessing:
 		return p.Cyan("⋯")
 	}
 	return "•"

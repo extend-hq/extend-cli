@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // CommandDoc is the typed source of truth for one node in the CLI's
@@ -73,7 +73,7 @@ type CommandDoc struct {
 	Wait *WaitSpec
 	// Failures lists the run statuses that gate non-zero exit. Must be
 	// empty when Wait is nil.
-	Failures []client.RunStatus
+	Failures []extendx.RunStatus
 
 	// Args is the cobra positional-args validator. When nil, Build picks
 	// a sane default (NoArgs for groups, ArbitraryArgs for leaves).
@@ -122,7 +122,7 @@ type OutputSpec struct {
 // operations.
 type WaitSpec struct {
 	// Profile is the polling cadence (ProfileShort or ProfileLong).
-	Profile client.WaitProfile
+	Profile extendx.WaitProfile
 	// DefaultsToWait records whether the command blocks by default
 	// (true) or returns the run ID immediately (false).
 	DefaultsToWait bool

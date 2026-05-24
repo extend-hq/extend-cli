@@ -10,38 +10,83 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-type processorAccessor[T any, V any] struct {
+// processorAccessor parameterizes the shared
+// list/get/create/update/versions structure for one resource family
+// (extractors, classifiers, splitters, workflows). The shape varies
+// in details — version create accepts different per-resource fields,
+// versions are surfaced as different SDK types — so we plug each via
+// function pointers.
+//
+// Type parameters (each unconstrained — Go generics require an
+// explicit constraint, and `any` means "no constraint"):
+//
+//   - T  = full resource type (e.g. *extend.Extractor) returned by
+//     get/create/update.
+//   - TS = list-summary type (e.g. *extend.ExtractorSummary) used
+//     for resource list rows.
+//   - V  = full version type (e.g. *extend.ExtractorVersion)
+//     returned by version get/create.
+//   - VS = version summary type (e.g.
+//     *extend.ExtractorVersionSummary) used in versions-list rows.
+//
+// The list callbacks return the SDK response object as the first
+// value so the JSON-rendering pipeline (renderListForCmd) can emit
+// it verbatim; that pipeline takes `[]any` because each family's
+// response is a different concrete type, so the heterogeneity is
+// unavoidable at that boundary.
+type processorAccessor[T any, TS any, V any, VS any] struct {
 	noun       string
 	pluralNoun string
 	exampleID  string
-	// runVerb is the top-level action verb that uses this resource. For
-	// extractors it's "extract"; for classifiers, "classify"; for
-	// splitters, "split"; for workflows, "run". Used to populate SeeAlso
-	// references back to the action verb in the list doc.
+	// runVerb is the top-level action verb that uses this resource.
+	// For extractors it's "extract"; for classifiers, "classify";
+	// for splitters, "split"; for workflows, "run". Used to populate
+	// SeeAlso references back to the action verb in the list doc.
 	runVerb     string
-	rowFields   func(T) []string
-	listFn      func(context.Context, *client.Client, client.ListProcessorsOptions) (any, []T, string, error)
-	getFn       func(context.Context, *client.Client, string) (T, error)
-	listVerFn   func(context.Context, *client.Client, string, client.ListProcessorVersionsOptions) (any, []V, string, error)
-	getVerFn    func(context.Context, *client.Client, string, string) (V, error)
-	verRowFn    func(V) []string
-	createFn    func(context.Context, *client.Client, json.RawMessage) (T, error)
-	updateFn    func(context.Context, *client.Client, string, json.RawMessage) (T, error)
-	createVerFn func(context.Context, *client.Client, string, json.RawMessage) (V, error)
+	rowFields   func(TS) []string
+	listFn      func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (resp any, data []TS, nextPageToken string, err error)
+	getFn       func(ctx context.Context, c *sdkclient.Client, id string) (T, error)
+	listVerFn   func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (resp any, data []VS, nextPageToken string, err error)
+	getVerFn    func(ctx context.Context, c *sdkclient.Client, id, ver string) (V, error)
+	verRowFn    func(VS) []string
+	createFn    func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (T, error)
+	updateFn    func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (T, error)
+	createVerFn func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (V, error)
+}
+
+// listProcessorsOptions is the CLI-side carrier for processor list
+// flags. Each *Fn translates this into the SDK's per-resource list
+// request struct.
+type listProcessorsOptions struct {
+	SortBy    string
+	SortDir   string
+	Limit     int
+	PageToken string
+}
+
+// listProcessorVersionsOptions is the CLI-side carrier for version
+// list flags.
+type listProcessorVersionsOptions struct {
+	SortDir   string
+	Limit     int
+	PageToken string
 }
 
 // doc returns the typed CommandDoc tree for one resource family
-// (extractors / classifiers / splitters / workflows). The same structure —
-// list, get, create, update, versions [list/get/create] — is generated for
-// each, parameterised by noun.
-func (a processorAccessor[T, V]) doc(app *App) *CommandDoc {
+// (extractors / classifiers / splitters / workflows). The same
+// structure — list, get, create, update, versions [list/get/create] —
+// is generated for each, parameterised by noun.
+func (a processorAccessor[T, TS, V, VS]) doc(app *App) *CommandDoc {
 	subs := []*CommandDoc{
 		a.listDoc(app),
 		a.getDoc(app),
@@ -67,7 +112,7 @@ version.`, capitalize(articleFor(a.noun)), a.noun),
 	}
 }
 
-func (a processorAccessor[T, V]) listDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) listDoc(app *App) *CommandDoc {
 	var (
 		sortBy    string
 		sortDir   string
@@ -114,7 +159,7 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{
+			opts := listProcessorsOptions{
 				Limit:     limit,
 				SortBy:    sortBy,
 				SortDir:   sortDir,
@@ -123,11 +168,11 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 			var rows [][]string
 			var pages []any
 			for {
-				page, items, next, err := a.listFn(cmd.Context(), cli, opts)
+				resp, items, next, err := a.listFn(cmd.Context(), cli, opts)
 				if err != nil {
 					return err
 				}
-				pages = append(pages, page)
+				pages = append(pages, resp)
 				for _, it := range items {
 					rows = append(rows, a.rowFields(it))
 				}
@@ -151,7 +196,7 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 	}
 }
 
-func (a processorAccessor[T, V]) getDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) getDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     fmt.Sprintf("get <%s-id>", a.noun),
 		Summary: fmt.Sprintf("Show one %s by ID", a.noun),
@@ -190,7 +235,7 @@ draft and deployed-version metadata.`, a.noun),
 	}
 }
 
-func (a processorAccessor[T, V]) versionsDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) versionsDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "versions",
 		Summary: fmt.Sprintf("List or inspect versions of %s %s", articleFor(a.noun), a.noun),
@@ -207,7 +252,7 @@ editable working copy and is not a version.`, articleFor(a.noun), a.noun),
 	}
 }
 
-func (a processorAccessor[T, V]) versionsListDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) versionsListDoc(app *App) *CommandDoc {
 	var (
 		verSortDir   string
 		verLimit     int
@@ -245,19 +290,19 @@ is the editable working copy.
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorVersionsOptions{
+			opts := listProcessorVersionsOptions{
 				SortDir:   verSortDir,
 				Limit:     verLimit,
 				PageToken: verPageToken,
 			}
-			var allItems []V
+			var allItems []VS
 			var pages []any
 			for {
-				page, items, next, err := a.listVerFn(cmd.Context(), cli, args[0], opts)
+				resp, items, next, err := a.listVerFn(cmd.Context(), cli, args[0], opts)
 				if err != nil {
 					return err
 				}
-				pages = append(pages, page)
+				pages = append(pages, resp)
 				allItems = append(allItems, items...)
 				if paginationDone(verAll, verMax, len(allItems), next) {
 					break
@@ -281,7 +326,7 @@ is the editable working copy.
 	}
 }
 
-func (a processorAccessor[T, V]) versionsGetDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) versionsGetDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     fmt.Sprintf("get <%s-id> <version>", a.noun),
 		Summary: fmt.Sprintf("Show one %s version", a.noun),
@@ -320,7 +365,7 @@ new one.`, a.pluralNoun),
 	}
 }
 
-func (a processorAccessor[T, V]) versionsCreateDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) versionsCreateDoc(app *App) *CommandDoc {
 	var fromFile, description, releaseType, name string
 	return &CommandDoc{
 		Use:     fmt.Sprintf("create <%s-id>", a.noun),
@@ -454,7 +499,7 @@ func flagName(field string) string {
 	return strings.ToLower(out.String())
 }
 
-func (a processorAccessor[T, V]) createDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) createDoc(app *App) *CommandDoc {
 	var fromFile, name string
 	return &CommandDoc{
 		Use:     "create",
@@ -511,7 +556,7 @@ Then edit and pass via --from-file.`, a.noun, a.pluralNoun),
 	}
 }
 
-func (a processorAccessor[T, V]) updateDoc(app *App) *CommandDoc {
+func (a processorAccessor[T, TS, V, VS]) updateDoc(app *App) *CommandDoc {
 	var fromFile, name string
 	return &CommandDoc{
 		Use:     fmt.Sprintf("update <%s-id>", a.noun),
@@ -563,10 +608,11 @@ file:// URI, or - for stdin); --name overrides any name in the body.`,
 	}
 }
 
-// articleFor picks "a" or "an" based on the first letter only. Phonetic
-// edge cases (silent h, X/M/etc. with vowel sound) are not handled because
-// the only nouns this is called with are: extractor, classifier, splitter,
-// workflow, evaluation. Don't trust this for arbitrary English.
+// articleFor picks "a" or "an" based on the first letter only.
+// Phonetic edge cases (silent h, X/M/etc. with vowel sound) are not
+// handled because the only nouns this is called with are: extractor,
+// classifier, splitter, workflow, evaluation. Don't trust this for
+// arbitrary English.
 func articleFor(noun string) string {
 	if noun == "" {
 		return "a"
@@ -632,10 +678,11 @@ func mergeBody(fromFile string, overrides map[string]string) (json.RawMessage, e
 
 const maxBodyFileBytes = 5 << 20
 
-// readJSONFile accepts inline JSON, a path, stdin (-), or an absolute file://
-// URI, then validates JSON syntax. The error message names the flag for
-// clarity ("--config: invalid JSON: ..."). Returns the raw bytes as
-// json.RawMessage so callers can plug it directly into a struct field.
+// readJSONFile accepts inline JSON, a path, stdin (-), or an absolute
+// file:// URI, then validates JSON syntax. The error message names the
+// flag for clarity ("--config: invalid JSON: ..."). Returns the raw
+// bytes as json.RawMessage so callers can plug it directly into a
+// struct field.
 func readJSONFile(path, flag string) (json.RawMessage, error) {
 	data, err := readJSONSource(path)
 	if err != nil {
@@ -714,162 +761,329 @@ func readBodyFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func extractorAccessor() processorAccessor[*client.Extractor, *client.ProcessorVersion] {
-	return processorAccessor[*client.Extractor, *client.ProcessorVersion]{
+// processorListReqOpts is a tiny helper that translates the CLI-side
+// listProcessorsOptions into the SortBy/SortDir/MaxPageSize/NextPageToken
+// trio every processor list endpoint accepts. Returning typed pointers
+// only when non-empty mirrors the SDK's omit-when-nil idiom.
+func processorListReqOpts(opts listProcessorsOptions) (sortBy *extend.SortBy, sortDir *extend.SortDir, maxPageSize *extend.MaxPageSize, nextPageToken *extend.NextPageToken, err error) {
+	if opts.SortBy != "" {
+		sb, e := extend.NewSortByFromString(opts.SortBy)
+		if e != nil {
+			err = fmt.Errorf("--sort-by: %w", e)
+			return
+		}
+		sortBy = &sb
+	}
+	if opts.SortDir != "" {
+		sd, e := extend.NewSortDirFromString(opts.SortDir)
+		if e != nil {
+			err = fmt.Errorf("--sort: %w", e)
+			return
+		}
+		sortDir = &sd
+	}
+	if opts.Limit > 0 {
+		ps := extend.MaxPageSize(opts.Limit)
+		maxPageSize = &ps
+	}
+	if opts.PageToken != "" {
+		t := extend.NextPageToken(opts.PageToken)
+		nextPageToken = &t
+	}
+	return
+}
+
+func processorVersionListReqOpts(opts listProcessorVersionsOptions) (sortDir *extend.SortDir, maxPageSize *extend.MaxPageSize, nextPageToken *extend.NextPageToken, err error) {
+	if opts.SortDir != "" {
+		sd, e := extend.NewSortDirFromString(opts.SortDir)
+		if e != nil {
+			err = fmt.Errorf("--sort: %w", e)
+			return
+		}
+		sortDir = &sd
+	}
+	if opts.Limit > 0 {
+		ps := extend.MaxPageSize(opts.Limit)
+		maxPageSize = &ps
+	}
+	if opts.PageToken != "" {
+		t := extend.NextPageToken(opts.PageToken)
+		nextPageToken = &t
+	}
+	return
+}
+
+func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorSummary, *extend.ExtractorVersion, *extend.ExtractorVersionSummary] {
+	return processorAccessor[*extend.Extractor, *extend.ExtractorSummary, *extend.ExtractorVersion, *extend.ExtractorVersionSummary]{
 		noun:       "extractor",
 		pluralNoun: "extractors",
 		exampleID:  "ex_abc",
 		runVerb:    "extract",
-		rowFields:  func(e *client.Extractor) []string { return []string{e.ID, e.Name, relTime(e.CreatedAt)} },
-		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Extractor, string, error) {
-			r, err := c.ListExtractors(ctx, opts)
+		rowFields: func(e *extend.ExtractorSummary) []string {
+			return []string{e.ID, e.Name, relTime(e.CreatedAt.Format(time.RFC3339))}
+		},
+		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.ExtractorSummary, string, error) {
+			sb, sd, ps, np, err := processorListReqOpts(opts)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
-		},
-		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Extractor, error) {
-			return c.GetExtractor(ctx, id)
-		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) (any, []*client.ProcessorVersion, string, error) {
-			r, err := c.ListExtractorVersions(ctx, id, opts)
+			r, err := c.Extractors.List(ctx, &extend.ExtractorsListRequest{
+				SortBy: sb, SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
-			return c.GetExtractorVersion(ctx, id, ver)
+		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Extractor, error) {
+			return c.Extractors.Retrieve(ctx, id, &extend.ExtractorsRetrieveRequest{})
 		},
-		verRowFn: func(v *client.ProcessorVersion) []string { return []string{v.Version, v.ID, relTime(v.CreatedAt)} },
-		createFn: func(ctx context.Context, c *client.Client, body json.RawMessage) (*client.Extractor, error) {
-			return c.CreateExtractor(ctx, body)
+		listVerFn: func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (any, []*extend.ExtractorVersionSummary, string, error) {
+			sd, ps, np, err := processorVersionListReqOpts(opts)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			r, err := c.ExtractorVersions.List(ctx, id, &extend.ExtractorVersionsListRequest{
+				SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		updateFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.Extractor, error) {
-			return c.UpdateExtractor(ctx, id, body)
+		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.ExtractorVersion, error) {
+			return c.ExtractorVersions.Retrieve(ctx, id, ver, &extend.ExtractorVersionsRetrieveRequest{})
 		},
-		createVerFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.ProcessorVersion, error) {
-			return c.CreateExtractorVersion(ctx, id, body)
+		verRowFn: func(v *extend.ExtractorVersionSummary) []string {
+			return []string{v.Version, v.ID, relTime(v.CreatedAt.Format(time.RFC3339))}
+		},
+		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Extractor, error) {
+			var req extend.ExtractorsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Extractors.Create(ctx, &req)
+		},
+		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Extractor, error) {
+			var req extend.ExtractorsUpdateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Extractors.Update(ctx, id, &req)
+		},
+		createVerFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.ExtractorVersion, error) {
+			var req extend.ExtractorVersionsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.ExtractorVersions.Create(ctx, id, &req)
 		},
 	}
 }
 
-func classifierAccessor() processorAccessor[*client.Classifier, *client.ProcessorVersion] {
-	return processorAccessor[*client.Classifier, *client.ProcessorVersion]{
+func classifierAccessor() processorAccessor[*extend.Classifier, *extend.ClassifierSummary, *extend.ClassifierVersion, *extend.ClassifierVersionSummary] {
+	return processorAccessor[*extend.Classifier, *extend.ClassifierSummary, *extend.ClassifierVersion, *extend.ClassifierVersionSummary]{
 		noun:       "classifier",
 		pluralNoun: "classifiers",
 		exampleID:  "cl_abc",
 		runVerb:    "classify",
-		rowFields:  func(c *client.Classifier) []string { return []string{c.ID, c.Name, relTime(c.CreatedAt)} },
-		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Classifier, string, error) {
-			r, err := c.ListClassifiers(ctx, opts)
+		rowFields: func(c *extend.ClassifierSummary) []string {
+			return []string{c.ID, c.Name, relTime(c.CreatedAt.Format(time.RFC3339))}
+		},
+		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.ClassifierSummary, string, error) {
+			sb, sd, ps, np, err := processorListReqOpts(opts)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
-		},
-		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Classifier, error) {
-			return c.GetClassifier(ctx, id)
-		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) (any, []*client.ProcessorVersion, string, error) {
-			r, err := c.ListClassifierVersions(ctx, id, opts)
+			r, err := c.Classifiers.List(ctx, &extend.ClassifiersListRequest{
+				SortBy: sb, SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
-			return c.GetClassifierVersion(ctx, id, ver)
+		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Classifier, error) {
+			return c.Classifiers.Retrieve(ctx, id, &extend.ClassifiersRetrieveRequest{})
 		},
-		verRowFn: func(v *client.ProcessorVersion) []string { return []string{v.Version, v.ID, relTime(v.CreatedAt)} },
-		createFn: func(ctx context.Context, c *client.Client, body json.RawMessage) (*client.Classifier, error) {
-			return c.CreateClassifier(ctx, body)
+		listVerFn: func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (any, []*extend.ClassifierVersionSummary, string, error) {
+			sd, ps, np, err := processorVersionListReqOpts(opts)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			r, err := c.ClassifierVersions.List(ctx, id, &extend.ClassifierVersionsListRequest{
+				SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		updateFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.Classifier, error) {
-			return c.UpdateClassifier(ctx, id, body)
+		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.ClassifierVersion, error) {
+			return c.ClassifierVersions.Retrieve(ctx, id, ver, &extend.ClassifierVersionsRetrieveRequest{})
 		},
-		createVerFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.ProcessorVersion, error) {
-			return c.CreateClassifierVersion(ctx, id, body)
+		verRowFn: func(v *extend.ClassifierVersionSummary) []string {
+			return []string{v.Version, v.ID, relTime(v.CreatedAt.Format(time.RFC3339))}
+		},
+		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Classifier, error) {
+			var req extend.ClassifiersCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Classifiers.Create(ctx, &req)
+		},
+		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Classifier, error) {
+			var req extend.ClassifiersUpdateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Classifiers.Update(ctx, id, &req)
+		},
+		createVerFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.ClassifierVersion, error) {
+			var req extend.ClassifierVersionsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.ClassifierVersions.Create(ctx, id, &req)
 		},
 	}
 }
 
-func splitterAccessor() processorAccessor[*client.Splitter, *client.ProcessorVersion] {
-	return processorAccessor[*client.Splitter, *client.ProcessorVersion]{
+func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSummary, *extend.SplitterVersion, *extend.SplitterVersionSummary] {
+	return processorAccessor[*extend.Splitter, *extend.SplitterSummary, *extend.SplitterVersion, *extend.SplitterVersionSummary]{
 		noun:       "splitter",
 		pluralNoun: "splitters",
 		exampleID:  "spl_abc",
 		runVerb:    "split",
-		rowFields:  func(s *client.Splitter) []string { return []string{s.ID, s.Name, relTime(s.CreatedAt)} },
-		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Splitter, string, error) {
-			r, err := c.ListSplitters(ctx, opts)
+		rowFields: func(s *extend.SplitterSummary) []string {
+			return []string{s.ID, s.Name, relTime(s.CreatedAt.Format(time.RFC3339))}
+		},
+		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.SplitterSummary, string, error) {
+			sb, sd, ps, np, err := processorListReqOpts(opts)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
-		},
-		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Splitter, error) {
-			return c.GetSplitter(ctx, id)
-		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) (any, []*client.ProcessorVersion, string, error) {
-			r, err := c.ListSplitterVersions(ctx, id, opts)
+			r, err := c.Splitters.List(ctx, &extend.SplittersListRequest{
+				SortBy: sb, SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
-			return c.GetSplitterVersion(ctx, id, ver)
+		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Splitter, error) {
+			return c.Splitters.Retrieve(ctx, id, &extend.SplittersRetrieveRequest{})
 		},
-		verRowFn: func(v *client.ProcessorVersion) []string { return []string{v.Version, v.ID, relTime(v.CreatedAt)} },
-		createFn: func(ctx context.Context, c *client.Client, body json.RawMessage) (*client.Splitter, error) {
-			return c.CreateSplitter(ctx, body)
+		listVerFn: func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (any, []*extend.SplitterVersionSummary, string, error) {
+			sd, ps, np, err := processorVersionListReqOpts(opts)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			r, err := c.SplitterVersions.List(ctx, id, &extend.SplitterVersionsListRequest{
+				SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		updateFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.Splitter, error) {
-			return c.UpdateSplitter(ctx, id, body)
+		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.SplitterVersion, error) {
+			return c.SplitterVersions.Retrieve(ctx, id, ver, &extend.SplitterVersionsRetrieveRequest{})
 		},
-		createVerFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.ProcessorVersion, error) {
-			return c.CreateSplitterVersion(ctx, id, body)
+		verRowFn: func(v *extend.SplitterVersionSummary) []string {
+			return []string{v.Version, v.ID, relTime(v.CreatedAt.Format(time.RFC3339))}
+		},
+		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Splitter, error) {
+			var req extend.SplittersCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Splitters.Create(ctx, &req)
+		},
+		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Splitter, error) {
+			var req extend.SplittersUpdateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Splitters.Update(ctx, id, &req)
+		},
+		createVerFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.SplitterVersion, error) {
+			var req extend.SplitterVersionsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.SplitterVersions.Create(ctx, id, &req)
 		},
 	}
 }
 
-func workflowAccessor() processorAccessor[*client.Workflow, *client.ProcessorVersion] {
-	return processorAccessor[*client.Workflow, *client.ProcessorVersion]{
+func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSummary, *extend.WorkflowVersion, *extend.WorkflowVersionSummary] {
+	return processorAccessor[*extend.Workflow, *extend.WorkflowSummary, *extend.WorkflowVersion, *extend.WorkflowVersionSummary]{
 		noun:       "workflow",
 		pluralNoun: "workflows",
 		exampleID:  "workflow_abc",
 		runVerb:    "run",
-		rowFields:  func(w *client.Workflow) []string { return []string{w.ID, w.Name, relTime(w.CreatedAt)} },
-		listFn: func(ctx context.Context, c *client.Client, opts client.ListProcessorsOptions) (any, []*client.Workflow, string, error) {
-			r, err := c.ListWorkflows(ctx, opts)
+		rowFields: func(w *extend.WorkflowSummary) []string {
+			return []string{w.ID, w.Name, relTime(w.CreatedAt.Format(time.RFC3339))}
+		},
+		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.WorkflowSummary, string, error) {
+			sb, sd, ps, np, err := processorListReqOpts(opts)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
-		},
-		getFn: func(ctx context.Context, c *client.Client, id string) (*client.Workflow, error) {
-			return c.GetWorkflow(ctx, id)
-		},
-		listVerFn: func(ctx context.Context, c *client.Client, id string, opts client.ListProcessorVersionsOptions) (any, []*client.ProcessorVersion, string, error) {
-			r, err := c.ListWorkflowVersions(ctx, id, opts)
+			r, err := c.Workflows.List(ctx, &extend.WorkflowsListRequest{
+				SortBy: sb, SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
 			if err != nil {
 				return nil, nil, "", err
 			}
-			return r, r.Data, r.NextPageToken, nil
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		getVerFn: func(ctx context.Context, c *client.Client, id, ver string) (*client.ProcessorVersion, error) {
-			return c.GetWorkflowVersion(ctx, id, ver)
+		getFn: func(ctx context.Context, c *sdkclient.Client, id string) (*extend.Workflow, error) {
+			// Workflows.Retrieve takes no request struct (no workspace
+			// override path on this endpoint) — unlike the processor
+			// resource families.
+			return c.Workflows.Retrieve(ctx, id)
 		},
-		verRowFn: func(v *client.ProcessorVersion) []string { return []string{v.Version, v.ID, relTime(v.CreatedAt)} },
-		createFn: func(ctx context.Context, c *client.Client, body json.RawMessage) (*client.Workflow, error) {
-			return c.CreateWorkflow(ctx, body)
+		listVerFn: func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (any, []*extend.WorkflowVersionSummary, string, error) {
+			sd, ps, np, err := processorVersionListReqOpts(opts)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			r, err := c.WorkflowVersions.List(ctx, id, &extend.WorkflowVersionsListRequest{
+				SortDir: sd, MaxPageSize: ps, NextPageToken: np,
+			})
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return r, r.Data, derefString(r.NextPageToken), nil
 		},
-		updateFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.Workflow, error) {
-			return c.UpdateWorkflow(ctx, id, body)
+		getVerFn: func(ctx context.Context, c *sdkclient.Client, id, ver string) (*extend.WorkflowVersion, error) {
+			return c.WorkflowVersions.Retrieve(ctx, id, ver)
 		},
-		createVerFn: func(ctx context.Context, c *client.Client, id string, body json.RawMessage) (*client.ProcessorVersion, error) {
-			return c.CreateWorkflowVersion(ctx, id, body)
+		verRowFn: func(v *extend.WorkflowVersionSummary) []string {
+			return []string{v.Version, v.ID, relTime(v.CreatedAt.Format(time.RFC3339))}
+		},
+		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Workflow, error) {
+			var req extend.WorkflowsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Workflows.Create(ctx, &req)
+		},
+		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Workflow, error) {
+			var req extend.WorkflowsUpdateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.Workflows.Update(ctx, id, &req)
+		},
+		createVerFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.WorkflowVersion, error) {
+			var req extend.WorkflowVersionsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return nil, fmt.Errorf("decode body: %w", err)
+			}
+			return c.WorkflowVersions.Create(ctx, id, &req)
 		},
 	}
 }

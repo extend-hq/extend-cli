@@ -11,7 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -29,11 +32,11 @@ const defaultUploadConcurrency = 5
 // Order of the returned slice matches the order of inputs. The first error
 // returned by any worker cancels the remaining work and is propagated to the
 // caller.
-func uploadAllOrResolve(ctx context.Context, app *App, cli *client.Client, inputs []string) ([]client.FileRef, error) {
+func uploadAllOrResolve(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string) ([]extendx.FileRef, error) {
 	return uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, defaultUploadConcurrency)
 }
 
-func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *client.Client, inputs []string, concurrency int) ([]client.FileRef, error) {
+func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string, concurrency int) ([]extendx.FileRef, error) {
 	if concurrency <= 0 {
 		concurrency = defaultUploadConcurrency
 	}
@@ -42,7 +45,7 @@ func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *clien
 	}
 	if concurrency <= 1 || len(inputs) <= 1 {
 		// Fast path: no goroutines for tiny batches.
-		out := make([]client.FileRef, 0, len(inputs))
+		out := make([]extendx.FileRef, 0, len(inputs))
 		for _, in := range inputs {
 			ref, err := uploadOrResolve(ctx, app, cli, in)
 			if err != nil {
@@ -53,7 +56,7 @@ func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *clien
 		return out, nil
 	}
 
-	out := make([]client.FileRef, len(inputs))
+	out := make([]extendx.FileRef, len(inputs))
 	jobs := make(chan int, len(inputs))
 	for i := range inputs {
 		jobs <- i
@@ -147,6 +150,38 @@ func collectBatchInputs(args []string, filesFrom string) ([]string, error) {
 	return inputs, nil
 }
 
+// versionPtr returns a *ProcessorVersionString for the given non-empty
+// version string, or nil if empty. The SDK's batch reference types take
+// the version as an optional pointer.
+func versionPtr(v string) *extend.ProcessorVersionString {
+	if v == "" {
+		return nil
+	}
+	pv := extend.ProcessorVersionString(v)
+	return &pv
+}
+
+// priorityPtr returns a *RunPriority for any positive priority value.
+// 0 (the flag default) maps to nil so the on-the-wire body omits it.
+func priorityPtr(p int) *extend.RunPriority {
+	if p <= 0 {
+		return nil
+	}
+	pr := extend.RunPriority(p)
+	return &pr
+}
+
+// metadataPtr returns a *RunMetadata for the given map, or nil if the
+// map is nil. The SDK's batch input shape takes metadata as a pointer
+// to the map so explicit-nil and absent both serialize cleanly.
+func metadataPtr(md map[string]any) *extend.RunMetadata {
+	if md == nil {
+		return nil
+	}
+	mm := extend.RunMetadata(md)
+	return &mm
+}
+
 // newExtractBatchDoc returns the typed documentation for the
 // `extend extract batch` subcommand. Composed under newExtractDoc via
 // CommandDoc.Subcommands.
@@ -200,18 +235,26 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			items := make([]client.ProcessorBatchItem, len(refs))
+			items := make([]*extend.ExtractRunsCreateBatchRequestInputsItem, len(refs))
 			for i, r := range refs {
-				items[i] = client.ProcessorBatchItem{File: r, Metadata: md}
+				file, err := extendx.BuildExtractBatchFile(r)
+				if err != nil {
+					return err
+				}
+				items[i] = &extend.ExtractRunsCreateBatchRequestInputsItem{
+					File:     file,
+					Metadata: metadataPtr(md),
+				}
 			}
-			in := client.CreateExtractBatchInput{
-				Extractor: &client.ExtractorRef{ID: f.using, Version: f.version},
-				Inputs:    items,
+			req := &extend.ExtractRunsCreateBatchRequest{
+				Extractor: &extend.ExtractRunsCreateBatchRequestExtractor{
+					ID:      f.using,
+					Version: versionPtr(f.version),
+				},
+				Inputs:   items,
+				Priority: priorityPtr(f.priority),
 			}
-			if f.priority > 0 {
-				in.Priority = &f.priority
-			}
-			br, err := cli.CreateExtractRunBatch(cmd.Context(), in)
+			br, err := cli.ExtractRuns.CreateBatch(cmd.Context(), req)
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
@@ -275,18 +318,26 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			items := make([]client.ProcessorBatchItem, len(refs))
+			items := make([]*extend.ClassifyRunsCreateBatchRequestInputsItem, len(refs))
 			for i, r := range refs {
-				items[i] = client.ProcessorBatchItem{File: r, Metadata: md}
+				file, err := extendx.BuildClassifyBatchFile(r)
+				if err != nil {
+					return err
+				}
+				items[i] = &extend.ClassifyRunsCreateBatchRequestInputsItem{
+					File:     file,
+					Metadata: metadataPtr(md),
+				}
 			}
-			in := client.CreateClassifyBatchInput{
-				Classifier: &client.ClassifierRef{ID: f.using, Version: f.version},
-				Inputs:     items,
+			req := &extend.ClassifyRunsCreateBatchRequest{
+				Classifier: &extend.ClassifyRunsCreateBatchRequestClassifier{
+					ID:      f.using,
+					Version: versionPtr(f.version),
+				},
+				Inputs:   items,
+				Priority: priorityPtr(f.priority),
 			}
-			if f.priority > 0 {
-				in.Priority = &f.priority
-			}
-			br, err := cli.CreateClassifyRunBatch(cmd.Context(), in)
+			br, err := cli.ClassifyRuns.CreateBatch(cmd.Context(), req)
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
@@ -348,18 +399,26 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			items := make([]client.ProcessorBatchItem, len(refs))
+			items := make([]*extend.SplitRunsCreateBatchRequestInputsItem, len(refs))
 			for i, r := range refs {
-				items[i] = client.ProcessorBatchItem{File: r, Metadata: md}
+				file, err := extendx.BuildSplitBatchFile(r)
+				if err != nil {
+					return err
+				}
+				items[i] = &extend.SplitRunsCreateBatchRequestInputsItem{
+					File:     file,
+					Metadata: metadataPtr(md),
+				}
 			}
-			in := client.CreateSplitBatchInput{
-				Splitter: &client.SplitterRef{ID: f.using, Version: f.version},
+			req := &extend.SplitRunsCreateBatchRequest{
+				Splitter: &extend.SplitRunsCreateBatchRequestSplitter{
+					ID:      f.using,
+					Version: versionPtr(f.version),
+				},
 				Inputs:   items,
+				Priority: priorityPtr(f.priority),
 			}
-			if f.priority > 0 {
-				in.Priority = &f.priority
-			}
-			br, err := cli.CreateSplitRunBatch(cmd.Context(), in)
+			br, err := cli.SplitRuns.CreateBatch(cmd.Context(), req)
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
@@ -429,22 +488,41 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			if err != nil {
 				return err
 			}
-			items := make([]client.ParseBatchItem, len(refs))
+			items := make([]*extend.ParseRunsCreateBatchRequestInputsItem, len(refs))
 			for i, r := range refs {
-				items[i] = client.ParseBatchItem{File: r, Metadata: md}
+				file, err := extendx.BuildParseBatchFile(r)
+				if err != nil {
+					return err
+				}
+				items[i] = &extend.ParseRunsCreateBatchRequestInputsItem{
+					File:     file,
+					Metadata: metadataPtr(md),
+				}
 			}
-			in := client.CreateParseBatchInput{
-				Inputs: items,
-				Config: &client.ParseConfig{
-					Target:        target,
-					Engine:        engine,
-					EngineVersion: engineVersion,
-				},
+			cfg := &extend.ParseConfig{}
+			if target != "" {
+				t, err := extend.NewParseConfigTargetFromString(target)
+				if err != nil {
+					return fmt.Errorf("--target: %w", err)
+				}
+				cfg.Target = &t
 			}
-			if priority > 0 {
-				in.Priority = &priority
+			if engine != "" {
+				e, err := extend.NewParseConfigEngineFromString(engine)
+				if err != nil {
+					return fmt.Errorf("--engine: %w", err)
+				}
+				cfg.Engine = &e
 			}
-			br, err := cli.CreateParseRunBatch(cmd.Context(), in)
+			if engineVersion != "" {
+				cfg.EngineVersion = extend.String(engineVersion)
+			}
+			req := &extend.ParseRunsCreateBatchRequest{
+				Inputs:   items,
+				Config:   cfg,
+				Priority: priorityPtr(priority),
+			}
+			br, err := cli.ParseRuns.CreateBatch(cmd.Context(), req)
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
@@ -517,15 +595,22 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 			if err != nil {
 				return err
 			}
-			items := make([]client.WorkflowBatchItem, len(refs))
+			items := make([]*extend.WorkflowRunsCreateBatchRequestInputsItem, len(refs))
 			for i, r := range refs {
-				items[i] = client.WorkflowBatchItem{File: r}
+				file, err := extendx.BuildWorkflowBatchFile(r)
+				if err != nil {
+					return err
+				}
+				items[i] = &extend.WorkflowRunsCreateBatchRequestInputsItem{File: file}
 			}
-			in := client.CreateWorkflowBatchInput{
-				Workflow: &client.WorkflowRef{ID: f.using, Version: f.version},
-				Inputs:   items,
+			req := &extend.WorkflowRunsCreateBatchRequest{
+				Workflow: &extend.WorkflowReference{
+					ID:      f.using,
+					Version: versionPtr(f.version),
+				},
+				Inputs: items,
 			}
-			resp, err := cli.CreateWorkflowRunBatch(cmd.Context(), in)
+			resp, err := cli.WorkflowRuns.CreateBatch(cmd.Context(), req)
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
@@ -537,10 +622,10 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 	}
 }
 
-// renderWorkflowBatchSubmitted formats the workflow-batch submit response,
-// which is `{batchId}` only — there's no run count, status, or createdAt
-// like in processor/parse batches.
-func renderWorkflowBatchSubmitted(app *App, resp *client.WorkflowBatchResponse, runCount int) error {
+// renderWorkflowBatchSubmitted formats the workflow-batch submit
+// response, which is `{batchId}` only — there's no run count, status,
+// or createdAt like in processor/parse batches.
+func renderWorkflowBatchSubmitted(app *App, resp *extend.WorkflowRunsCreateBatchResponse, runCount int) error {
 	if app.Format != "" {
 		return renderWithDefault(app, resp, output.FormatJSON)
 	}
@@ -552,13 +637,13 @@ func renderWorkflowBatchSubmitted(app *App, resp *client.WorkflowBatchResponse, 
 	return nil
 }
 
-func renderBatchSubmitted(app *App, br *client.BatchRun) error {
+func renderBatchSubmitted(app *App, br *extend.BatchRun) error {
 	if app.Format != "" {
 		return renderWithDefault(app, br, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.Out, "%s %s (%s, %d run%s)\n",
-		statusIcon(pal, br.Status), br.ID, br.Status, br.RunCount, pluralize(br.RunCount))
+		statusIcon(pal, extendx.RunStatus(br.Status)), br.ID, br.Status, br.RunCount, pluralize(br.RunCount))
 	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Watch:   extend batches watch %s", br.ID))
 	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Results: extend runs list --type <type> --batch %s", br.ID))
 	return nil
@@ -615,13 +700,26 @@ endpoint; for those, use 'extend runs list --type workflow --batch <id>'.`,
 			if err != nil {
 				return err
 			}
-			br, err := cli.GetBatchRun(cmd.Context(), args[0])
+			br, err := getBatchRun(cmd.Context(), cli, args[0])
 			if err != nil {
 				return err
 			}
 			return renderWithDefault(app, br, output.FormatJSON)
 		},
 	}
+}
+
+// getBatchRun is the CLI-side wrapper around BatchRuns.Get that
+// surfaces the friendly "workflow batches have no get endpoint" error
+// instead of letting a 404 leak through. The SDK has no equivalent
+// because the API endpoint really does exist for processor and parse
+// batches; the workflow-batch carve-out lives at the schema level on
+// the server side, not the SDK's.
+func getBatchRun(ctx context.Context, cli *sdkclient.Client, id string) (*extend.BatchRun, error) {
+	if kind, ok := extendx.BatchKindFromID(id); ok && kind == extendx.BatchKindWorkflow {
+		return nil, extendx.ErrWorkflowBatchNotRetrievable
+	}
+	return cli.BatchRuns.Get(ctx, id)
 }
 
 func newBatchesWatchDoc(app *App) *CommandDoc {
@@ -662,8 +760,8 @@ Polls every 2s, backing off to 30s.`,
 		},
 		SeeAlso:  []string{"batches get", "runs list", "runs watch"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileLong, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
@@ -672,7 +770,7 @@ Polls every 2s, backing off to 30s.`,
 			}
 			id := args[0]
 			sp := app.IO.StartSpinner(fmt.Sprintf("Batch %s: ?", id))
-			final, err := cli.WaitForBatchRun(cmd.Context(), id, client.WaitProfileOptions(client.ProfileLong, timeout), func(r *client.BatchRun) {
+			final, err := waitForBatchRun(cmd.Context(), cli, id, extendx.WaitProfileOptions(extendx.ProfileLong, timeout), func(r *extend.BatchRun) {
 				sp.Update(fmt.Sprintf("Batch %s: %s (%d run%s)", r.ID, r.Status, r.RunCount, pluralize(r.RunCount)))
 			})
 			sp.Stop("")
@@ -683,10 +781,10 @@ Polls every 2s, backing off to 30s.`,
 				return err
 			}
 			if exitStatus {
-				switch final.Status {
-				case client.StatusFailed:
+				switch extendx.RunStatus(final.Status) {
+				case extendx.StatusFailed:
 					return fmt.Errorf("batch %s failed", id)
-				case client.StatusCancelled:
+				case extendx.StatusCancelled:
 					return fmt.Errorf("batch %s was cancelled", id)
 				}
 			}
@@ -697,4 +795,14 @@ Polls every 2s, backing off to 30s.`,
 			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
 		},
 	}
+}
+
+func waitForBatchRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.BatchRun)) (*extend.BatchRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.BatchRun, error) {
+			return getBatchRun(ctx, c, id)
+		},
+		func(r *extend.BatchRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // TestHTTPTimeoutFlagRegistered checks the persistent --http-timeout
@@ -31,8 +31,8 @@ func TestHTTPTimeoutFlagRegistered(t *testing.T) {
 // env var added without an entry here renders incomplete help.
 func TestEnvHTTPTimeoutInEnvVarRegistry(t *testing.T) {
 	var found bool
-	for _, ev := range client.EnvVars {
-		if ev.Name == client.EnvHTTPTimeout {
+	for _, ev := range extendx.EnvVars {
+		if ev.Name == extendx.EnvHTTPTimeout {
 			found = true
 			if ev.Description == "" {
 				t.Errorf("EnvHTTPTimeout entry has empty Description")
@@ -40,7 +40,7 @@ func TestEnvHTTPTimeoutInEnvVarRegistry(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("EnvHTTPTimeout must appear in client.EnvVars so 'extend help auth' documents it")
+		t.Errorf("EnvHTTPTimeout must appear in extendx.EnvVars so 'extend help auth' documents it")
 	}
 }
 

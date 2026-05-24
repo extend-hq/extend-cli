@@ -21,7 +21,13 @@ func TestParse_RawMarkdownWhenPiped(t *testing.T) {
 				"status": "PROCESSED",
 				"output": map[string]any{
 					"chunks": []map[string]any{
-						{"content": "# Hello\n\nWorld."},
+						{
+							"object":   "chunk",
+							"type":     "page",
+							"content":  "# Hello\n\nWorld.",
+							"metadata": map[string]any{"pageRange": map[string]any{"start": 1, "end": 1}},
+							"blocks":   []any{},
+						},
 					},
 				},
 			})
@@ -55,7 +61,17 @@ func TestParse_JSONFormatRendersFullRun(t *testing.T) {
 			writeJSON(w, 200, map[string]any{
 				"id":     "pr_json",
 				"status": "PROCESSED",
-				"output": map[string]any{"chunks": []map[string]any{{"content": "x"}}},
+				"output": map[string]any{
+					"chunks": []map[string]any{
+						{
+							"object":   "chunk",
+							"type":     "page",
+							"content":  "x",
+							"metadata": map[string]any{"pageRange": map[string]any{"start": 1, "end": 1}},
+							"blocks":   []any{},
+						},
+					},
+				},
 			})
 		}
 	})
@@ -231,15 +247,15 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 		input:               "file_xK9",
 		target:              "markdown",
 		blockOptionsPath:    `{"tables":{"enabled":true}}`,
-		advancedOptionsPath: `{"pageRanges":"1-3"}`,
+		advancedOptionsPath: `{"pageRanges":[{"start":1,"end":3}]}`,
 		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
 	}
 	body := string(srv.lastRequest().Body)
 	for _, want := range []string{
-		`"blockOptions":{"tables":{"enabled":true}}`,
-		`"advancedOptions":{"pageRanges":"1-3"}`,
+		`"tables":{"enabled":true}`,
+		`"pageRanges":[{"start":1,"end":3}]`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %s: %s", want, body)
@@ -250,7 +266,7 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 func TestParse_AdvancedOptionsFileURI(t *testing.T) {
 	tmp := t.TempDir()
 	advanced := filepath.Join(tmp, "advanced options.json")
-	if err := writeFileForTest(advanced, []byte(`{"pageRanges":"4-5"}`)); err != nil {
+	if err := writeFileForTest(advanced, []byte(`{"pageRanges":[{"start":4,"end":5}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +282,7 @@ func TestParse_AdvancedOptionsFileURI(t *testing.T) {
 		t.Fatalf("runParse: %v", err)
 	}
 	body := string(srv.lastRequest().Body)
-	if !strings.Contains(body, `"advancedOptions":{"pageRanges":"4-5"}`) {
+	if !strings.Contains(body, `"pageRanges":[{"start":4,"end":5}]`) {
 		t.Errorf("body should embed advancedOptions from file URI: %s", body)
 	}
 }

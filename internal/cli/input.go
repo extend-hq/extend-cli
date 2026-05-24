@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // uploadProgressMu serializes writes to ErrOut when uploadOrResolveWith is
@@ -15,7 +17,7 @@ import (
 // interleaved progress lines on stderr in production.
 var uploadProgressMu sync.Mutex
 
-func uploadOrResolve(ctx context.Context, app *App, cli *client.Client, input string) (client.FileRef, error) {
+func uploadOrResolve(ctx context.Context, app *App, cli *sdkclient.Client, input string) (extendx.FileRef, error) {
 	return uploadOrResolveWith(ctx, app, cli, input, "")
 }
 
@@ -28,28 +30,28 @@ func uploadOrResolve(ctx context.Context, app *App, cli *client.Client, input st
 //     is the sole schema with a settings field). Silently dropping the
 //     password would leave the user wondering why a password-protected PDF
 //     fails to parse.
-func uploadOrResolveWith(ctx context.Context, app *App, cli *client.Client, input, password string) (client.FileRef, error) {
-	ref, localPath, err := client.ResolveInput(input)
+func uploadOrResolveWith(ctx context.Context, app *App, cli *sdkclient.Client, input, password string) (extendx.FileRef, error) {
+	ref, localPath, err := extendx.ResolveInput(input)
 	if err != nil {
-		return client.FileRef{}, err
+		return extendx.FileRef{}, err
 	}
 	if localPath == "-" {
-		return client.FileRef{}, errors.New("stdin (-) is not supported; save the input to a file first (the file extension determines content-type server-side)")
+		return extendx.FileRef{}, errors.New("stdin (-) is not supported; save the input to a file first (the file extension determines content-type server-side)")
 	}
 	if password != "" && (localPath != "" || ref.ID != "") {
-		return client.FileRef{}, errors.New("--password is only honored for URL inputs; the API has no way to attach a password to uploaded files or file IDs (decrypt the PDF locally first if you need to upload)")
+		return extendx.FileRef{}, errors.New("--password is only honored for URL inputs; the API has no way to attach a password to uploaded files or file IDs (decrypt the PDF locally first if you need to upload)")
 	}
 	if localPath != "" {
 		printUploadProgress(app, "Uploading %s...\n", localPath)
-		f, err := cli.UploadFile(ctx, localPath)
+		f, err := extendx.UploadFile(ctx, cli, localPath)
 		if err != nil {
-			return client.FileRef{}, fmt.Errorf("upload: %w", err)
+			return extendx.FileRef{}, fmt.Errorf("upload: %w", err)
 		}
 		printUploadProgress(app, "Uploaded as %s\n", f.ID)
-		ref = client.FileRef{ID: f.ID}
+		ref = extendx.FileRef{ID: f.ID}
 	}
 	if password != "" && ref.URL != "" {
-		ref.Settings = &client.FileSettings{Password: password}
+		ref.Settings = &extendx.FileSettings{Password: password}
 	}
 	return ref, nil
 }

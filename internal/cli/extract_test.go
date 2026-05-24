@@ -9,31 +9,29 @@ import (
 )
 
 // TestExtractHelpDistinguishesConfigFlags locks in the disambiguation
-// between --config and --override-config. The two flags do orthogonal
-// things (--config = no saved extractor, --override-config = merge onto
-// a --using extractor) but their names sound related, which has
-// confused agents and humans alike. The Details, Gotchas, and flag
-// usage strings must all surface the distinction; if a refactor loses
-// it, this test fires.
+// between --config (standalone, no saved extractor) and --patch (per-run
+// partial merge onto a --using extractor). The names alone don't tell
+// the whole story, so Details, Gotchas, and flag usage must each carry
+// the distinction; if a refactor loses it, this test fires.
 func TestExtractHelpDistinguishesConfigFlags(t *testing.T) {
 	app := &App{}
 	doc := newExtractDoc(app)
 
 	// Details must explain that the two flags are NOT interchangeable.
 	if !strings.Contains(doc.Details, "NOT") || !strings.Contains(doc.Details, "interchangeable") {
-		t.Errorf("extract Details should call out that --config and --override-config are not interchangeable; got:\n%s", doc.Details)
+		t.Errorf("extract Details should call out that --config and --patch are not interchangeable; got:\n%s", doc.Details)
 	}
 
 	// At least one gotcha must contrast the two flags.
 	var gotchaFound bool
 	for _, g := range doc.Gotchas {
-		if strings.Contains(g, "--config") && strings.Contains(g, "--override-config") {
+		if strings.Contains(g, "--config") && strings.Contains(g, "--patch") {
 			gotchaFound = true
 			break
 		}
 	}
 	if !gotchaFound {
-		t.Errorf("extract should have a gotcha contrasting --config and --override-config; got: %v", doc.Gotchas)
+		t.Errorf("extract should have a gotcha contrasting --config and --patch; got: %v", doc.Gotchas)
 	}
 }
 
@@ -84,14 +82,20 @@ func TestExtract_WaitPath(t *testing.T) {
 			writeJSON(w, 200, map[string]any{
 				"id":     "exr_xyz",
 				"status": status,
-				"output": map[string]any{"value": "hello"},
+				// ExtractOutput is a union (*ExtractOutputJSON or
+				// ExtractOutputLegacy). The JSON variant requires
+				// {"value": object, "metadata": object}.
+				"output": map[string]any{
+					"value":    map[string]any{"greeting": "hello"},
+					"metadata": map[string]any{},
+				},
 			})
 		default:
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 	})
 	ta := newTestApp(t, srv)
-	ta.app.JQ = ".output.value"
+	ta.app.JQ = ".output.value.greeting"
 	ta.app.Format = "raw"
 
 	err := runExtract(context.Background(), ta.app, extractParams{
@@ -234,9 +238,14 @@ func TestExtract_MetadataAndTagsInRequestBody(t *testing.T) {
 	}
 }
 
-func TestExtract_OverrideConfigFromFile(t *testing.T) {
-	tmp := t.TempDir() + "/override.json"
-	if err := writeFileForTest(tmp, []byte(`{"fields":[{"key":"foo"}]}`)); err != nil {
+func TestExtract_PatchFromFile(t *testing.T) {
+	tmp := t.TempDir() + "/patch.json"
+	// The SDK's *ExtractOverrideConfigJSON has typed fields
+	// (baseProcessor, baseVersion, extractionRules, schema,
+	// advancedOptions, parseConfig). The patch JSON we hand it must
+	// match those keys; unknown fields are silently dropped on
+	// serialization.
+	if err := writeFileForTest(tmp, []byte(`{"extractionRules":"only invoices"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,22 +254,25 @@ func TestExtract_OverrideConfigFromFile(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	if err := runExtract(context.Background(), ta.app, extractParams{
-		input:              "file_xK9",
-		extractorID:        "ex_abc",
-		overrideConfigPath: tmp,
-		wait:               false,
+		input:       "file_xK9",
+		extractorID: "ex_abc",
+		patchPath:   tmp,
+		wait:        false,
 	}); err != nil {
 		t.Fatalf("runExtract: %v", err)
 	}
+	// Wire field name is still `overrideConfig` — only the CLI flag changed.
 	body := string(srv.lastRequest().Body)
-	if !strings.Contains(body, `"overrideConfig":{"fields":[{"key":"foo"}]}`) {
-		t.Errorf("body should embed overrideConfig under extractor: %s", body)
+	if !strings.Contains(body, `"overrideConfig":{`) || !strings.Contains(body, `"extractionRules":"only invoices"`) {
+		t.Errorf("body should embed overrideConfig under extractor with the patch fields: %s", body)
 	}
 }
 
 func TestExtract_InlineConfigSkipsExtractor(t *testing.T) {
 	tmp := t.TempDir() + "/config.json"
-	if err := writeFileForTest(tmp, []byte(`{"fields":[{"key":"bar","type":"string"}]}`)); err != nil {
+	// Inline --config is unmarshaled into *ExtractConfigJSON. Use a
+	// minimally valid shape (schema is the only required field).
+	if err := writeFileForTest(tmp, []byte(`{"schema":{"type":"object","properties":{"bar":{"type":"string"}}}}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,8 +288,8 @@ func TestExtract_InlineConfigSkipsExtractor(t *testing.T) {
 		t.Fatalf("runExtract: %v", err)
 	}
 	body := string(srv.lastRequest().Body)
-	if !strings.Contains(body, `"config":{"fields":[`) {
-		t.Errorf("body should include inline config: %s", body)
+	if !strings.Contains(body, `"config":{`) || !strings.Contains(body, `"bar":{"type":"string"}`) {
+		t.Errorf("body should include inline config with the bar property: %s", body)
 	}
 	if strings.Contains(body, `"extractor"`) {
 		t.Errorf("body must not include extractor when --config is set: %s", body)
@@ -314,7 +326,7 @@ func TestExtract_RejectsBothUsingAndConfig(t *testing.T) {
 	}
 }
 
-func TestExtract_InvalidJSONOverrideConfigErrorsClearly(t *testing.T) {
+func TestExtract_InvalidJSONPatchErrorsClearly(t *testing.T) {
 	tmp := t.TempDir() + "/bad.json"
 	if err := writeFileForTest(tmp, []byte(`{not json`)); err != nil {
 		t.Fatal(err)
@@ -324,13 +336,13 @@ func TestExtract_InvalidJSONOverrideConfigErrorsClearly(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	err := runExtract(context.Background(), ta.app, extractParams{
-		input:              "file_xK9",
-		extractorID:        "ex_abc",
-		overrideConfigPath: tmp,
-		wait:               false,
+		input:       "file_xK9",
+		extractorID: "ex_abc",
+		patchPath:   tmp,
+		wait:        false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "--override-config") {
-		t.Errorf("expected --override-config error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "--patch") {
+		t.Errorf("expected --patch error, got %v", err)
 	}
 	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Errorf("expected JSON validity message, got %v", err)

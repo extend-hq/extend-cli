@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // TestRootDocValidates is the strict-from-day-1 contract: every node in
@@ -176,8 +176,8 @@ func TestBuildProjectsCommandLeaf(t *testing.T) {
 		Gotchas:  []string{"Don't forget to bring a towel."},
 		SeeAlso:  []string{},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		RunE:     noopRun,
 	}
 

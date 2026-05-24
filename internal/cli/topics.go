@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // This file defines the four canonical help topics as *CommandDoc literals
@@ -79,8 +81,8 @@ func newErrorsTopicDoc() *CommandDoc {
 }
 
 // renderAuthTopicBody is a typed-tree consumer that pulls env vars and
-// regions from the client registries. The doc tree itself isn't needed
-// here, but the function signature stays uniform across topics.
+// regions from the extendx registries. The doc tree itself isn't
+// needed here, but the function signature stays uniform across topics.
 func renderAuthTopicBody(_ *CommandDoc) string {
 	var b strings.Builder
 	b.WriteString("Authentication\n\n")
@@ -88,19 +90,19 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("  export EXTEND_API_KEY=sk_xxx\n\n")
 	b.WriteString("Environment variables:\n\n")
 	maxNameLen := 0
-	for _, ev := range client.EnvVars {
+	for _, ev := range extendx.EnvVars {
 		if len(ev.Name) > maxNameLen {
 			maxNameLen = len(ev.Name)
 		}
 	}
-	for _, ev := range client.EnvVars {
+	for _, ev := range extendx.EnvVars {
 		fmt.Fprintf(&b, "  %-*s  %s\n", maxNameLen, ev.Name, ev.Description)
 	}
 	b.WriteString("\nRegions:\n\n")
-	for _, region := range client.KnownRegions() {
-		url, _ := client.RegionBaseURL(region)
+	for _, region := range extendx.KnownRegions() {
+		url, _ := extendx.RegionBaseURL(region)
 		suffix := ""
-		if url == client.DefaultBaseURL {
+		if url == extend.Environments.Production {
 			suffix = " (default)"
 		}
 		fmt.Fprintf(&b, "  %-4s  %s%s\n", region, url, suffix)
@@ -205,7 +207,7 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	b.WriteString("run) are different: they return immediately by default; pass --wait to\n")
 	b.WriteString("block.\n\n")
 	b.WriteString("Polling profiles:\n\n")
-	for _, spec := range client.WaitProfileSpecs() {
+	for _, spec := range extendx.WaitProfileSpecs() {
 		fmt.Fprintf(&b, "  %-6s  %v -> %v\n", spec.Profile, spec.Interval, spec.MaxInterval)
 	}
 	b.WriteString("\nPer-command behavior:\n\n")
@@ -252,20 +254,20 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	}
 
 	b.WriteString("\nTerminal states:\n\n")
-	for _, s := range client.TerminalSuccessStates {
+	for _, s := range extendx.TerminalSuccessStates {
 		fmt.Fprintf(&b, "  %-13s  Successful completion.\n", s)
 	}
-	for _, s := range client.TerminalFailureStates {
+	for _, s := range extendx.TerminalFailureStates {
 		switch s {
-		case client.StatusFailed:
+		case extendx.StatusFailed:
 			fmt.Fprintf(&b, "  %-13s  Run failed (server-side error or processing failure).\n", s)
-		case client.StatusCancelled:
+		case extendx.StatusCancelled:
 			fmt.Fprintf(&b, "  %-13s  Run was cancelled (parse runs cannot be cancelled).\n", s)
-		case client.StatusRejected:
+		case extendx.StatusRejected:
 			fmt.Fprintf(&b, "  %-13s  Run was rejected (workflow runs only).\n", s)
 		}
 	}
-	for _, s := range client.TerminalReviewStates {
+	for _, s := range extendx.TerminalReviewStates {
 		fmt.Fprintf(&b, "  %-13s  Paused for human review at the dashboard URL. Terminal\n", s)
 		fmt.Fprintf(&b, "  %-13s  but not failed; does NOT cause non-zero exit.\n", "")
 	}
@@ -284,11 +286,11 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	return b.String()
 }
 
-// renderErrorsTopicBody is mostly hand-written prose; the only typed input
-// is client.DefaultRetryConfig. The doc tree isn't walked here.
+// renderErrorsTopicBody is mostly hand-written prose; the retry policy
+// figures come from the SDK's documented defaults (see the
+// extend-go-sdk README). Update both when the SDK ships a new policy.
 func renderErrorsTopicBody(_ *CommandDoc) string {
 	var b strings.Builder
-	rc := client.DefaultRetryConfig
 	b.WriteString("Errors\n\n")
 	b.WriteString("API errors carry a stable envelope:\n\n")
 	b.WriteString("  {\n")
@@ -301,12 +303,13 @@ func renderErrorsTopicBody(_ *CommandDoc) string {
 	b.WriteString("on its own dimmed line. Cite the request_id when filing support\n")
 	b.WriteString("tickets so the team can correlate your call to server-side logs.\n\n")
 	b.WriteString("Retries\n\n")
-	fmt.Fprintf(&b, "  GET requests retry up to %d times on 429 and 5xx errors with\n", rc.MaxAttempts)
-	fmt.Fprintf(&b, "  exponential backoff (%v -> %v).\n\n", rc.InitialBackoff, rc.MaxBackoff)
-	b.WriteString("  POST requests only retry on 429. POSTs are not assumed idempotent\n")
-	b.WriteString("  and will not be replayed on 5xx errors. The server's `retryable`\n")
-	b.WriteString("  field overrides this for non-2xx responses where the server\n")
-	b.WriteString("  explicitly opts in to retries.\n\n")
+	b.WriteString("  The Extend Go SDK retries failed requests automatically. It treats\n")
+	b.WriteString("  408 (Timeout), 429 (Rate limit), and 5xx (Server error) responses as\n")
+	b.WriteString("  retryable, applying exponential backoff between attempts. When the\n")
+	b.WriteString("  server sends a Retry-After header the SDK honors it verbatim.\n\n")
+	b.WriteString("  The default policy is 2 retries per request. The CLI does not expose\n")
+	b.WriteString("  a knob to override this today; if you need a different policy on a\n")
+	b.WriteString("  busy network, raise it on the Extend Go SDK directly.\n\n")
 	b.WriteString("Common error codes\n\n")
 	b.WriteString("  401 UNAUTHORIZED         API key missing or invalid.\n")
 	b.WriteString("  404 NOT_FOUND            Resource doesn't exist or belongs to a\n")
@@ -315,6 +318,6 @@ func renderErrorsTopicBody(_ *CommandDoc) string {
 	b.WriteString("                           validation. The message field details\n")
 	b.WriteString("                           which field; check it before retrying.\n")
 	b.WriteString("  429 RATE_LIMIT_EXCEEDED  Auto-retried with backoff (above).\n")
-	b.WriteString("  5xx INTERNAL_ERROR       Auto-retried for GETs only.\n")
+	b.WriteString("  5xx INTERNAL_ERROR       Auto-retried by the SDK.\n")
 	return b.String()
 }

@@ -11,7 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -74,11 +77,11 @@ keys individually.`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			kind, ok := client.RunKindFromID(id)
+			kind, ok := extendx.RunKindFromID(id)
 			if !ok {
 				return fmt.Errorf("cannot determine run type from id %q", id)
 			}
-			if kind != client.KindWorkflow {
+			if kind != extendx.KindWorkflow {
 				return fmt.Errorf("only workflow runs (workflow_run_...) support metadata updates; got %s run", kind)
 			}
 			cli, err := app.NewClient()
@@ -89,21 +92,21 @@ keys individually.`,
 			if err != nil {
 				return err
 			}
-			var body []byte
+			var req extend.WorkflowRunsUpdateRequest
 			if fromFile != "" {
-				body, err = readJSONFile(fromFile, "--from-file")
+				raw, err := readJSONFile(fromFile, "--from-file")
 				if err != nil {
 					return err
+				}
+				if err := json.Unmarshal(raw, &req); err != nil {
+					return fmt.Errorf("--from-file: %w", err)
 				}
 			} else if md != nil {
-				body, err = jsonMarshal(map[string]any{"metadata": md})
-				if err != nil {
-					return err
-				}
+				req.Metadata = md
 			} else {
 				return errors.New("nothing to update; pass --from-file, --metadata, or --tag")
 			}
-			run, err := cli.UpdateWorkflowRun(cmd.Context(), id, body)
+			run, err := cli.WorkflowRuns.Update(cmd.Context(), id, &req)
 			if err != nil {
 				return err
 			}
@@ -114,10 +117,6 @@ keys individually.`,
 			meta.attach(cmd)
 		},
 	}
-}
-
-func jsonMarshal(v any) ([]byte, error) {
-	return json.Marshal(v)
 }
 
 func newRunsGetDoc(app *App) *CommandDoc {
@@ -199,8 +198,8 @@ works as expected.`,
 		},
 		SeeAlso:  []string{"runs get", "runs list", "batches watch"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRunsWatch(cmd.Context(), app, args[0], timeout, exitStatus)
@@ -217,49 +216,57 @@ func runRunsGet(ctx context.Context, app *App, id, responseType string) error {
 	if err != nil {
 		return err
 	}
-	kind, ok := client.RunKindFromID(id)
+	kind, ok := extendx.RunKindFromID(id)
 	if !ok {
 		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
 	}
-	if responseType != "" && kind != client.KindParse {
+	if responseType != "" && kind != extendx.KindParse {
 		return fmt.Errorf("--response-type is only supported for parse runs (pr_...); got %s run", kind)
 	}
 	if responseType != "" && responseType != "json" && responseType != "url" {
 		return fmt.Errorf("--response-type must be one of: json|url")
 	}
 	switch kind {
-	case client.KindExtract:
-		run, err := cli.GetExtractRun(ctx, id)
+	case extendx.KindExtract:
+		run, err := cli.ExtractRuns.Retrieve(ctx, id, &extend.ExtractRunsRetrieveRequest{})
 		if err != nil {
 			return err
 		}
 		return renderWithDefault(app, run, output.FormatJSON)
-	case client.KindParse:
-		run, err := cli.GetParseRunWithOptions(ctx, id, client.GetParseRunOptions{ResponseType: responseType})
+	case extendx.KindParse:
+		req := &extend.ParseRunsRetrieveRequest{}
+		if responseType != "" {
+			rt, err := extend.NewParseRunsRetrieveRequestResponseTypeFromString(responseType)
+			if err != nil {
+				return fmt.Errorf("--response-type: %w", err)
+			}
+			req.ResponseType = &rt
+		}
+		run, err := cli.ParseRuns.Retrieve(ctx, id, req)
 		if err != nil {
 			return err
 		}
 		return renderParseResult(app, run, "markdown")
-	case client.KindClassify:
-		run, err := cli.GetClassifyRun(ctx, id)
+	case extendx.KindClassify:
+		run, err := cli.ClassifyRuns.Retrieve(ctx, id, &extend.ClassifyRunsRetrieveRequest{})
 		if err != nil {
 			return err
 		}
 		return renderClassifyResult(app, run)
-	case client.KindSplit:
-		run, err := cli.GetSplitRun(ctx, id)
+	case extendx.KindSplit:
+		run, err := cli.SplitRuns.Retrieve(ctx, id, &extend.SplitRunsRetrieveRequest{})
 		if err != nil {
 			return err
 		}
 		return renderSplitResult(app, run)
-	case client.KindWorkflow:
-		run, err := cli.GetWorkflowRun(ctx, id)
+	case extendx.KindWorkflow:
+		run, err := cli.WorkflowRuns.Retrieve(ctx, id, &extend.WorkflowRunsRetrieveRequest{})
 		if err != nil {
 			return err
 		}
 		return renderWorkflowResult(app, run)
-	case client.KindEdit:
-		run, err := cli.GetEditRun(ctx, id)
+	case extendx.KindEdit:
+		run, err := cli.EditRuns.Retrieve(ctx, id, &extend.EditRunsRetrieveRequest{})
 		if err != nil {
 			return err
 		}
@@ -274,79 +281,79 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	if err != nil {
 		return err
 	}
-	kind, ok := client.RunKindFromID(id)
+	kind, ok := extendx.RunKindFromID(id)
 	if !ok {
 		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Watching %s...", id))
-	// Watching uses the short profile uniformly, even for workflow runs:
-	// users invoking `runs watch` are explicitly asking for live progress and
-	// expect responsive updates.
-	opts := client.WaitProfileOptions(client.ProfileShort, timeout)
+	// Watching uses the short profile uniformly, even for workflow
+	// runs: users invoking `runs watch` are explicitly asking for live
+	// progress and expect responsive updates.
+	opts := extendx.WaitProfileOptions(extendx.ProfileShort, timeout)
 
-	var status client.RunStatus
+	var status extendx.RunStatus
 	var renderErr error
 	switch kind {
-	case client.KindExtract:
-		final, err := cli.WaitForExtractRun(ctx, id, opts, func(r *client.ExtractRun) {
+	case extendx.KindExtract:
+		final, err := waitForExtractRun(ctx, cli, id, opts, func(r *extend.ExtractRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderWithDefault(app, final, output.FormatJSON)
-	case client.KindParse:
-		final, err := cli.WaitForParseRun(ctx, id, opts, func(r *client.ParseRun) {
+	case extendx.KindParse:
+		final, err := waitForParseRun(ctx, cli, id, opts, func(r *extend.ParseRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderParseResult(app, final, "markdown")
-	case client.KindClassify:
-		final, err := cli.WaitForClassifyRun(ctx, id, opts, func(r *client.ClassifyRun) {
+	case extendx.KindClassify:
+		final, err := waitForClassifyRun(ctx, cli, id, opts, func(r *extend.ClassifyRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderClassifyResult(app, final)
-	case client.KindSplit:
-		final, err := cli.WaitForSplitRun(ctx, id, opts, func(r *client.SplitRun) {
+	case extendx.KindSplit:
+		final, err := waitForSplitRun(ctx, cli, id, opts, func(r *extend.SplitRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderSplitResult(app, final)
-	case client.KindWorkflow:
-		final, err := cli.WaitForWorkflowRun(ctx, id, opts, func(r *client.WorkflowRun) {
+	case extendx.KindWorkflow:
+		final, err := waitForWorkflowRun(ctx, cli, id, opts, func(r *extend.WorkflowRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderWorkflowResult(app, final)
-	case client.KindEdit:
-		final, err := cli.WaitForEditRun(ctx, id, opts, func(r *client.EditRun) {
+	case extendx.KindEdit:
+		final, err := waitForEditRun(ctx, cli, id, opts, func(r *extend.EditRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
 			return formatWatchWaitError(err, id)
 		}
-		status = final.Status
+		status = extendx.RunStatus(final.Status)
 		renderErr = renderEditResult(app, final)
 	default:
 		sp.Stop("")
@@ -358,9 +365,9 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	}
 	if exitStatus {
 		switch status {
-		case client.StatusFailed:
+		case extendx.StatusFailed:
 			return fmt.Errorf("run %s failed", id)
-		case client.StatusCancelled:
+		case extendx.StatusCancelled:
 			return fmt.Errorf("run %s was cancelled", id)
 		}
 	}
@@ -481,20 +488,7 @@ func runRunsList(cmd *cobra.Command, app *App, p runsListParams) error {
 		return err
 	}
 
-	opts := client.ListRunsOptions{
-		Status:           p.status,
-		ProcessorID:      p.using,
-		BatchID:          p.batchID,
-		Source:           p.source,
-		SourceID:         p.sourceID,
-		FileNameContains: p.fileName,
-		Limit:            p.limit,
-		PageToken:        p.pageToken,
-		SortBy:           p.sortBy,
-		SortDir:          p.sortDir,
-	}
-
-	rows, pages, err := collectListRows(ctx, cli, kind, opts, p.all, p.max)
+	rows, pages, err := collectListRows(ctx, cli, kind, p)
 	if err != nil {
 		return err
 	}
@@ -502,148 +496,365 @@ func runRunsList(cmd *cobra.Command, app *App, p runsListParams) error {
 	return renderListForCmd(cmd, app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
 }
 
-func parseRunKind(s string) (client.RunKind, error) {
+func parseRunKind(s string) (extendx.RunKind, error) {
 	switch strings.ToLower(s) {
 	case "extract":
-		return client.KindExtract, nil
+		return extendx.KindExtract, nil
 	case "parse":
-		return client.KindParse, nil
+		return extendx.KindParse, nil
 	case "classify":
-		return client.KindClassify, nil
+		return extendx.KindClassify, nil
 	case "split":
-		return client.KindSplit, nil
+		return extendx.KindSplit, nil
 	case "workflow":
-		return client.KindWorkflow, nil
+		return extendx.KindWorkflow, nil
 	case "edit":
-		return client.KindEdit, nil
+		return extendx.KindEdit, nil
 	}
 	return "", fmt.Errorf("unknown run type %q (want extract|parse|classify|split|workflow|edit)", s)
 }
 
-func collectListRows(ctx context.Context, cli *client.Client, kind client.RunKind, opts client.ListRunsOptions, all bool, max int) ([][]string, []any, error) {
+func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.RunKind, p runsListParams) ([][]string, []any, error) {
 	var rows [][]string
 	var rawPages []any
+	pageToken := p.pageToken
 	for {
 		var (
 			pageRows  [][]string
 			page      any
-			pageToken string
+			nextToken string
+			err       error
 		)
 		switch kind {
-		case client.KindExtract:
-			r, err := cli.ListExtractRuns(ctx, opts)
-			if err != nil {
-				return nil, nil, err
-			}
-			page = r
-			pageToken = r.NextPageToken
-			for _, run := range r.Data {
-				pageRows = append(pageRows, extractRow(run))
-			}
-		case client.KindParse:
-			r, err := cli.ListParseRuns(ctx, opts)
-			if err != nil {
-				return nil, nil, err
-			}
-			page = r
-			pageToken = r.NextPageToken
-			for _, run := range r.Data {
-				pageRows = append(pageRows, parseRow(run))
-			}
-		case client.KindClassify:
-			r, err := cli.ListClassifyRuns(ctx, opts)
-			if err != nil {
-				return nil, nil, err
-			}
-			page = r
-			pageToken = r.NextPageToken
-			for _, run := range r.Data {
-				pageRows = append(pageRows, classifyRow(run))
-			}
-		case client.KindSplit:
-			r, err := cli.ListSplitRuns(ctx, opts)
-			if err != nil {
-				return nil, nil, err
-			}
-			page = r
-			pageToken = r.NextPageToken
-			for _, run := range r.Data {
-				pageRows = append(pageRows, splitRow(run))
-			}
-		case client.KindWorkflow:
-			r, err := cli.ListWorkflowRuns(ctx, opts)
-			if err != nil {
-				return nil, nil, err
-			}
-			page = r
-			pageToken = r.NextPageToken
-			for _, run := range r.Data {
-				pageRows = append(pageRows, workflowRow(run))
-			}
-		case client.KindEdit:
+		case extendx.KindExtract:
+			pageRows, page, nextToken, err = listExtractPage(ctx, cli, p, pageToken)
+		case extendx.KindParse:
+			pageRows, page, nextToken, err = listParsePage(ctx, cli, p, pageToken)
+		case extendx.KindClassify:
+			pageRows, page, nextToken, err = listClassifyPage(ctx, cli, p, pageToken)
+		case extendx.KindSplit:
+			pageRows, page, nextToken, err = listSplitPage(ctx, cli, p, pageToken)
+		case extendx.KindWorkflow:
+			pageRows, page, nextToken, err = listWorkflowPage(ctx, cli, p, pageToken)
+		case extendx.KindEdit:
 			return nil, nil, fmt.Errorf("listing edit runs is not supported by the API; use 'extend runs get edr_...' for individual edit runs")
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 		rows = append(rows, pageRows...)
 		rawPages = append(rawPages, page)
-		if paginationDone(all, max, len(rows), pageToken) {
+		if paginationDone(p.all, p.max, len(rows), nextToken) {
 			break
 		}
-		opts.PageToken = pageToken
+		pageToken = nextToken
 	}
-	rows = capRowsToMax(rows, max)
+	rows = capRowsToMax(rows, p.max)
 	return rows, rawPages, nil
 }
 
-func extractRow(r *client.ExtractRun) []string {
+func listExtractPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	req := &extend.ExtractRunsListRequest{}
+	if p.status != "" {
+		s := extend.ProcessorRunStatus(p.status)
+		req.Status = &s
+	}
+	if p.using != "" {
+		req.ExtractorID = extend.String(p.using)
+	}
+	if p.batchID != "" {
+		req.BatchID = extend.String(p.batchID)
+	}
+	if p.source != "" {
+		s := extend.RunSource(p.source)
+		req.Source = &s
+	}
+	if p.sourceID != "" {
+		sid := extend.RunSourceID(p.sourceID)
+		req.SourceID = &sid
+	}
+	if p.fileName != "" {
+		req.FileNameContains = extend.String(p.fileName)
+	}
+	if p.sortBy != "" {
+		sb, err := extend.NewSortByFromString(p.sortBy)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
+		}
+		req.SortBy = &sb
+	}
+	if p.sortDir != "" {
+		sd, err := extend.NewSortDirFromString(p.sortDir)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort: %w", err)
+		}
+		req.SortDir = &sd
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+	resp, err := cli.ExtractRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		rows = append(rows, extractSummaryRow(r))
+	}
+	return rows, resp, derefString(resp.NextPageToken), nil
+}
+
+func listParsePage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	req := &extend.ParseRunsListRequest{}
+	if p.status != "" {
+		s := extend.ParseRunsListRequestStatus(p.status)
+		req.Status = &s
+	}
+	if p.batchID != "" {
+		req.BatchID = extend.String(p.batchID)
+	}
+	if p.source != "" {
+		s := extend.ParseRunSource(p.source)
+		req.Source = &s
+	}
+	if p.sourceID != "" {
+		sid := extend.RunSourceID(p.sourceID)
+		req.SourceID = &sid
+	}
+	if p.fileName != "" {
+		req.FileNameContains = extend.String(p.fileName)
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+	resp, err := cli.ParseRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		rows = append(rows, parseRow(r))
+	}
+	return rows, resp, derefString(resp.NextPageToken), nil
+}
+
+func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	req := &extend.ClassifyRunsListRequest{}
+	if p.status != "" {
+		s := extend.ProcessorRunStatus(p.status)
+		req.Status = &s
+	}
+	if p.using != "" {
+		req.ClassifierID = extend.String(p.using)
+	}
+	if p.batchID != "" {
+		req.BatchID = extend.String(p.batchID)
+	}
+	if p.source != "" {
+		s := extend.RunSource(p.source)
+		req.Source = &s
+	}
+	if p.sourceID != "" {
+		sid := extend.RunSourceID(p.sourceID)
+		req.SourceID = &sid
+	}
+	if p.fileName != "" {
+		req.FileNameContains = extend.String(p.fileName)
+	}
+	if p.sortBy != "" {
+		sb, err := extend.NewSortByFromString(p.sortBy)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
+		}
+		req.SortBy = &sb
+	}
+	if p.sortDir != "" {
+		sd, err := extend.NewSortDirFromString(p.sortDir)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort: %w", err)
+		}
+		req.SortDir = &sd
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+	resp, err := cli.ClassifyRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		rows = append(rows, classifySummaryRow(r))
+	}
+	return rows, resp, derefString(resp.NextPageToken), nil
+}
+
+func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	req := &extend.SplitRunsListRequest{}
+	if p.status != "" {
+		s := extend.ProcessorRunStatus(p.status)
+		req.Status = &s
+	}
+	if p.using != "" {
+		req.SplitterID = extend.String(p.using)
+	}
+	if p.batchID != "" {
+		req.BatchID = extend.String(p.batchID)
+	}
+	if p.source != "" {
+		s := extend.RunSource(p.source)
+		req.Source = &s
+	}
+	if p.sourceID != "" {
+		sid := extend.RunSourceID(p.sourceID)
+		req.SourceID = &sid
+	}
+	if p.fileName != "" {
+		req.FileNameContains = extend.String(p.fileName)
+	}
+	if p.sortBy != "" {
+		sb, err := extend.NewSortByFromString(p.sortBy)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
+		}
+		req.SortBy = &sb
+	}
+	if p.sortDir != "" {
+		sd, err := extend.NewSortDirFromString(p.sortDir)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort: %w", err)
+		}
+		req.SortDir = &sd
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+	resp, err := cli.SplitRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		rows = append(rows, splitSummaryRow(r))
+	}
+	return rows, resp, derefString(resp.NextPageToken), nil
+}
+
+func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	req := &extend.WorkflowRunsListRequest{}
+	if p.status != "" {
+		s := extend.WorkflowRunStatus(p.status)
+		req.Status = &s
+	}
+	if p.using != "" {
+		req.WorkflowID = extend.String(p.using)
+	}
+	if p.batchID != "" {
+		req.BatchID = extend.String(p.batchID)
+	}
+	if p.fileName != "" {
+		req.FileNameContains = extend.String(p.fileName)
+	}
+	if p.sortBy != "" {
+		sb, err := extend.NewSortByFromString(p.sortBy)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
+		}
+		req.SortBy = &sb
+	}
+	if p.sortDir != "" {
+		sd, err := extend.NewSortDirFromString(p.sortDir)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("--sort: %w", err)
+		}
+		req.SortDir = &sd
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+	resp, err := cli.WorkflowRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		rows = append(rows, workflowSummaryRow(r))
+	}
+	return rows, resp, derefString(resp.NextPageToken), nil
+}
+
+func extractSummaryRow(r *extend.ExtractRunSummary) []string {
 	name := ""
 	if r.Extractor != nil {
 		name = r.Extractor.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
 }
 
-func parseRow(r *client.ParseRun) []string {
-	return []string{r.ID, string(r.Status), "", relTime(r.CreatedAt)}
+func parseRow(r *extend.ParseRun) []string {
+	// The SDK's *extend.ParseRun does not declare a CreatedAt
+	// field — the server still emits one, but it lives in
+	// extraProperties because Fern's spec doesn't model it. Pull
+	// it out so the "created" column matches the other run kinds.
+	// If/when the SDK adds CreatedAt as a typed field, swap this
+	// back to a direct field read.
+	created := ""
+	if r != nil {
+		if t, ok := r.GetExtraProperties()["createdAt"].(string); ok {
+			created = relTime(t)
+		}
+	}
+	// Parse runs have no processor reference, so the "processor"
+	// column is always empty (matches the old client).
+	return []string{r.ID, string(r.Status), "", created}
 }
 
-func classifyRow(r *client.ClassifyRun) []string {
+func classifySummaryRow(r *extend.ClassifyRunSummary) []string {
 	name := ""
 	if r.Classifier != nil {
 		name = r.Classifier.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
 }
 
-func splitRow(r *client.SplitRun) []string {
+func splitSummaryRow(r *extend.SplitRunSummary) []string {
 	name := ""
 	if r.Splitter != nil {
 		name = r.Splitter.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
 }
 
-func workflowRow(r *client.WorkflowRun) []string {
+func workflowSummaryRow(r *extend.WorkflowRunSummary) []string {
 	name := ""
 	if r.Workflow != nil {
 		name = r.Workflow.Name
 	}
-	created := r.CreatedAt
-	if created == "" {
-		created = r.InitialRunAt
+	created := ""
+	if r.InitialRunAt != nil {
+		created = r.InitialRunAt.Format(time.RFC3339)
 	}
 	return []string{r.ID, string(r.Status), name, relTime(created)}
-}
-
-// editRow is currently unused: there is no LIST /edit_runs endpoint, so
-// `extend runs list --type edit` errors out rather than calling this. Kept
-// (with a no-op CreatedAt placeholder) so a future LIST endpoint can wire it
-// back into collectListRows without re-deriving the formatting.
-func editRow(r *client.EditRun) []string {
-	name := ""
-	if r.File != nil {
-		name = r.File.Name
-	}
-	return []string{r.ID, string(r.Status), name, ""}
 }
 
 func relTime(iso string) string {
@@ -751,7 +962,7 @@ inventory; it does not affect billing.`,
 }
 
 func runRunsDelete(ctx context.Context, app *App, id string, yes bool) error {
-	if _, ok := client.RunKindFromID(id); !ok {
+	if _, ok := extendx.RunKindFromID(id); !ok {
 		return fmt.Errorf("cannot determine run type from id %q", id)
 	}
 	return deleteWithConfirm(ctx, app, "run", id, yes,
@@ -760,8 +971,69 @@ func runRunsDelete(ctx context.Context, app *App, id string, yes bool) error {
 			if err != nil {
 				return err
 			}
-			return c.DeleteRun(ctx, id)
+			return deleteRun(ctx, c, id)
 		})
+}
+
+// deleteRun dispatches to the right per-kind delete endpoint on the
+// SDK client based on the run ID's prefix. Centralized so both
+// `extend runs delete` and any other generic deleter can share the
+// dispatch.
+func deleteRun(ctx context.Context, c *sdkclient.Client, id string) error {
+	kind, ok := extendx.RunKindFromID(id)
+	if !ok {
+		return fmt.Errorf("unknown run id prefix: %s", id)
+	}
+	switch kind {
+	case extendx.KindExtract:
+		_, err := c.ExtractRuns.Delete(ctx, id, &extend.ExtractRunsDeleteRequest{})
+		return err
+	case extendx.KindParse:
+		_, err := c.ParseRuns.Delete(ctx, id, &extend.ParseRunsDeleteRequest{})
+		return err
+	case extendx.KindClassify:
+		_, err := c.ClassifyRuns.Delete(ctx, id, &extend.ClassifyRunsDeleteRequest{})
+		return err
+	case extendx.KindSplit:
+		_, err := c.SplitRuns.Delete(ctx, id, &extend.SplitRunsDeleteRequest{})
+		return err
+	case extendx.KindEdit:
+		_, err := c.EditRuns.Delete(ctx, id, &extend.EditRunsDeleteRequest{})
+		return err
+	case extendx.KindWorkflow:
+		_, err := c.WorkflowRuns.Delete(ctx, id, &extend.WorkflowRunsDeleteRequest{})
+		return err
+	default:
+		return fmt.Errorf("unsupported run kind: %s", kind)
+	}
+}
+
+// cancelRun dispatches a cancel call to the right per-kind endpoint
+// based on the run ID's prefix. Parse and edit runs return
+// extendx.ErrNotCancellable.
+func cancelRun(ctx context.Context, c *sdkclient.Client, id string) error {
+	kind, ok := extendx.RunKindFromID(id)
+	if !ok {
+		return fmt.Errorf("unknown run id prefix: %s", id)
+	}
+	switch kind {
+	case extendx.KindExtract:
+		_, err := c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
+		return err
+	case extendx.KindClassify:
+		_, err := c.ClassifyRuns.Cancel(ctx, id, &extend.ClassifyRunsCancelRequest{})
+		return err
+	case extendx.KindSplit:
+		_, err := c.SplitRuns.Cancel(ctx, id, &extend.SplitRunsCancelRequest{})
+		return err
+	case extendx.KindWorkflow:
+		_, err := c.WorkflowRuns.Cancel(ctx, id, &extend.WorkflowRunsCancelRequest{})
+		return err
+	case extendx.KindParse, extendx.KindEdit:
+		return extendx.ErrNotCancellable
+	default:
+		return fmt.Errorf("unsupported run kind: %s", kind)
+	}
 }
 
 func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
@@ -769,7 +1041,7 @@ func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
 	if err != nil {
 		return err
 	}
-	if err := client.CanCancel(id); err != nil {
+	if err := extendx.CanCancel(id); err != nil {
 		return err
 	}
 
@@ -787,7 +1059,7 @@ func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
 		}
 	}
 
-	if err := cli.CancelRun(ctx, id); err != nil {
+	if err := cancelRun(ctx, cli, id); err != nil {
 		return err
 	}
 	fmt.Fprintf(app.IO.ErrOut, "%s Cancelled %s\n", paletteFor(app.IO).Green("✓"), id)
