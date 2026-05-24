@@ -193,8 +193,6 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-
-
 // newFilesGetDoc returns the typed documentation for `extend files get`.
 func newFilesGetDoc(app *App) *CommandDoc {
 	var (

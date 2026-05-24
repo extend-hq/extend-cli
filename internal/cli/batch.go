@@ -197,8 +197,6 @@ func prepBatchSubmitArgs(ctx context.Context, app *App, args []string, filesFrom
 	return &batchSubmitPrep{Client: cli, Refs: refs, Metadata: md}, nil
 }
 
-
-
 // newExtractBatchDoc returns the typed documentation for the
 // `extend extract batch` subcommand. Composed under newExtractDoc via
 // CommandDoc.Subcommands.
