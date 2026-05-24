@@ -17,11 +17,11 @@ import (
 
 func versionShort() string { return version.Short() }
 
-func init() {
-	// Reflect the binary's version in the User-Agent header on every
-	// SDK request. extendx default is "extend-cli/dev"; we only swap
-	// it in to a richer string when version.Short() resolves.
-	extendx.SetUserAgent("extend-cli/" + version.Short())
+// userAgent renders the CLI's User-Agent header value, e.g.
+// "extend-cli/1.2.3". Recomputed per call so tests that override
+// version.Short() see fresh output.
+func userAgent() string {
+	return "extend-cli/" + version.Short()
 }
 
 type App struct {
@@ -150,6 +150,7 @@ func NewRoot() *cobra.Command {
 			APIKey:      key,
 			Region:      app.Region,
 			WorkspaceID: app.Workspace,
+			UserAgent:   userAgent(),
 		}
 		if cfg.Region == "" {
 			cfg.Region = os.Getenv(extendx.EnvRegion)

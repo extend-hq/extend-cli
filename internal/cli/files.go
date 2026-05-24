@@ -171,11 +171,11 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 			rows = append(rows, []string{
 				f.ID,
 				truncate(f.Name, 40),
-				fileTypeString(f.Type),
-				relTime(f.CreatedAt.Format("2006-01-02T15:04:05Z07:00")),
+				string(extendx.Deref(f.Type)),
+				relTime(f.CreatedAt),
 			})
 		}
-		next := derefString(page.NextPageToken)
+		next := extendx.Deref(page.NextPageToken)
 		if paginationDone(all, max, len(rows), next) {
 			break
 		}
@@ -193,24 +193,7 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-// derefString safely dereferences a *string, returning "" for nil.
-// Used pervasively across list commands now that the SDK's
-// NextPageToken/string-flavored optional fields are pointers.
-func derefString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
 
-// fileTypeString renders an SDK *FileType pointer as the bare string
-// for table display. Empty/nil → "".
-func fileTypeString(t *extend.FileType) string {
-	if t == nil {
-		return ""
-	}
-	return string(*t)
-}
 
 // newFilesGetDoc returns the typed documentation for `extend files get`.
 func newFilesGetDoc(app *App) *CommandDoc {

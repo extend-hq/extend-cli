@@ -553,8 +553,74 @@ func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.Ru
 	return rows, rawPages, nil
 }
 
+// runsListCommon is the cross-kind subset of runsListParams parsed
+// into the SDK's typed pointer fields. Each per-kind page function
+// assigns these onto its specific SDK request struct (the request
+// types share field names but not types, so the assignment can't be
+// further DRY'd without reflection).
+type runsListCommon struct {
+	BatchID          *string
+	SourceID         *extend.RunSourceID
+	FileNameContains *string
+	SortBy           *extend.SortBy
+	SortDir          *extend.SortDir
+	MaxPageSize      *extend.MaxPageSize
+	NextPageToken    *extend.NextPageToken
+}
+
+// parseRunsListCommon parses the kind-independent slice of
+// runsListParams. status, source, and the processor-ID field stay
+// kind-local because their SDK types differ (extract/classify/split
+// use ProcessorRunStatus + RunSource; parse has its own
+// ParseRunsListRequestStatus + ParseRunSource; workflow has
+// WorkflowRunStatus and no source field at all).
+func parseRunsListCommon(p runsListParams, pageToken string) (*runsListCommon, error) {
+	c := &runsListCommon{}
+	if p.batchID != "" {
+		c.BatchID = extend.String(p.batchID)
+	}
+	if p.sourceID != "" {
+		sid := extend.RunSourceID(p.sourceID)
+		c.SourceID = &sid
+	}
+	if p.fileName != "" {
+		c.FileNameContains = extend.String(p.fileName)
+	}
+	if p.sortBy != "" {
+		sb, err := extend.NewSortByFromString(p.sortBy)
+		if err != nil {
+			return nil, fmt.Errorf("--sort-by: %w", err)
+		}
+		c.SortBy = &sb
+	}
+	if p.sortDir != "" {
+		sd, err := extend.NewSortDirFromString(p.sortDir)
+		if err != nil {
+			return nil, fmt.Errorf("--sort: %w", err)
+		}
+		c.SortDir = &sd
+	}
+	if p.limit > 0 {
+		ps := extend.MaxPageSize(p.limit)
+		c.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		c.NextPageToken = extend.String(pageToken)
+	}
+	return c, nil
+}
+
 func listExtractPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
-	req := &extend.ExtractRunsListRequest{}
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.ExtractRunsListRequest{
+		BatchID: common.BatchID, SourceID: common.SourceID,
+		FileNameContains: common.FileNameContains,
+		SortBy:           common.SortBy, SortDir: common.SortDir,
+		MaxPageSize: common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
 	if p.status != "" {
 		s := extend.ProcessorRunStatus(p.status)
 		req.Status = &s
@@ -562,40 +628,9 @@ func listExtractPage(ctx context.Context, cli *sdkclient.Client, p runsListParam
 	if p.using != "" {
 		req.ExtractorID = extend.String(p.using)
 	}
-	if p.batchID != "" {
-		req.BatchID = extend.String(p.batchID)
-	}
 	if p.source != "" {
 		s := extend.RunSource(p.source)
 		req.Source = &s
-	}
-	if p.sourceID != "" {
-		sid := extend.RunSourceID(p.sourceID)
-		req.SourceID = &sid
-	}
-	if p.fileName != "" {
-		req.FileNameContains = extend.String(p.fileName)
-	}
-	if p.sortBy != "" {
-		sb, err := extend.NewSortByFromString(p.sortBy)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
-		}
-		req.SortBy = &sb
-	}
-	if p.sortDir != "" {
-		sd, err := extend.NewSortDirFromString(p.sortDir)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort: %w", err)
-		}
-		req.SortDir = &sd
-	}
-	if p.limit > 0 {
-		ps := extend.MaxPageSize(p.limit)
-		req.MaxPageSize = &ps
-	}
-	if pageToken != "" {
-		req.NextPageToken = extend.String(pageToken)
 	}
 	resp, err := cli.ExtractRuns.List(ctx, req)
 	if err != nil {
@@ -605,35 +640,29 @@ func listExtractPage(ctx context.Context, cli *sdkclient.Client, p runsListParam
 	for _, r := range resp.Data {
 		rows = append(rows, extractSummaryRow(r))
 	}
-	return rows, resp, derefString(resp.NextPageToken), nil
+	return rows, resp, extendx.Deref(resp.NextPageToken), nil
 }
 
 func listParsePage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
-	req := &extend.ParseRunsListRequest{}
+	// Parse runs ignore SortBy/SortDir at the server, but we still
+	// parse them so an invalid string surfaces a friendly error
+	// rather than being silently dropped.
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.ParseRunsListRequest{
+		BatchID: common.BatchID, SourceID: common.SourceID,
+		FileNameContains: common.FileNameContains,
+		MaxPageSize:      common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
 	if p.status != "" {
 		s := extend.ParseRunsListRequestStatus(p.status)
 		req.Status = &s
 	}
-	if p.batchID != "" {
-		req.BatchID = extend.String(p.batchID)
-	}
 	if p.source != "" {
 		s := extend.ParseRunSource(p.source)
 		req.Source = &s
-	}
-	if p.sourceID != "" {
-		sid := extend.RunSourceID(p.sourceID)
-		req.SourceID = &sid
-	}
-	if p.fileName != "" {
-		req.FileNameContains = extend.String(p.fileName)
-	}
-	if p.limit > 0 {
-		ps := extend.MaxPageSize(p.limit)
-		req.MaxPageSize = &ps
-	}
-	if pageToken != "" {
-		req.NextPageToken = extend.String(pageToken)
 	}
 	resp, err := cli.ParseRuns.List(ctx, req)
 	if err != nil {
@@ -643,11 +672,20 @@ func listParsePage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 	for _, r := range resp.Data {
 		rows = append(rows, parseRow(r))
 	}
-	return rows, resp, derefString(resp.NextPageToken), nil
+	return rows, resp, extendx.Deref(resp.NextPageToken), nil
 }
 
 func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
-	req := &extend.ClassifyRunsListRequest{}
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.ClassifyRunsListRequest{
+		BatchID: common.BatchID, SourceID: common.SourceID,
+		FileNameContains: common.FileNameContains,
+		SortBy:           common.SortBy, SortDir: common.SortDir,
+		MaxPageSize: common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
 	if p.status != "" {
 		s := extend.ProcessorRunStatus(p.status)
 		req.Status = &s
@@ -655,40 +693,9 @@ func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListPara
 	if p.using != "" {
 		req.ClassifierID = extend.String(p.using)
 	}
-	if p.batchID != "" {
-		req.BatchID = extend.String(p.batchID)
-	}
 	if p.source != "" {
 		s := extend.RunSource(p.source)
 		req.Source = &s
-	}
-	if p.sourceID != "" {
-		sid := extend.RunSourceID(p.sourceID)
-		req.SourceID = &sid
-	}
-	if p.fileName != "" {
-		req.FileNameContains = extend.String(p.fileName)
-	}
-	if p.sortBy != "" {
-		sb, err := extend.NewSortByFromString(p.sortBy)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
-		}
-		req.SortBy = &sb
-	}
-	if p.sortDir != "" {
-		sd, err := extend.NewSortDirFromString(p.sortDir)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort: %w", err)
-		}
-		req.SortDir = &sd
-	}
-	if p.limit > 0 {
-		ps := extend.MaxPageSize(p.limit)
-		req.MaxPageSize = &ps
-	}
-	if pageToken != "" {
-		req.NextPageToken = extend.String(pageToken)
 	}
 	resp, err := cli.ClassifyRuns.List(ctx, req)
 	if err != nil {
@@ -698,11 +705,20 @@ func listClassifyPage(ctx context.Context, cli *sdkclient.Client, p runsListPara
 	for _, r := range resp.Data {
 		rows = append(rows, classifySummaryRow(r))
 	}
-	return rows, resp, derefString(resp.NextPageToken), nil
+	return rows, resp, extendx.Deref(resp.NextPageToken), nil
 }
 
 func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
-	req := &extend.SplitRunsListRequest{}
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.SplitRunsListRequest{
+		BatchID: common.BatchID, SourceID: common.SourceID,
+		FileNameContains: common.FileNameContains,
+		SortBy:           common.SortBy, SortDir: common.SortDir,
+		MaxPageSize: common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
 	if p.status != "" {
 		s := extend.ProcessorRunStatus(p.status)
 		req.Status = &s
@@ -710,40 +726,9 @@ func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 	if p.using != "" {
 		req.SplitterID = extend.String(p.using)
 	}
-	if p.batchID != "" {
-		req.BatchID = extend.String(p.batchID)
-	}
 	if p.source != "" {
 		s := extend.RunSource(p.source)
 		req.Source = &s
-	}
-	if p.sourceID != "" {
-		sid := extend.RunSourceID(p.sourceID)
-		req.SourceID = &sid
-	}
-	if p.fileName != "" {
-		req.FileNameContains = extend.String(p.fileName)
-	}
-	if p.sortBy != "" {
-		sb, err := extend.NewSortByFromString(p.sortBy)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
-		}
-		req.SortBy = &sb
-	}
-	if p.sortDir != "" {
-		sd, err := extend.NewSortDirFromString(p.sortDir)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort: %w", err)
-		}
-		req.SortDir = &sd
-	}
-	if p.limit > 0 {
-		ps := extend.MaxPageSize(p.limit)
-		req.MaxPageSize = &ps
-	}
-	if pageToken != "" {
-		req.NextPageToken = extend.String(pageToken)
 	}
 	resp, err := cli.SplitRuns.List(ctx, req)
 	if err != nil {
@@ -753,44 +738,29 @@ func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 	for _, r := range resp.Data {
 		rows = append(rows, splitSummaryRow(r))
 	}
-	return rows, resp, derefString(resp.NextPageToken), nil
+	return rows, resp, extendx.Deref(resp.NextPageToken), nil
 }
 
 func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
-	req := &extend.WorkflowRunsListRequest{}
+	// Workflow runs have no source/sourceId filters at the server;
+	// common.SourceID is ignored here (silently — the CLI flag is
+	// documented as ignored for --type workflow).
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.WorkflowRunsListRequest{
+		BatchID:          common.BatchID,
+		FileNameContains: common.FileNameContains,
+		SortBy:           common.SortBy, SortDir: common.SortDir,
+		MaxPageSize: common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
 	if p.status != "" {
 		s := extend.WorkflowRunStatus(p.status)
 		req.Status = &s
 	}
 	if p.using != "" {
 		req.WorkflowID = extend.String(p.using)
-	}
-	if p.batchID != "" {
-		req.BatchID = extend.String(p.batchID)
-	}
-	if p.fileName != "" {
-		req.FileNameContains = extend.String(p.fileName)
-	}
-	if p.sortBy != "" {
-		sb, err := extend.NewSortByFromString(p.sortBy)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort-by: %w", err)
-		}
-		req.SortBy = &sb
-	}
-	if p.sortDir != "" {
-		sd, err := extend.NewSortDirFromString(p.sortDir)
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("--sort: %w", err)
-		}
-		req.SortDir = &sd
-	}
-	if p.limit > 0 {
-		ps := extend.MaxPageSize(p.limit)
-		req.MaxPageSize = &ps
-	}
-	if pageToken != "" {
-		req.NextPageToken = extend.String(pageToken)
 	}
 	resp, err := cli.WorkflowRuns.List(ctx, req)
 	if err != nil {
@@ -800,7 +770,7 @@ func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListPara
 	for _, r := range resp.Data {
 		rows = append(rows, workflowSummaryRow(r))
 	}
-	return rows, resp, derefString(resp.NextPageToken), nil
+	return rows, resp, extendx.Deref(resp.NextPageToken), nil
 }
 
 func extractSummaryRow(r *extend.ExtractRunSummary) []string {
@@ -808,7 +778,7 @@ func extractSummaryRow(r *extend.ExtractRunSummary) []string {
 	if r.Extractor != nil {
 		name = r.Extractor.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
 }
 
 func parseRow(r *extend.ParseRun) []string {
@@ -821,7 +791,7 @@ func parseRow(r *extend.ParseRun) []string {
 	created := ""
 	if r != nil {
 		if t, ok := r.GetExtraProperties()["createdAt"].(string); ok {
-			created = relTime(t)
+			created = relTimeFromISO(t)
 		}
 	}
 	// Parse runs have no processor reference, so the "processor"
@@ -834,7 +804,7 @@ func classifySummaryRow(r *extend.ClassifyRunSummary) []string {
 	if r.Classifier != nil {
 		name = r.Classifier.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
 }
 
 func splitSummaryRow(r *extend.SplitRunSummary) []string {
@@ -842,7 +812,7 @@ func splitSummaryRow(r *extend.SplitRunSummary) []string {
 	if r.Splitter != nil {
 		name = r.Splitter.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt.Format(time.RFC3339))}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
 }
 
 func workflowSummaryRow(r *extend.WorkflowRunSummary) []string {
@@ -850,23 +820,25 @@ func workflowSummaryRow(r *extend.WorkflowRunSummary) []string {
 	if r.Workflow != nil {
 		name = r.Workflow.Name
 	}
-	created := ""
+	// WorkflowRunSummary has no CreatedAt; InitialRunAt is the
+	// closest proxy and matches what the old hand-rolled client
+	// rendered. It's *time.Time; relTime tolerates the zero value
+	// so we can dereference unconditionally with a nil guard.
+	var created time.Time
 	if r.InitialRunAt != nil {
-		created = r.InitialRunAt.Format(time.RFC3339)
+		created = *r.InitialRunAt
 	}
 	return []string{r.ID, string(r.Status), name, relTime(created)}
 }
 
-func relTime(iso string) string {
-	if iso == "" {
+// relTime renders a timestamp as a human-readable relative duration
+// ("5m ago", "2h ago", "3d ago"). For timestamps older than 30 days it
+// falls back to an absolute YYYY-MM-DD format so the output stays
+// short. The zero time renders as "" so callers can pass a pointer
+// dereference without an extra nil check.
+func relTime(t time.Time) string {
+	if t.IsZero() {
 		return ""
-	}
-	t, err := time.Parse(time.RFC3339Nano, iso)
-	if err != nil {
-		t, err = time.Parse(time.RFC3339, iso)
-		if err != nil {
-			return iso
-		}
 	}
 	d := time.Since(t)
 	switch {
@@ -880,6 +852,26 @@ func relTime(iso string) string {
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
 	return t.Format("2006-01-02")
+}
+
+// relTimeFromISO parses an RFC 3339 string and renders it via relTime.
+// Used by call paths that receive timestamps as strings — primarily
+// the ParseRun.createdAt field (which the SDK's typed struct doesn't
+// model, so we pull it out of extraProperties as a string) and tests
+// that synthesize timestamps. An unparseable input passes through
+// verbatim so test ergonomics around `not-a-date` keep working.
+func relTimeFromISO(iso string) string {
+	if iso == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339Nano, iso)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, iso)
+		if err != nil {
+			return iso
+		}
+	}
+	return relTime(t)
 }
 
 func newRunsCancelDoc(app *App) *CommandDoc {

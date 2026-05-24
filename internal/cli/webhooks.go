@@ -129,9 +129,9 @@ subscriptions list' to see what each endpoint is subscribed to.
 				}
 				pages = append(pages, page)
 				for _, ep := range page.Data {
-					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt.Format(time.RFC3339))})
+					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt)})
 				}
-				next := derefString(page.NextPageToken)
+				next := extendx.Deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
@@ -569,9 +569,9 @@ classifier, splitter, or workflow) and a set of event types. Use
 				}
 				pages = append(pages, page)
 				for _, s := range page.Data {
-					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt.Format(time.RFC3339))})
+					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt)})
 				}
-				next := derefString(page.NextPageToken)
+				next := extendx.Deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}

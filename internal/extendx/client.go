@@ -1,6 +1,7 @@
 package extendx
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,16 +16,15 @@ import (
 )
 
 // DefaultHTTPTimeout is applied to the HTTP client every API call goes
-// through, except uploads (see UploadTimeout). Tuned for the common
+// through, except uploads (see UploadOption). Tuned for the common
 // case of small JSON request/response payloads.
 const DefaultHTTPTimeout = 60 * time.Second
 
-// UserAgent is the value sent on every request. We override the SDK's
-// generic identifier so server-side analytics and logs continue to see
-// the CLI as the origin. The version-resolver is wired in by the cli
-// package at construction time so this package doesn't take a hard
-// dependency on internal/version.
-var UserAgent = "extend-cli/dev"
+// DefaultUserAgent is the User-Agent sent when Config.UserAgent is
+// empty. Cli callers should set Config.UserAgent to a version-aware
+// string ("extend-cli/<version>") so server logs identify the CLI
+// release; this constant exists as a safe fallback.
+const DefaultUserAgent = "extend-cli/dev"
 
 // Config is the CLI-side, env-resolved view of all knobs that affect
 // how the SDK client is built. NewClient consumes it once per command
@@ -49,6 +49,10 @@ type Config struct {
 	// WorkspaceID is sent as X-Extend-Workspace-Id on every request.
 	// Required for org-scoped API keys.
 	WorkspaceID string
+	// UserAgent overrides the User-Agent header. Empty falls back to
+	// DefaultUserAgent. The CLI sets this to "extend-cli/<version>"
+	// so server-side analytics see the CLI release.
+	UserAgent string
 	// Debug, when non-nil, receives one log line per HTTP request and
 	// response. Hooked in via a custom http.RoundTripper.
 	Debug io.Writer
@@ -82,8 +86,12 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	// our values AFTER cloning, so our entry wins. Same trick is used
 	// for X-Extend-Workspace-Id (no SDK option for it) and User-Agent
 	// (the SDK's default identifies the SDK library, not the CLI).
+	ua := cfg.UserAgent
+	if ua == "" {
+		ua = DefaultUserAgent
+	}
 	headers := http.Header{}
-	headers.Set("User-Agent", UserAgent)
+	headers.Set("User-Agent", ua)
 	if cfg.APIVersion != "" {
 		headers.Set("x-extend-api-version", cfg.APIVersion)
 	}
@@ -226,99 +234,72 @@ func apiErrorFromTypedBody(status int, header http.Header, body *extend.APIError
 
 // populateFromBodyString best-effort parses a string body that looks
 // like {"code": "...", "message": "...", "requestId": "..."} or
-// {"error": {...}} and fills the corresponding APIError fields.
-// Anything else is treated as a free-form message.
+// {"error": {...}} and fills the corresponding APIError fields. The
+// SDK delivers the raw response body (after status codes it doesn't
+// have a typed wrapper for) as the .err of a *core.APIError; we read
+// .Error() to recover the body bytes.
+//
+// Anything that doesn't decode as the standard envelope falls
+// through to treating the entire string as the message field, which
+// is the right behaviour for plain-text 502s from a CDN.
 func populateFromBodyString(out *APIError, bodyErr error) {
 	if bodyErr == nil {
 		return
 	}
-	s := bodyErr.Error()
-	if s == "" {
+	body := bodyErr.Error()
+	if body == "" {
 		return
 	}
-	// Cheap structural check first to avoid pulling encoding/json
-	// into a hot error path when the body is plain text.
-	if !strings.HasPrefix(strings.TrimSpace(s), "{") {
-		out.Message = s
+	// Cheap structural check first: only attempt JSON parsing when
+	// the body actually looks like an object. Plain-text bodies
+	// (e.g. CDN-generated 502 HTML or proxy errors) skip the parse
+	// and surface verbatim as the message.
+	if !strings.HasPrefix(strings.TrimSpace(body), "{") {
+		out.Message = body
 		return
 	}
-	if parseStandardError(out, s) {
+	// The standard error envelope is {"code","message","requestId","retryable"}.
+	// Some endpoints wrap it as {"error": {...}}. Decode into a
+	// struct that captures both forms; the parser takes whichever
+	// is populated. If neither produces useful fields, fall through
+	// to message=body.
+	var env struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		RequestID string `json:"requestId"`
+		Retryable bool   `json:"retryable"`
+		Error     *struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"requestId"`
+			Retryable bool   `json:"retryable"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &env); err != nil {
+		out.Message = body
 		return
 	}
-	out.Message = s
-}
-
-// parseStandardError decodes the {code, message, retryable,
-// requestId} envelope or the {error: {...}} wrapper. We hand-roll
-// the parser instead of importing encoding/json into this file
-// because the SDK depends on it transitively; either is fine.
-func parseStandardError(out *APIError, body string) bool {
-	// Stupid-simple: look for "code":" segment and lift the value.
-	// Good enough for the error path; structurally invalid JSON
-	// falls through to message=full-body.
-	code := scrapeStringField(body, `"code"`)
-	msg := scrapeStringField(body, `"message"`)
-	rid := scrapeStringField(body, `"requestId"`)
-	if code == "" && msg == "" && rid == "" {
-		return false
+	src := env
+	if env.Error != nil {
+		src.Code = env.Error.Code
+		src.Message = env.Error.Message
+		src.RequestID = env.Error.RequestID
+		src.Retryable = env.Error.Retryable
 	}
-	if code != "" {
-		out.Code = code
+	if src.Code == "" && src.Message == "" && src.RequestID == "" {
+		out.Message = body
+		return
 	}
-	if msg != "" {
-		out.Message = msg
+	if src.Code != "" {
+		out.Code = src.Code
 	}
-	if rid != "" {
-		out.RequestID = rid
+	if src.Message != "" {
+		out.Message = src.Message
 	}
-	return true
-}
-
-// scrapeStringField finds the first occurrence of `key:"value"` in
-// body and returns value. Returns "" if not found. Handles escaped
-// quotes by simply not matching past them — for our error envelopes
-// this is good enough.
-func scrapeStringField(body, key string) string {
-	idx := strings.Index(body, key)
-	if idx < 0 {
-		return ""
+	if src.RequestID != "" {
+		out.RequestID = src.RequestID
 	}
-	rest := body[idx+len(key):]
-	colon := strings.IndexByte(rest, ':')
-	if colon < 0 {
-		return ""
-	}
-	rest = strings.TrimLeft(rest[colon+1:], " ")
-	if !strings.HasPrefix(rest, `"`) {
-		return ""
-	}
-	rest = rest[1:]
-	end := indexUnescapedQuote(rest)
-	if end < 0 {
-		return ""
-	}
-	return rest[:end]
-}
-
-func indexUnescapedQuote(s string) int {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\':
-			i++
-		case '"':
-			return i
-		}
-	}
-	return -1
-}
-
-// SetUserAgent overrides the default UserAgent. The cli package wires
-// this once at init so internal/version's Short() is reflected without
-// importing version here.
-func SetUserAgent(ua string) {
-	if ua != "" {
-		UserAgent = ua
-	}
+	out.Retryable = src.Retryable
 }
 
 // UploadOption returns a per-request option that swaps the SDK's

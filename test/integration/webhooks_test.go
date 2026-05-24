@@ -137,16 +137,21 @@ func TestWebhookSubscription_CreateUpdateDelete(t *testing.T) {
 
 	// Pick a real workflow ID to subscribe to. Subscriptions require an
 	// existing resource; the server validates the ID exists in the workspace.
+	// `workflows list -o json` emits the standard {"data":[...],"nextPageToken":...}
+	// list envelope, not a bare array — see TestWorkflowsList for the
+	// canonical decode shape.
 	wfRes := runExtend(t, env, "workflows", "list", "--limit", "1", "-o", "json")
 	wfRes.requireOK(t, "workflows", "list")
-	var wfArr []struct {
-		ID string `json:"id"`
+	var wfPage struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	wfRes.decodeJSON(t, &wfArr)
-	if len(wfArr) == 0 {
+	wfRes.decodeJSON(t, &wfPage)
+	if len(wfPage.Data) == 0 {
 		t.Skip("workspace has no workflows to subscribe to; skipping")
 	}
-	workflowID := wfArr[0].ID
+	workflowID := wfPage.Data[0].ID
 
 	subRes := runExtend(t, env,
 		"webhooks", "subscriptions", "create",

@@ -276,86 +276,65 @@ func stepRunInfo(step *extend.StepRun) (name, stepType, status string) {
 	if step == nil {
 		return "", "", ""
 	}
+	// Each variant exposes the same {Status, Step.{Name, Type}} shape
+	// but with kind-specific concrete types, so we can't iterate the
+	// union; we route every case through a single capture closure
+	// that takes the already-resolved fields.
+	capture := func(st extend.StepRunBaseStatus, n string, t *string) {
+		status = string(st)
+		name = n
+		if t != nil {
+			stepType = *t
+		}
+	}
 	switch step.StepType {
 	case "PARSE":
-		if step.Parse != nil {
-			status = string(step.Parse.Status)
-			if step.Parse.Step != nil {
-				name = step.Parse.Step.Name
-				if step.Parse.Step.Type != nil {
-					stepType = *step.Parse.Step.Type
-				}
-			}
+		if s := step.Parse; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "EXTRACT":
-		if step.Extract != nil {
-			status = string(step.Extract.Status)
-			if step.Extract.Step != nil {
-				name = step.Extract.Step.Name
-				if step.Extract.Step.Type != nil {
-					stepType = *step.Extract.Step.Type
-				}
-			}
+		if s := step.Extract; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "CLASSIFY":
-		if step.Classify != nil {
-			status = string(step.Classify.Status)
-			if step.Classify.Step != nil {
-				name = step.Classify.Step.Name
-				if step.Classify.Step.Type != nil {
-					stepType = *step.Classify.Step.Type
-				}
-			}
+		if s := step.Classify; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "SPLIT":
-		if step.Split != nil {
-			status = string(step.Split.Status)
-			if step.Split.Step != nil {
-				name = step.Split.Step.Name
-				if step.Split.Step.Type != nil {
-					stepType = *step.Split.Step.Type
-				}
-			}
+		if s := step.Split; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "MERGE_EXTRACT":
-		if step.MergeExtract != nil {
-			status = string(step.MergeExtract.Status)
-			if step.MergeExtract.Step != nil {
-				name = step.MergeExtract.Step.Name
-				if step.MergeExtract.Step.Type != nil {
-					stepType = *step.MergeExtract.Step.Type
-				}
-			}
+		if s := step.MergeExtract; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "CONDITIONAL_EXTRACT":
-		if step.ConditionalExtract != nil {
-			status = string(step.ConditionalExtract.Status)
-			if step.ConditionalExtract.Step != nil {
-				name = step.ConditionalExtract.Step.Name
-				if step.ConditionalExtract.Step.Type != nil {
-					stepType = *step.ConditionalExtract.Step.Type
-				}
-			}
+		if s := step.ConditionalExtract; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "RULE_VALIDATION":
-		if step.RuleValidation != nil {
-			status = string(step.RuleValidation.Status)
-			if step.RuleValidation.Step != nil {
-				name = step.RuleValidation.Step.Name
-				if step.RuleValidation.Step.Type != nil {
-					stepType = *step.RuleValidation.Step.Type
-				}
-			}
+		if s := step.RuleValidation; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	case "EXTERNAL_DATA_VALIDATION":
-		if step.ExternalDataValidation != nil {
-			status = string(step.ExternalDataValidation.Status)
-			if step.ExternalDataValidation.Step != nil {
-				name = step.ExternalDataValidation.Step.Name
-				if step.ExternalDataValidation.Step.Type != nil {
-					stepType = *step.ExternalDataValidation.Step.Type
-				}
-			}
+		if s := step.ExternalDataValidation; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
 		}
 	}
 	if stepType == "" {

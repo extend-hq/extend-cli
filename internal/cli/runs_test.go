@@ -345,15 +345,23 @@ func TestRelTime_Buckets(t *testing.T) {
 		{3 * 24 * time.Hour, "3d ago"},
 	}
 	for _, tc := range cases {
-		ts := now.Add(-tc.ago).Format(time.RFC3339Nano)
-		if got := relTime(ts); got != tc.want {
+		// Exercise both entry points (Time and ISO string) per case
+		// so they stay in sync if relTime's bucketing logic changes.
+		past := now.Add(-tc.ago)
+		if got := relTime(past); got != tc.want {
 			t.Errorf("relTime(%v ago) = %q, want %q", tc.ago, got, tc.want)
 		}
+		if got := relTimeFromISO(past.Format(time.RFC3339Nano)); got != tc.want {
+			t.Errorf("relTimeFromISO(%v ago) = %q, want %q", tc.ago, got, tc.want)
+		}
 	}
-	if got := relTime(""); got != "" {
-		t.Errorf("relTime('') = %q, want ''", got)
+	if got := relTime(time.Time{}); got != "" {
+		t.Errorf("relTime(zero) = %q, want ''", got)
 	}
-	if got := relTime("not-a-date"); got != "not-a-date" {
-		t.Errorf("relTime should pass through unparseable input, got %q", got)
+	if got := relTimeFromISO(""); got != "" {
+		t.Errorf("relTimeFromISO('') = %q, want ''", got)
+	}
+	if got := relTimeFromISO("not-a-date"); got != "not-a-date" {
+		t.Errorf("relTimeFromISO should pass through unparseable input, got %q", got)
 	}
 }

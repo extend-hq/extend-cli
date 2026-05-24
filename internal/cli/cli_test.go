@@ -157,44 +157,41 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	// UnmarshalJSON. Test fixtures historically didn't bother
 	// setting it because the hand-rolled client never validated.
 	// To keep the tests focused on behavior rather than serialization
-	// minutiae, we inject the discriminator here based on the ID
-	// prefix when the caller didn't provide one. A test that wants a
-	// non-default object literal (e.g. explicitly testing the SDK
+	// minutiae, we inject the discriminator on every map at every
+	// nesting level when the caller didn't provide one. A test that
+	// wants a non-default literal (e.g. explicitly exercising the SDK
 	// rejection path) can still pass `"object"` in the map directly.
-	if m, ok := v.(map[string]any); ok {
-		if _, has := m["object"]; !has {
-			if obj := inferObjectFromMap(m); obj != "" {
-				m["object"] = obj
-			}
-		}
-		// List responses always have object="list" plus a Data
-		// slice whose elements need their own discriminator. Walk
-		// the slice once when present so individual list items
-		// also pass SDK validation.
-		if data, ok := m["data"].([]any); ok {
-			for _, item := range data {
-				if im, ok := item.(map[string]any); ok {
-					if _, has := im["object"]; !has {
-						if obj := inferObjectFromMap(im); obj != "" {
-							im["object"] = obj
-						}
-					}
-				}
-			}
-		}
-		if data, ok := m["data"].([]map[string]any); ok {
-			for _, im := range data {
-				if _, has := im["object"]; !has {
-					if obj := inferObjectFromMap(im); obj != "" {
-						im["object"] = obj
-					}
-				}
-			}
-		}
-	}
+	autoInjectObject(v)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// autoInjectObject walks v recursively (objects + arrays) and sets
+// "object" on any map[string]any whose id-prefix the inferrer
+// recognises. Idempotent — values the caller already set are left
+// alone — and safe to call on any JSON-shaped value (it noops on
+// primitives).
+func autoInjectObject(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		if _, has := x["object"]; !has {
+			if obj := inferObjectFromMap(x); obj != "" {
+				x["object"] = obj
+			}
+		}
+		for _, child := range x {
+			autoInjectObject(child)
+		}
+	case []any:
+		for _, item := range x {
+			autoInjectObject(item)
+		}
+	case []map[string]any:
+		for _, item := range x {
+			autoInjectObject(item)
+		}
+	}
 }
 
 // inferObjectFromMap maps a response object back to its SDK
