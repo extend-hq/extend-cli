@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -286,8 +292,22 @@ func debugEnvTruthy(s string) bool {
 }
 
 func Execute() int {
+	// Wire Ctrl-C / SIGTERM to context cancellation so in-flight API
+	// calls (every command threads cmd.Context() into the SDK) abort
+	// promptly instead of the process being hard-killed mid-request.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	root := NewRoot()
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
+		// A signal-cancelled run is a user action, not a failure to
+		// debug. The signal context has no deadline, so a non-nil
+		// ctx.Err() here means a signal fired: report it quietly and
+		// exit 130 (128+SIGINT), the code shells expect for Ctrl-C.
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			return 130
+		}
 		printError(os.Stderr, err)
 		return 1
 	}
@@ -295,8 +315,13 @@ func Execute() int {
 }
 
 func printError(w *os.File, err error) {
-	pal := palette{enabled: isTerminal(w)}
+	formatError(w, palette{enabled: isTerminal(w)}, err)
+}
 
+// formatError renders err to w. Split from printError so it can be
+// tested against a buffer with a fixed (no-color) palette; printError
+// just supplies the terminal-derived palette for the real os.File.
+func formatError(w io.Writer, pal palette, err error) {
 	if apiErr, ok := extendx.AsAPIError(err); ok {
 		// Prefer the server-side error code when present; fall back to
 		// the HTTP status string otherwise.
@@ -313,6 +338,31 @@ func printError(w *os.File, err error) {
 		}
 		return
 	}
+
+	// Transport-level failures (DNS, connection refused, TLS, or an
+	// http.Client timeout from --http-timeout) surface as *url.Error.
+	// The raw dump is noisy and looks like a crash; classify it and put
+	// the underlying detail on a dim second line.
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			fmt.Fprintf(w, "%s request timed out\n", pal.Red("Error:"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend runs watch'"))
+		} else {
+			fmt.Fprintf(w, "%s could not reach the Extend API\n", pal.Red("Error:"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("check connectivity, --region/--base-url, and that the API is reachable"))
+		}
+		fmt.Fprintf(w, "       %s\n", pal.Dimf("detail: %v", urlErr))
+		return
+	}
+
+	// A bare deadline not wrapped by the HTTP client (rare). Classify it
+	// rather than dumping "context deadline exceeded".
+	if errors.Is(err, context.DeadlineExceeded) {
+		fmt.Fprintf(w, "%s request timed out (raise --http-timeout / EXTEND_HTTP_TIMEOUT)\n", pal.Red("Error:"))
+		return
+	}
+
 	fmt.Fprintf(w, "%s %v\n", pal.Red("Error:"), err)
 }
 
