@@ -62,6 +62,73 @@ jobs:
         working-directory: test/integration
         run: go vet ./...
 
+  # The evals/runner module (skill-eval harness) has its own go.mod and is
+  # only otherwise exercised by the dispatch-only skill-evals workflow. Keep
+  # it compiling, formatted, and unit-tested on every PR so harness changes
+  # don't bit-rot. The unit tests here are pure (no network, no claude/codex
+  # binaries) — the model-driving runs only happen under skill-evals.
+  evals-build:
+    name: evals runner build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        working-directory: evals/runner
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Unformatted files in evals/runner (run 'gofmt -w'):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: evals/runner
+        run: go vet ./...
+
+      - name: go build
+        working-directory: evals/runner
+        run: go build ./...
+
+      - name: go test
+        working-directory: evals/runner
+        run: go test -count=1 ./...
+
+  # Verify go.mod/go.sum are tidy in every module. Catches the common drift
+  # where a dependency added via `go get` keeps a stale `// indirect` marker
+  # (or an unused require lingers) because `go mod tidy` was never re-run.
+  # The Go version is pinned via go-version-file so tidy output is
+  # deterministic across runs.
+  mod-tidy:
+    name: go mod tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: verify modules are tidy
+        run: |
+          set -euo pipefail
+          for dir in . test/integration evals/runner; do
+            echo "::group::go mod tidy ($dir)"
+            (cd "$dir" && go mod tidy)
+            echo "::endgroup::"
+          done
+          if ! git diff --exit-code; then
+            echo "::error::go.mod/go.sum not tidy. Run 'go mod tidy' in each module (., test/integration, evals/runner) and commit the result."
+            exit 1
+          fi
+
   # Cross-compile the CLI binary for every supported platform. We don't run
   # the binary here — just verify the code compiles for each target.
   cross-compile:
