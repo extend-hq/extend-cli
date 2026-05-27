@@ -171,6 +171,43 @@ func TestExtract_FailedRunSurfacesAsError(t *testing.T) {
 	}
 }
 
+// TestExtract_FailedRunSurfacesReasonAndMessage locks the parity fix:
+// extract previously returned a bare "run X failed" while the server
+// supplied a coded failureReason and a human failureMessage. Both must
+// now appear in the error line so an extract failure is self-diagnosing
+// like classify/split/workflow already were.
+func TestExtract_FailedRunSurfacesReasonAndMessage(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			writeJSON(w, 200, map[string]any{"id": "exr_fail", "status": "PENDING"})
+		case r.Method == http.MethodGet:
+			writeJSON(w, 200, map[string]any{
+				"id":             "exr_fail",
+				"status":         "FAILED",
+				"failureReason":  "FAILED_TO_PROCESS_FILE",
+				"failureMessage": "OCR engine could not read page 3.",
+			})
+		}
+	})
+	ta := newTestApp(t, srv)
+
+	err := runExtract(context.Background(), ta.app, extractParams{
+		input:       "file_xK9",
+		extractorID: "ex_abc",
+		wait:        true,
+		timeout:     2 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected error for FAILED run, got nil")
+	}
+	for _, want := range []string{"FAILED_TO_PROCESS_FILE", "OCR engine could not read page 3."} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
 func TestExtract_APIErrorRenderedNicely(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 404, "NOT_FOUND", "Resource ex_doesnotexist not found")

@@ -184,10 +184,7 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 	}
 	switch extendx.RunStatus(final.Status) {
 	case extendx.StatusFailed:
-		if final.FailureMessage != nil && *final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, *final.FailureMessage)
-		}
-		return fmt.Errorf("run %s failed", final.ID)
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
 	case extendx.StatusCancelled:
 		return fmt.Errorf("run %s was cancelled", final.ID)
 	}

@@ -222,7 +222,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 	}
 	switch extendx.RunStatus(final.Status) {
 	case extendx.StatusFailed:
-		return fmt.Errorf("run %s failed", final.ID)
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
 	case extendx.StatusCancelled:
 		return fmt.Errorf("run %s was cancelled", final.ID)
 	}

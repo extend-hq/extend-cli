@@ -192,10 +192,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		return err
 	}
 	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
-		if final.FailureMessage != nil && *final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, *final.FailureMessage)
-		}
-		return fmt.Errorf("run %s failed", final.ID)
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
 	}
 	return nil
 }

@@ -3,9 +3,31 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 )
+
+// runFailureError builds the error returned when a run reaches a
+// terminal FAILED state. It folds the server's coded failureReason
+// (e.g. PRE_PROCESSING_FAILURE) and the human-readable failureMessage
+// into the message when present, so the stderr "Error:" line is
+// self-diagnosing instead of a bare "run X failed". Both fields are
+// *string on every run type; nil/empty entries are skipped, and when
+// neither is set we fall back to the bare form.
+func runFailureError(id string, reason, message *string) error {
+	var parts []string
+	if reason != nil && *reason != "" {
+		parts = append(parts, *reason)
+	}
+	if message != nil && *message != "" {
+		parts = append(parts, *message)
+	}
+	if len(parts) > 0 {
+		return fmt.Errorf("run %s failed: %s", id, strings.Join(parts, ": "))
+	}
+	return fmt.Errorf("run %s failed", id)
+}
 
 // formatActionWaitError wraps an error from a wait helper into the
 // message we want to show users of an action verb (extract, classify,

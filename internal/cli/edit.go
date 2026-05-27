@@ -198,11 +198,11 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	}
 
 	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
+		// Best-effort render of the (failed) result before returning the
+		// failure error; a render error here is secondary to the run
+		// failure we're about to report.
 		_ = renderEditResult(app, final)
-		if final.FailureMessage != nil && *final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, *final.FailureMessage)
-		}
-		return fmt.Errorf("run %s failed", final.ID)
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
 	}
 
 	if p.outputFile != "" {
