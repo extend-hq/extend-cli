@@ -26,6 +26,22 @@ go run ./cmd/runner
 
 # Run a subset for fast iteration.
 go run ./cmd/runner -cases T+1,S-1 -harnesses claude_code -runs 1
+
+# Compare two Claude models head-to-head against Codex. Each -claude-models
+# entry runs as its own harness named claude_code:<model>; -harnesses still
+# filters by family ("claude_code" selects every pinned Claude variant).
+go run ./cmd/runner -claude-models claude-opus-4-7,claude-sonnet-4-6
+```
+
+The summary then prints a per-harness table so the model-vs-model delta
+is visible at a glance:
+
+```
+=== Per-harness ===
+harness                              with_skill  without_skill        delta
+claude_code:claude-opus-4-7              94.2%          57.1%       +37.1pp
+claude_code:claude-sonnet-4-6             96.5%          59.0%       +37.5pp
+codex                                    91.0%          55.0%       +36.0pp
 ```
 
 Per-run artifacts land in `extend-cli-evals-workspace/iteration-N/`

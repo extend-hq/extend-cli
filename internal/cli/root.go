@@ -1,24 +1,38 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/version"
 )
 
 func versionShort() string { return version.Short() }
 
+// userAgent renders the CLI's User-Agent header value, e.g.
+// "extend-cli/1.2.3". Recomputed per call so tests that override
+// version.Short() see fresh output.
+func userAgent() string {
+	return "extend-cli/" + version.Short()
+}
+
 type App struct {
 	IO        *iostreams.IOStreams
-	NewClient func() (*client.Client, error)
+	NewClient func() (*sdkclient.Client, error)
 	Format    string
 	JQ        string
 	Workspace string
@@ -27,10 +41,8 @@ type App struct {
 	Debug     bool
 	// HTTPTimeout caps each individual HTTP request (POST/GET).
 	// Distinct from per-command --timeout (the overall wait budget
-	// for a run to reach a terminal state). Zero leaves the client
-	// default in place. Uploads never honor this — they use a
-	// separate untimed client because end-to-end http.Client
-	// timeouts are hostile to large multipart bodies.
+	// for a run to reach a terminal state). Zero leaves the SDK's
+	// default timeout in place.
 	HTTPTimeout time.Duration
 }
 
@@ -133,51 +145,54 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&app.Env, "env", "", "Environment label that selects the API key: e.g. --env test reads EXTEND_TEST_API_KEY instead of EXTEND_API_KEY (or EXTEND_ENV)")
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
-	app.NewClient = func() (*client.Client, error) {
+	app.NewClient = func() (*sdkclient.Client, error) {
 		keyVar := apiKeyEnvVar(app.Env)
 		key := os.Getenv(keyVar)
 		if key == "" {
 			return nil, fmt.Errorf("%s environment variable is required", keyVar)
 		}
-		c := client.New(key)
 
-		region := app.Region
-		if region == "" {
-			region = os.Getenv(client.EnvRegion)
+		cfg := extendx.Config{
+			APIKey:      key,
+			Region:      app.Region,
+			WorkspaceID: app.Workspace,
+			UserAgent:   userAgent(),
 		}
-		if region != "" {
-			url, ok := client.RegionBaseURL(region)
-			if !ok {
-				return nil, fmt.Errorf("unknown region %q (known: %v)", region, client.KnownRegions())
-			}
-			c.BaseURL = url
+		if cfg.Region == "" {
+			cfg.Region = os.Getenv(envRegion)
 		}
-		if v := os.Getenv(client.EnvBaseURL); v != "" {
-			c.BaseURL = v
+		if cfg.WorkspaceID == "" {
+			cfg.WorkspaceID = os.Getenv(envWorkspaceID)
 		}
-		if v := os.Getenv(client.EnvAPIVersion); v != "" {
-			c.APIVersion = v
+		// EXTEND_BASE_URL always wins over region.
+		if v := os.Getenv(envBaseURL); v != "" {
+			cfg.BaseURL = v
 		}
-
-		ws := app.Workspace
-		if ws == "" {
-			ws = os.Getenv(client.EnvWorkspaceID)
+		if v := os.Getenv(envAPIVersion); v != "" {
+			cfg.APIVersion = v
 		}
-		c.WorkspaceID = ws
 
 		// Debug logging: --debug flag wins; otherwise honor EXTEND_DEBUG.
 		// Truthy values: "1", "true", "yes", "on" (case-insensitive).
-		if app.Debug || debugEnvTruthy(os.Getenv(client.EnvDebug)) {
-			c.Debug = app.IO.ErrOut
+		if app.Debug || debugEnvTruthy(os.Getenv(envDebug)) {
+			cfg.Debug = app.IO.ErrOut
 		}
 
 		// Per-HTTP-request timeout: --http-timeout flag wins; otherwise
-		// honor EXTEND_HTTP_TIMEOUT. Both override the client default.
-		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(client.EnvHTTPTimeout)); ok {
-			c.SetHTTPTimeout(d)
+		// honor EXTEND_HTTP_TIMEOUT. Both override the SDK default.
+		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(envHTTPTimeout)); ok {
+			// A flag value of 0 is impossible to express to extendx
+			// (0 means "leave default"). We use -1 as a sentinel for
+			// "explicitly disable timeout" so the underlying http.Client
+			// timeout becomes zero (no end-to-end deadline).
+			if d == 0 {
+				cfg.HTTPTimeout = -1
+			} else {
+				cfg.HTTPTimeout = d
+			}
 		}
 
-		return c, nil
+		return extendx.NewClient(cfg)
 	}
 
 	root.AddCommand(newVersionCommand(app))
@@ -194,8 +209,8 @@ func NewRoot() *cobra.Command {
 //  2. EXTEND_HTTP_TIMEOUT env (parseable as time.Duration; "60s",
 //     "2m", etc.). Malformed values are silently ignored — a typo
 //     shouldn't break every command. Surface it via --debug.
-//  3. Neither set → return ok=false; caller leaves the client default
-//     (DefaultHTTPTimeout) in place.
+//  3. Neither set → return ok=false; caller leaves the SDK default in
+//     place.
 //
 // A returned timeout of 0 is meaningful: it disables the http.Client
 // timeout entirely, leaving the context as the only deadline. Useful
@@ -226,10 +241,10 @@ func resolveHTTPTimeout(flag time.Duration, env string) (time.Duration, bool) {
 // label apply to every command, so their fallbacks live here.
 func applyEnvDefaults(app *App) {
 	if app.Format == "" {
-		app.Format = os.Getenv(client.EnvOutput)
+		app.Format = os.Getenv(envOutput)
 	}
 	if app.Env == "" {
-		app.Env = os.Getenv(client.EnvEnv)
+		app.Env = os.Getenv(envEnv)
 	}
 }
 
@@ -242,7 +257,7 @@ func applyEnvDefaults(app *App) {
 func apiKeyEnvVar(envLabel string) string {
 	envLabel = strings.TrimSpace(envLabel)
 	if envLabel == "" {
-		return client.EnvAPIKey
+		return envAPIKey
 	}
 	upper := strings.Map(func(r rune) rune {
 		switch {
@@ -258,7 +273,7 @@ func apiKeyEnvVar(envLabel string) string {
 		return -1
 	}, envLabel)
 	if upper == "" {
-		return client.EnvAPIKey
+		return envAPIKey
 	}
 	return "EXTEND_" + upper + "_API_KEY"
 }
@@ -277,8 +292,22 @@ func debugEnvTruthy(s string) bool {
 }
 
 func Execute() int {
+	// Wire Ctrl-C / SIGTERM to context cancellation so in-flight API
+	// calls (every command threads cmd.Context() into the SDK) abort
+	// promptly instead of the process being hard-killed mid-request.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	root := NewRoot()
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
+		// A signal-cancelled run is a user action, not a failure to
+		// debug. The signal context has no deadline, so a non-nil
+		// ctx.Err() here means a signal fired: report it quietly and
+		// exit 130 (128+SIGINT), the code shells expect for Ctrl-C.
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			return 130
+		}
 		printError(os.Stderr, err)
 		return 1
 	}
@@ -286,11 +315,21 @@ func Execute() int {
 }
 
 func printError(w *os.File, err error) {
-	pal := palette{enabled: isTerminal(w)}
+	formatError(w, palette{enabled: isTerminal(w)}, err)
+}
 
-	var apiErr *client.APIError
-	if errors.As(err, &apiErr) {
-		fmt.Fprintf(w, "%s %s\n", pal.Red("Error:"), apiErr.Code)
+// formatError renders err to w. Split from printError so it can be
+// tested against a buffer with a fixed (no-color) palette; printError
+// just supplies the terminal-derived palette for the real os.File.
+func formatError(w io.Writer, pal palette, err error) {
+	if apiErr, ok := extendx.AsAPIError(err); ok {
+		// Prefer the server-side error code when present; fall back to
+		// the HTTP status string otherwise.
+		head := apiErr.Code
+		if head == "" {
+			head = fmt.Sprintf("HTTP %d", apiErr.StatusCode)
+		}
+		fmt.Fprintf(w, "%s %s\n", pal.Red("Error:"), head)
 		if msg := strings.TrimSpace(apiErr.Message); msg != "" {
 			fmt.Fprintf(w, "       %s\n", msg)
 		}
@@ -299,6 +338,31 @@ func printError(w *os.File, err error) {
 		}
 		return
 	}
+
+	// Transport-level failures (DNS, connection refused, TLS, or an
+	// http.Client timeout from --http-timeout) surface as *url.Error.
+	// The raw dump is noisy and looks like a crash; classify it and put
+	// the underlying detail on a dim second line.
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			fmt.Fprintf(w, "%s request timed out\n", pal.Red("Error:"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend runs watch'"))
+		} else {
+			fmt.Fprintf(w, "%s could not reach the Extend API\n", pal.Red("Error:"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("check connectivity, --region/--base-url, and that the API is reachable"))
+		}
+		fmt.Fprintf(w, "       %s\n", pal.Dimf("detail: %v", urlErr))
+		return
+	}
+
+	// A bare deadline not wrapped by the HTTP client (rare). Classify it
+	// rather than dumping "context deadline exceeded".
+	if errors.Is(err, context.DeadlineExceeded) {
+		fmt.Fprintf(w, "%s request timed out (raise --http-timeout / EXTEND_HTTP_TIMEOUT)\n", pal.Red("Error:"))
+		return
+	}
+
 	fmt.Fprintf(w, "%s %v\n", pal.Red("Error:"), err)
 }
 

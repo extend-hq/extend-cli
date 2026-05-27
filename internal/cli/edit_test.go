@@ -61,7 +61,7 @@ func TestSkillFillPDFRecipeMatchesEditHelp(t *testing.T) {
 func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"fields":[{"key":"foo"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{"foo":{"type":"string"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,8 +92,11 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	if !strings.Contains(postBody, `"config":{`) {
 		t.Errorf("body must nest config; got %s", postBody)
 	}
-	if !strings.Contains(postBody, `"schema":{"fields":[{"key":"foo"}]}`) {
-		t.Errorf("schema must be inside config; got %s", postBody)
+	// The SDK re-serializes schema field order (typed structs
+	// marshal in declared field order, not source order). Assert
+	// structural containment rather than exact byte equality.
+	if !strings.Contains(postBody, `"schema":{`) || !strings.Contains(postBody, `"foo":{"type":"string"}`) {
+		t.Errorf("schema must be inside config and carry the foo property; got %s", postBody)
 	}
 	if !strings.Contains(postBody, `"instructions":"be thorough"`) {
 		t.Errorf("instructions must be inside config; got %s", postBody)
@@ -112,7 +115,7 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"fields":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(tmp, "filled.pdf")
@@ -165,7 +168,7 @@ func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 func TestEdit_OutputFileStdoutDoesNotAppendRunJSON(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"fields":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	storage := mockStorage(t, "filled-pdf-bytes")
@@ -248,7 +251,7 @@ func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
 func TestEdit_ProcessedButNoOutputFileEmitsWarning(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"fields":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +298,7 @@ func TestEdit_ProcessedButNoOutputFileEmitsWarning(t *testing.T) {
 func TestEdit_ProcessedWithOutputFileSilent(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	if err := os.WriteFile(schema, []byte(`{"fields":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	storage := mockStorage(t, "filled-bytes")
@@ -335,7 +338,7 @@ func TestEdit_ProcessedWithOutputFileSilent(t *testing.T) {
 func TestEdit_FailedRunSurfacesFailureMessage(t *testing.T) {
 	tmp := t.TempDir()
 	schema := filepath.Join(tmp, "schema.json")
-	_ = os.WriteFile(schema, []byte(`{}`), 0o600)
+	_ = os.WriteFile(schema, []byte(`{"type":"object","properties":{}}`), 0o600)
 
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {

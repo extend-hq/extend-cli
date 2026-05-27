@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // Annotation keys used on Cobra commands. These are now an internal
@@ -25,7 +25,7 @@ const (
 	// AnnotOutputPipe: format rendered when stdout is not a terminal and no
 	// --output flag is set. Value must be a member of OutputModes.
 	AnnotOutputPipe = "output.pipe"
-	// AnnotWaitProfile: which client.WaitProfile this command's wait loop
+	// AnnotWaitProfile: which extendx.WaitProfile this command's wait loop
 	// uses. Value must be a member of WaitProfileNames.
 	AnnotWaitProfile = "wait.profile"
 	// AnnotWaitDefault: whether the command blocks by default ("true") or
@@ -87,8 +87,8 @@ func validOutputMode(s string) bool {
 // WaitProfileNames is the set of valid annotation values for AnnotWaitProfile,
 // including "n/a" for commands that don't wait.
 var WaitProfileNames = []string{
-	string(client.ProfileShort),
-	string(client.ProfileLong),
+	string(extendx.ProfileShort),
+	string(extendx.ProfileLong),
 	"n/a",
 }
 

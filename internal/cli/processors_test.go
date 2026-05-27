@@ -55,8 +55,14 @@ func TestExtractorsCreate_OverlaysNameOntoFromFile(t *testing.T) {
 	ta := newTestApp(t, srv)
 	cmd := findCmd(t, ta.app, "extractors", "create")
 
+	// The SDK's ExtractorsCreateRequest has name + cloneExtractorId +
+	// config + generate; we use cloneExtractorId to assert that
+	// non-name fields from the file are preserved when --name
+	// overlays. (Earlier versions of this test used "description"
+	// which existed on the hand-rolled client but not in the SDK
+	// schema.)
 	tmp := t.TempDir() + "/body.json"
-	if err := os.WriteFile(tmp, []byte(`{"description":"from file","schema":{"type":"object"}}`), 0o600); err != nil {
+	if err := os.WriteFile(tmp, []byte(`{"cloneExtractorId":"ex_template_abc"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,8 +74,8 @@ func TestExtractorsCreate_OverlaysNameOntoFromFile(t *testing.T) {
 	if !strings.Contains(body, `"name":"overlay-name"`) {
 		t.Errorf("expected --name to overlay onto body, got: %s", body)
 	}
-	if !strings.Contains(body, `"description":"from file"`) {
-		t.Errorf("expected description from file preserved, got: %s", body)
+	if !strings.Contains(body, `"cloneExtractorId":"ex_template_abc"`) {
+		t.Errorf("expected cloneExtractorId from file preserved, got: %s", body)
 	}
 }
 

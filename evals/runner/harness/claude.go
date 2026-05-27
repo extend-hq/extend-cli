@@ -16,9 +16,25 @@ import (
 // HOME pointed at our scratch home).
 type Claude struct {
 	Bin string // path to `claude` binary; if empty, looked up on PATH
+
+	// Model pins the underlying model via `claude --model <Model>`.
+	// Empty leaves the binary's configured default in place. Set this
+	// to compare model versions side-by-side — each pinned model
+	// becomes its own named harness so the benchmark keeps their
+	// results separate.
+	Model string
 }
 
-func (c *Claude) Name() string { return "claude_code" }
+// Name is the harness identity used as a benchmark key, console label,
+// and on-disk path segment. Unpinned Claude stays "claude_code" for
+// backward compatibility; a pinned model appends ":<model>" so two
+// Claude variants don't collide in the same iteration.
+func (c *Claude) Name() string {
+	if c.Model == "" {
+		return "claude_code"
+	}
+	return "claude_code:" + c.Model
+}
 
 // Available returns nil if the harness is invocable.
 func (c *Claude) Available() error {
@@ -59,6 +75,9 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		// Per the Claude Code CLI: --disable-slash-commands "Disable all
 		// skills". Used for the without-skill baseline.
 		args = append(args, "--disable-slash-commands")
+	}
+	if c.Model != "" {
+		args = append(args, "--model", c.Model)
 	}
 	if opts.Tune.Effort != "" {
 		args = append(args, "--effort", opts.Tune.Effort)

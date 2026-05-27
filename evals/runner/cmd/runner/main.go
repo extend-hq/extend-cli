@@ -50,19 +50,20 @@ func main() {
 
 func run() error {
 	var (
-		evalsPath   = flag.String("evals", "../evals.json", "path to evals.json")
-		wsRoot      = flag.String("workspace", "", "workspace root (default: <repo>/../extend-cli-evals-workspace)")
-		iter        = flag.Int("iteration", 0, "iteration number (default: next free)")
-		caseList    = flag.String("cases", "", "comma-separated case IDs to run (default: all)")
-		harnList    = flag.String("harnesses", "", "comma-separated harness names: claude_code,codex (default: all available)")
-		runs        = flag.Int("runs", 1, "runs per (case, harness, mode, config) tuple")
-		timeout     = flag.Duration("timeout", 5*time.Minute, "per-run timeout")
-		concurrency = flag.Int("concurrency", 4, "max harness invocations to run in parallel")
-		effort      = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
-		fastMode    = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
-		noJudge     = flag.Bool("no-judge", false, "skip LLM-judge expectations (no Anthropic API calls); judge expectations report Skipped")
-		judgeModel  = flag.String("judge-model", "claude-opus-4-7", "model used by the LLM judge for `judge` expectations")
-		judgeEffort = flag.String("judge-effort", "low", "effort level for the judge: low|medium|high|xhigh|max (low recommended; judging is a simple classification task)")
+		evalsPath    = flag.String("evals", "../evals.json", "path to evals.json")
+		wsRoot       = flag.String("workspace", "", "workspace root (default: <repo>/../extend-cli-evals-workspace)")
+		iter         = flag.Int("iteration", 0, "iteration number (default: next free)")
+		caseList     = flag.String("cases", "", "comma-separated case IDs to run (default: all)")
+		harnList     = flag.String("harnesses", "", "comma-separated harness names: claude_code,codex (default: all available). Also matches model-pinned variants by family, e.g. claude_code selects claude_code:<model>")
+		claudeModels = flag.String("claude-models", "", "comma-separated model IDs to run the Claude harness under, e.g. claude-opus-4-7,claude-sonnet-4-6. Each becomes a separate harness named claude_code:<model>. Empty runs a single unpinned claude_code.")
+		runs         = flag.Int("runs", 1, "runs per (case, harness, mode, config) tuple")
+		timeout      = flag.Duration("timeout", 5*time.Minute, "per-run timeout")
+		concurrency  = flag.Int("concurrency", 4, "max harness invocations to run in parallel")
+		effort       = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
+		fastMode     = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
+		noJudge      = flag.Bool("no-judge", false, "skip LLM-judge expectations (no Anthropic API calls); judge expectations report Skipped")
+		judgeModel   = flag.String("judge-model", "claude-opus-4-7", "model used by the LLM judge for `judge` expectations")
+		judgeEffort  = flag.String("judge-effort", "low", "effort level for the judge: low|medium|high|xhigh|max (low recommended; judging is a simple classification task)")
 	)
 	flag.Parse()
 
@@ -90,7 +91,7 @@ func run() error {
 	}
 	fmt.Printf("stub: %s\n", stubBin)
 
-	drivers := pickHarnesses(*harnList)
+	drivers := pickHarnesses(*harnList, *claudeModels)
 	if len(drivers) == 0 {
 		return fmt.Errorf("no available harnesses (install with `mise install`?)")
 	}
@@ -304,18 +305,32 @@ func buildStub(iterDir string) (string, error) {
 }
 
 // pickHarnesses returns drivers for every harness that's both
-// available on PATH and (if -harnesses was set) requested by name.
-func pickHarnesses(filter string) []harness.Driver {
-	all := []harness.Driver{&harness.Claude{}, &harness.Codex{}}
-	wants := map[string]bool{}
-	if filter != "" {
-		for _, h := range strings.Split(filter, ",") {
-			wants[strings.TrimSpace(h)] = true
+// available on PATH and (if -harnesses was set) requested.
+//
+// The Claude family expands across claudeModels: with models set, one
+// claude_code:<model> driver is created per model; without, a single
+// unpinned claude_code. The -harnesses filter matches either the exact
+// Name() or the family prefix, so `-harnesses claude_code` selects all
+// pinned Claude variants while `-harnesses claude_code:claude-sonnet-4-6`
+// selects just one.
+func pickHarnesses(filter, claudeModels string) []harness.Driver {
+	var candidates []harness.Driver
+	if models := splitCommaList(claudeModels); len(models) > 0 {
+		for _, m := range models {
+			candidates = append(candidates, &harness.Claude{Model: m})
 		}
+	} else {
+		candidates = append(candidates, &harness.Claude{})
+	}
+	candidates = append(candidates, &harness.Codex{})
+
+	wants := map[string]bool{}
+	for _, h := range splitCommaList(filter) {
+		wants[h] = true
 	}
 	out := []harness.Driver{}
-	for _, d := range all {
-		if len(wants) > 0 && !wants[d.Name()] {
+	for _, d := range candidates {
+		if len(wants) > 0 && !wants[d.Name()] && !wants[harnessFamily(d.Name())] {
 			continue
 		}
 		if err := d.Available(); err != nil {
@@ -323,6 +338,28 @@ func pickHarnesses(filter string) []harness.Driver {
 			continue
 		}
 		out = append(out, d)
+	}
+	return out
+}
+
+// harnessFamily strips the ":<model>" suffix from a harness name so a
+// family-level -harnesses filter (e.g. "claude_code") matches every
+// model-pinned variant.
+func harnessFamily(name string) string {
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		return name[:i]
+	}
+	return name
+}
+
+// splitCommaList splits on commas and trims whitespace, dropping empty
+// entries. Shared by the -harnesses and -claude-models parsing.
+func splitCommaList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
 	}
 	return out
 }

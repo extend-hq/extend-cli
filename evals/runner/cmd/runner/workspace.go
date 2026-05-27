@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -64,7 +65,7 @@ func (w *workspace) runDir(evalID, harnessName, configName string, runN int) (st
 	dir := filepath.Join(
 		w.iterationDir(),
 		"eval-"+evalID,
-		harnessName, configName,
+		pathSafe(harnessName), configName,
 		fmt.Sprintf("run-%d", runN),
 	)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -81,6 +82,23 @@ func (w *workspace) runDir(evalID, harnessName, configName string, runN int) (st
 // benchmarkPath is where the aggregator writes the rollup.
 func (w *workspace) benchmarkPath() string {
 	return filepath.Join(w.iterationDir(), "benchmark.json")
+}
+
+// pathSafe replaces filesystem-hostile characters in a harness name
+// (notably the ':' in model-pinned names like "claude_code:claude-sonnet-4-6")
+// with '_' so artifact dirs stay portable across OSes and CI upload
+// steps. The benchmark.json and console keep the original colon form.
+func pathSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '-', r == '_', r == '.':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
 }
 
 // nextIteration returns the lowest unused iteration number under root.

@@ -10,7 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -86,8 +89,8 @@ files download'.`,
 		},
 		SeeAlso:  []string{"edit schema generate", "runs watch", "runs get", "files download"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEdit(cmd.Context(), app, editParams{
@@ -142,27 +145,41 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		return err
 	}
 
-	cfg := &client.EditRunConfig{
-		Instructions:                 p.instructions,
-		SchemaGenerationInstructions: p.schemaGenInstructions,
-		AdvancedOptions: &client.EditAdvancedOptions{
-			NativeFieldsOnly: &p.nativeOnly,
-			FlattenPdf:       &p.flatten,
+	file, err := extendx.BuildEditFile(ref)
+	if err != nil {
+		return err
+	}
+
+	cfg := &extend.EditConfig{
+		AdvancedOptions: &extend.EditConfigAdvancedOptions{
+			NativeFieldsOnly: extend.Bool(p.nativeOnly),
+			FlattenPdf:       extend.Bool(p.flatten),
 		},
+	}
+	if p.instructions != "" {
+		cfg.Instructions = extend.String(p.instructions)
+	}
+	if p.schemaGenInstructions != "" {
+		cfg.SchemaGenerationInstructions = extend.String(p.schemaGenInstructions)
 	}
 	if p.schemaPath != "" {
 		raw, err := readJSONFile(p.schemaPath, "--schema")
 		if err != nil {
 			return err
 		}
-		cfg.Schema = raw
+		var schema extend.EditRootJSON
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return fmt.Errorf("--schema: %w", err)
+		}
+		cfg.Schema = &schema
 	}
-	in := client.CreateEditRunInput{
-		File:   ref,
+
+	req := &extend.EditRunsCreateRequest{
+		File:   file,
 		Config: cfg,
 	}
 
-	run, err := cli.CreateEditRun(ctx, in)
+	run, err := cli.EditRuns.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
@@ -172,7 +189,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForEditRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.EditRun) {
+	final, err := waitForEditRun(ctx, cli, run.ID, extendx.WaitProfileOptions(extendx.ProfileShort, p.timeout), func(r *extend.EditRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")
@@ -180,12 +197,12 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		return formatActionWaitError(err, run.ID)
 	}
 
-	if final.Status == client.StatusFailed {
+	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
+		// Best-effort render of the (failed) result before returning the
+		// failure error; a render error here is secondary to the run
+		// failure we're about to report.
 		_ = renderEditResult(app, final)
-		if final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, final.FailureMessage)
-		}
-		return fmt.Errorf("run %s failed", final.ID)
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
 	}
 
 	if p.outputFile != "" {
@@ -204,38 +221,26 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	return renderEditResult(app, final)
 }
 
-func outputFileID(run *client.EditRun) string {
+func waitForEditRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.EditRun)) (*extend.EditRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.EditRun, error) {
+			return c.EditRuns.Retrieve(ctx, id, &extend.EditRunsRetrieveRequest{})
+		},
+		func(r *extend.EditRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
+}
+
+func outputFileID(run *extend.EditRun) string {
 	if run.Output == nil || run.Output.EditedFile == nil {
 		return ""
 	}
 	return run.Output.EditedFile.ID
 }
 
-// generatedEditSchema unwraps the documented response shape from
-// POST /edit_schemas/generate:
-//
-//	{"schema": {...}, "annotatedSchema": ..., "mappingResult": ...}
-//
-// Only the inner `schema` field is exposed to users; the rest is debug data.
-func generatedEditSchema(raw json.RawMessage) (json.RawMessage, error) {
-	var env struct {
-		Schema json.RawMessage `json:"schema"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("decode generated edit schema: %w", err)
-	}
-	if len(env.Schema) == 0 {
-		return nil, fmt.Errorf("generated edit schema response missing 'schema' field")
-	}
-	if !json.Valid(env.Schema) {
-		return nil, fmt.Errorf("generated edit schema response contains invalid schema")
-	}
-	return env.Schema, nil
-}
-
-func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileID, outPath string) error {
+func downloadEditOutput(ctx context.Context, app *App, cli *sdkclient.Client, fileID, outPath string) error {
 	if outPath == "-" {
-		_, err := cli.DownloadFile(ctx, fileID, app.IO.Out)
+		_, err := extendx.DownloadFile(ctx, cli, fileID, app.IO.Out)
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(outPath), ".extend-edit-*")
@@ -244,7 +249,7 @@ func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileI
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	n, err := cli.DownloadFile(ctx, fileID, tmp)
+	n, err := extendx.DownloadFile(ctx, cli, fileID, tmp)
 	tmp.Close()
 	if err != nil {
 		return err
@@ -256,7 +261,7 @@ func downloadEditOutput(ctx context.Context, app *App, cli *client.Client, fileI
 	return nil
 }
 
-func renderEditResult(app *App, run *client.EditRun) error {
+func renderEditResult(app *App, run *extend.EditRun) error {
 	// Surface the no-output-file case loudly in every render path
 	// (pretty, JSON, jq), because a PROCESSED run with no edited PDF
 	// is the failure mode the May 2026 agent-experience transcripts
@@ -269,9 +274,10 @@ func renderEditResult(app *App, run *client.EditRun) error {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)
-	fmt.Fprintf(app.IO.Out, "%s %s (%s)\n", statusIcon(pal, run.Status), run.ID, run.Status)
-	if run.Status == client.StatusFailed && run.FailureMessage != "" {
-		fmt.Fprintf(app.IO.Out, "  %s\n", run.FailureMessage)
+	status := extendx.RunStatus(run.Status)
+	fmt.Fprintf(app.IO.Out, "%s %s (%s)\n", statusIcon(pal, status), run.ID, run.Status)
+	if status == extendx.StatusFailed && run.FailureMessage != nil && *run.FailureMessage != "" {
+		fmt.Fprintf(app.IO.Out, "  %s\n", *run.FailureMessage)
 		return nil
 	}
 	if fid := outputFileID(run); fid != "" {
@@ -288,8 +294,8 @@ func renderEditResult(app *App, run *client.EditRun) error {
 // agents misread the lack of an error as success. The warning is
 // strictly informational: exit code is unchanged, since the API
 // itself reported a terminal-success state.
-func maybeWarnEmptyEditOutput(app *App, run *client.EditRun) {
-	if run == nil || run.Status != client.StatusProcessed {
+func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
+	if run == nil || extendx.RunStatus(run.Status) != extendx.StatusProcessed {
 		return
 	}
 	if outputFileID(run) != "" {
@@ -364,33 +370,50 @@ are overlaid onto your starting point.`,
 			if err != nil {
 				return err
 			}
-			cfg := &client.EditSchemaGenerationConfig{
-				Instructions: instructions,
-				AdvancedOptions: &client.EditAdvancedOptions{
-					NativeFieldsOnly: &nativeOnly,
+			file, err := extendx.BuildEditSchemaFile(ref)
+			if err != nil {
+				return err
+			}
+			cfg := &extend.EditSchemaGenerationConfig{
+				AdvancedOptions: &extend.EditSchemaGenerationConfigAdvancedOptions{
+					NativeFieldsOnly: extend.Bool(nativeOnly),
 				},
+			}
+			if instructions != "" {
+				cfg.Instructions = extend.String(instructions)
 			}
 			if inputSchemaPath != "" {
 				raw, err := readJSONFile(inputSchemaPath, "--input-schema")
 				if err != nil {
 					return err
 				}
-				cfg.InputSchema = raw
+				var schema extend.EditRootJSON
+				if err := json.Unmarshal(raw, &schema); err != nil {
+					return fmt.Errorf("--input-schema: %w", err)
+				}
+				cfg.InputSchema = &schema
 			}
-			resp, err := cli.GenerateEditSchema(cmd.Context(), client.GenerateEditSchemaInput{
-				File:   ref,
+			resp, err := cli.EditSchemas.Generate(cmd.Context(), &extend.EditSchemasGenerateRequest{
+				File:   file,
 				Config: cfg,
 			})
 			if err != nil {
 				return err
 			}
-			schema, err := generatedEditSchema(resp)
+			if resp.Schema == nil {
+				return fmt.Errorf("generated edit schema response missing 'schema' field")
+			}
+			// Re-marshal the typed schema so output is consistent with
+			// the JSON shape the server would have returned. This keeps
+			// downstream `extend edit --schema schema.json` flows
+			// working unchanged.
+			body, err := json.Marshal(resp.Schema)
 			if err != nil {
-				return err
+				return fmt.Errorf("encode schema: %w", err)
 			}
 			var pretty any
-			if err := json.Unmarshal(schema, &pretty); err != nil {
-				_, werr := app.IO.Out.Write(schema)
+			if err := json.Unmarshal(body, &pretty); err != nil {
+				_, werr := app.IO.Out.Write(body)
 				return werr
 			}
 			return renderWithDefault(app, pretty, output.FormatJSON)

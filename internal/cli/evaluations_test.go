@@ -75,8 +75,20 @@ func TestEvaluationItemsCreate_DecodesEvaluationSetItemsEnvelope(t *testing.T) {
 				map[string]any{
 					"id": "it_1", "object": "evaluation_set_item",
 					"evaluationSetId": "ev_a",
-					"file":            map[string]any{"id": "file_1", "name": "a.pdf"},
-					"expectedOutput":  map[string]any{"value": map[string]any{}},
+					// Nested file needs the SDK's FileSummary
+					// discriminator and required metadata block; the
+					// auto-inference in writeJSON only walks the
+					// top-level data slice, not arbitrary array
+					// fields.
+					"file": map[string]any{
+						"id":        "file_1",
+						"name":      "a.pdf",
+						"object":    "file",
+						"metadata":  map[string]any{},
+						"createdAt": "2026-01-01T00:00:00Z",
+						"updatedAt": "2026-01-01T00:00:00Z",
+					},
+					"expectedOutput": map[string]any{"value": map[string]any{}},
 				},
 			},
 		})

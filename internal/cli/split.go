@@ -2,12 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -15,14 +19,14 @@ import (
 // `extend split batch` subcommand.
 func newSplitDoc(app *App) *CommandDoc {
 	var (
-		splitterID         string
-		version            string
-		overrideConfigPath string
-		password           string
-		wait               bool
-		priority           int
-		timeout            time.Duration
-		meta               metaFlags
+		splitterID string
+		version    string
+		patchPath  string
+		password   string
+		wait       bool
+		priority   int
+		timeout    time.Duration
+		meta       metaFlags
 	)
 
 	return &CommandDoc{
@@ -47,17 +51,16 @@ when the input is a single document and you only need its category.`,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
---override-config merges per-run tweaks onto the --using splitter's
-saved config, just for this one run. Source: inline JSON, a plain file
-path, an absolute file:// URI, or '-' to read from stdin. It does NOT
-replace the splitter; pass --using to pick the splitter and
---override-config to vary it without modifying
-the persisted splitter.`,
+--patch applies a per-run partial merge onto the --using splitter's
+saved config. Source: inline JSON, a plain file path, an absolute
+file:// URI, or '-' to read from stdin. --patch does NOT replace the
+splitter; pass --using to pick the splitter and --patch to vary it
+without modifying the persisted version.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend split combined.pdf --using spl_abc"},
 			{Label: "JSON output", Cmd: "extend split combined.pdf --using spl_abc -o json"},
-			{Label: "Merge per-run tweaks onto a saved splitter", Cmd: "extend split combined.pdf --using spl_abc --override-config override.json"},
-			{Label: "Inline per-run override", Cmd: `extend split combined.pdf --using spl_abc --override-config '{"foo":"bar"}'`},
+			{Label: "Patch a saved splitter for this run", Cmd: "extend split combined.pdf --using spl_abc --patch tweaks.json"},
+			{Label: "Inline patch", Cmd: `extend split combined.pdf --using spl_abc --patch '{"foo":"bar"}'`},
 			{Label: "Count segments via jq", Cmd: "extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw"},
 		},
 		Gotchas: []string{
@@ -65,8 +68,8 @@ the persisted splitter.`,
 		},
 		SeeAlso:  []string{"parse", "split batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: client.ProfileShort, DefaultsToWait: true},
-		Failures: []client.RunStatus{client.StatusFailed, client.StatusCancelled},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
@@ -74,21 +77,21 @@ the persisted splitter.`,
 				return err
 			}
 			return runSplit(cmd.Context(), app, splitParams{
-				input:              args[0],
-				splitterID:         splitterID,
-				version:            version,
-				overrideConfigPath: overrideConfigPath,
-				password:           password,
-				wait:               wait,
-				priority:           priority,
-				timeout:            timeout,
-				metadata:           md,
+				input:      args[0],
+				splitterID: splitterID,
+				version:    version,
+				patchPath:  patchPath,
+				password:   password,
+				wait:       wait,
+				priority:   priority,
+				timeout:    timeout,
+				metadata:   md,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
 			cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
-			cmd.Flags().StringVar(&overrideConfigPath, "override-config", "", "Per-run overrides merged onto the --using splitter's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using splitter's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -101,15 +104,15 @@ the persisted splitter.`,
 }
 
 type splitParams struct {
-	input              string
-	splitterID         string
-	version            string
-	overrideConfigPath string
-	password           string
-	wait               bool
-	priority           int
-	timeout            time.Duration
-	metadata           map[string]any
+	input      string
+	splitterID string
+	version    string
+	patchPath  string
+	password   string
+	wait       bool
+	priority   int
+	timeout    time.Duration
+	metadata   map[string]any
 }
 
 func runSplit(ctx context.Context, app *App, p splitParams) error {
@@ -123,24 +126,42 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 		return err
 	}
 
-	splitter := &client.SplitterRef{ID: p.splitterID, Version: p.version}
-	if p.overrideConfigPath != "" {
-		raw, err := readJSONFile(p.overrideConfigPath, "--override-config")
+	file, err := extendx.BuildSplitFile(ref)
+	if err != nil {
+		return err
+	}
+
+	splitter := &extend.SplitRunsCreateRequestSplitter{ID: p.splitterID}
+	if p.version != "" {
+		v := extend.ProcessorVersionString(p.version)
+		splitter.Version = &v
+	}
+	if p.patchPath != "" {
+		raw, err := readJSONFile(p.patchPath, "--patch")
 		if err != nil {
 			return err
 		}
-		splitter.OverrideConfig = raw
-	}
-	in := client.CreateSplitRunInput{
-		Splitter: splitter,
-		File:     ref,
-		Metadata: p.metadata,
-	}
-	if p.priority > 0 {
-		in.Priority = &p.priority
+		var override extend.SplitOverrideConfig
+		if err := json.Unmarshal(raw, &override); err != nil {
+			return fmt.Errorf("--patch: %w", err)
+		}
+		splitter.OverrideConfig = &override
 	}
 
-	run, err := cli.CreateSplitRun(ctx, in)
+	req := &extend.SplitRunsCreateRequest{
+		Splitter: splitter,
+		File:     file,
+	}
+	if p.metadata != nil {
+		md := extend.RunMetadata(p.metadata)
+		req.Metadata = &md
+	}
+	if p.priority > 0 {
+		pr := extend.RunPriority(p.priority)
+		req.Priority = &pr
+	}
+
+	run, err := cli.SplitRuns.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
@@ -150,7 +171,7 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: PENDING", run.ID))
-	final, err := cli.WaitForSplitRun(ctx, run.ID, client.WaitProfileOptions(client.ProfileShort, p.timeout), func(r *client.SplitRun) {
+	final, err := waitForSplitRun(ctx, cli, run.ID, extendx.WaitProfileOptions(extendx.ProfileShort, p.timeout), func(r *extend.SplitRun) {
 		sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 	})
 	sp.Stop("")
@@ -161,19 +182,26 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 	if err := renderSplitResult(app, final); err != nil {
 		return err
 	}
-	if final.Status == client.StatusFailed {
-		if final.FailureMessage != "" {
-			return fmt.Errorf("run %s failed: %s", final.ID, final.FailureMessage)
-		}
-		return fmt.Errorf("run %s failed", final.ID)
-	}
-	if final.Status == client.StatusCancelled {
+	switch extendx.RunStatus(final.Status) {
+	case extendx.StatusFailed:
+		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
+	case extendx.StatusCancelled:
 		return fmt.Errorf("run %s was cancelled", final.ID)
 	}
 	return nil
 }
 
-func renderSplitResult(app *App, run *client.SplitRun) error {
+func waitForSplitRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.SplitRun)) (*extend.SplitRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.SplitRun, error) {
+			return c.SplitRuns.Retrieve(ctx, id, &extend.SplitRunsRetrieveRequest{})
+		},
+		func(r *extend.SplitRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
+}
+
+func renderSplitResult(app *App, run *extend.SplitRun) error {
 	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}

@@ -11,7 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -74,7 +76,7 @@ including the file_id used by subsequent runs.`,
 			if err != nil {
 				return err
 			}
-			f, err := cli.UploadFile(cmd.Context(), args[0])
+			f, err := extendx.UploadFile(cmd.Context(), cli, args[0])
 			if err != nil {
 				return fmt.Errorf("upload: %w", err)
 			}
@@ -137,16 +139,30 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 	if err != nil {
 		return err
 	}
-	opts := client.ListFilesOptions{
-		NameContains: nameContains,
-		SortDir:      sortDir,
-		Limit:        limit,
-		PageToken:    pageToken,
+
+	req := &extend.FilesListRequest{}
+	if nameContains != "" {
+		req.NameContains = extend.String(nameContains)
 	}
+	if sortDir != "" {
+		sd, err := extend.NewSortDirFromString(sortDir)
+		if err != nil {
+			return fmt.Errorf("--sort: %w", err)
+		}
+		req.SortDir = &sd
+	}
+	if limit > 0 {
+		ps := extend.MaxPageSize(limit)
+		req.MaxPageSize = &ps
+	}
+	if pageToken != "" {
+		req.NextPageToken = extend.String(pageToken)
+	}
+
 	var rows [][]string
 	var pages []any
 	for {
-		page, err := cli.ListFiles(ctx, opts)
+		page, err := cli.Files.List(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -155,14 +171,15 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 			rows = append(rows, []string{
 				f.ID,
 				truncate(f.Name, 40),
-				f.Type,
+				string(deref(f.Type)),
 				relTime(f.CreatedAt),
 			})
 		}
-		if paginationDone(all, max, len(rows), page.NextPageToken) {
+		next := deref(page.NextPageToken)
+		if paginationDone(all, max, len(rows), next) {
 			break
 		}
-		opts.PageToken = page.NextPageToken
+		req.NextPageToken = extend.String(next)
 	}
 	rows = capRowsToMax(rows, max)
 
@@ -214,11 +231,17 @@ content under the response's "contents" field. The flags may be combined.`,
 			if err != nil {
 				return err
 			}
-			f, err := cli.GetFileWithOptions(cmd.Context(), args[0], client.GetFileOptions{
-				RawText:  rawText,
-				Markdown: markdown,
-				HTML:     html,
-			})
+			req := &extend.FilesRetrieveRequest{}
+			if rawText {
+				req.RawText = extend.Bool(true)
+			}
+			if markdown {
+				req.Markdown = extend.Bool(true)
+			}
+			if html {
+				req.HTML = extend.Bool(true)
+			}
+			f, err := cli.Files.Retrieve(cmd.Context(), args[0], req)
 			if err != nil {
 				return err
 			}
@@ -286,7 +309,7 @@ func runFilesDelete(ctx context.Context, app *App, id string, yes bool) error {
 			return nil
 		}
 	}
-	if err := cli.DeleteFile(ctx, id); err != nil {
+	if _, err := cli.Files.Delete(ctx, id, &extend.FilesDeleteRequest{}); err != nil {
 		return err
 	}
 	fmt.Fprintf(app.IO.ErrOut, "%s Deleted %s\n", paletteFor(app.IO).Green("✓"), id)
@@ -338,11 +361,11 @@ func runFilesDownload(ctx context.Context, app *App, id, outPath string) error {
 		return err
 	}
 	if outPath == "-" {
-		_, err := cli.DownloadFile(ctx, id, app.IO.Out)
+		_, err := extendx.DownloadFile(ctx, cli, id, app.IO.Out)
 		return err
 	}
 	if outPath == "" {
-		f, err := cli.GetFile(ctx, id)
+		f, err := cli.Files.Retrieve(ctx, id, &extend.FilesRetrieveRequest{})
 		if err != nil {
 			return err
 		}
@@ -358,7 +381,7 @@ func runFilesDownload(ctx context.Context, app *App, id, outPath string) error {
 	}
 	tmpName := tmpFile.Name()
 	defer os.Remove(tmpName)
-	n, err := cli.DownloadFile(ctx, id, tmpFile)
+	n, err := extendx.DownloadFile(ctx, cli, id, tmpFile)
 	tmpFile.Close()
 	if err != nil {
 		return err

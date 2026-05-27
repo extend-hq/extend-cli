@@ -172,6 +172,63 @@ func (b *benchmark) printSummary() {
 		delta := b.Summary.WithSkill.PassPct - b.Summary.WithoutSkill.PassPct
 		fmt.Printf("delta (with - without): %+.1fpp\n", delta)
 	}
+	b.printPerHarness()
+}
+
+// harnessCell accumulates pass/graded/token totals for one
+// (harness, config) pair in the per-harness breakdown.
+type harnessCell struct{ pass, graded, tokens int }
+
+func (c *harnessCell) pct() float64 {
+	if c == nil {
+		return 0
+	}
+	return pct(c.pass, c.graded)
+}
+
+// printPerHarness breaks the rollup down by harness so model-vs-model
+// comparisons (e.g. claude_code:claude-opus-4-7 vs
+// claude_code:claude-sonnet-4-6 vs codex) are legible at a glance. Only
+// printed when more than one harness ran; for a single harness the
+// headline numbers above already tell the whole story.
+func (b *benchmark) printPerHarness() {
+	type key struct{ harness, config string }
+	cells := map[key]*harnessCell{}
+	var harnesses []string
+	seen := map[string]bool{}
+	for _, c := range b.Cases {
+		for _, agg := range c.Runs {
+			k := key{agg.Harness, agg.Config}
+			cl := cells[k]
+			if cl == nil {
+				cl = &harnessCell{}
+				cells[k] = cl
+			}
+			cl.pass += agg.Passed
+			cl.graded += agg.Passed + agg.Failed
+			cl.tokens += agg.Tokens
+			if !seen[agg.Harness] {
+				seen[agg.Harness] = true
+				harnesses = append(harnesses, agg.Harness)
+			}
+		}
+	}
+	if len(harnesses) < 2 {
+		return
+	}
+	sort.Strings(harnesses)
+
+	fmt.Printf("\n=== Per-harness ===\n")
+	fmt.Printf("%-34s %12s %14s %12s\n", "harness", "with_skill", "without_skill", "delta")
+	for _, h := range harnesses {
+		w := cells[key{h, "with_skill"}]
+		wo := cells[key{h, "without_skill"}]
+		deltaStr := "    —"
+		if w != nil && wo != nil && w.graded > 0 && wo.graded > 0 {
+			deltaStr = fmt.Sprintf("%+.1fpp", w.pct()-wo.pct())
+		}
+		fmt.Printf("%-34s %11.1f%% %13.1f%% %12s\n", h, w.pct(), wo.pct(), deltaStr)
+	}
 }
 
 func pct(num, denom int) float64 {

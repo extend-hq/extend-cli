@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 func TestMergeBody_FromFileOnlyPreservesBytes(t *testing.T) {
@@ -252,18 +254,18 @@ func equalStrings(a, b []string) bool {
 
 func TestStatusIcon_PerStatus(t *testing.T) {
 	cases := []struct {
-		s        client.RunStatus
+		s        extendx.RunStatus
 		wantRune string
 	}{
-		{client.StatusProcessed, "✓"},
-		{client.StatusFailed, "✗"},
-		{client.StatusCancelled, "○"},
-		{client.StatusCancelling, "○"},
-		{client.StatusRejected, "✗"},
-		{client.StatusNeedsReview, "⏸"},
-		{client.StatusPending, "⋯"},
-		{client.StatusProcessing, "⋯"},
-		{client.RunStatus("UNKNOWN"), "•"},
+		{extendx.StatusProcessed, "✓"},
+		{extendx.StatusFailed, "✗"},
+		{extendx.StatusCancelled, "○"},
+		{extendx.StatusCancelling, "○"},
+		{extendx.StatusRejected, "✗"},
+		{extendx.StatusNeedsReview, "⏸"},
+		{extendx.StatusPending, "⋯"},
+		{extendx.StatusProcessing, "⋯"},
+		{extendx.RunStatus("UNKNOWN"), "•"},
 	}
 	colorless := palette{enabled: false}
 	colored := palette{enabled: true}
@@ -279,14 +281,14 @@ func TestStatusIcon_PerStatus(t *testing.T) {
 }
 
 func TestOutputFileID_FromEditedFile(t *testing.T) {
-	r := &client.EditRun{Output: &client.EditOutput{EditedFile: &client.EditedFile{ID: "file_filled", PresignedURL: "https://x.com/dl"}}}
+	r := &extend.EditRun{Output: &extend.EditRunOutput{EditedFile: &extend.EditRunOutputEditedFile{ID: "file_filled", PresignedURL: "https://x.com/dl"}}}
 	if got := outputFileID(r); got != "file_filled" {
 		t.Errorf("got %q, want file_filled", got)
 	}
 }
 
 func TestOutputFileID_NoOutputReturnsEmpty(t *testing.T) {
-	r := &client.EditRun{}
+	r := &extend.EditRun{}
 	if got := outputFileID(r); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}

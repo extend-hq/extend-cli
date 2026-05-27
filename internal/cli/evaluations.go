@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/extend-hq/extend-cli/internal/client"
+	extend "github.com/extend-hq/extend-go-sdk"
+
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -75,17 +78,36 @@ processor accuracy via 'extend evaluations runs get'.
 			if err != nil {
 				return err
 			}
-			opts := client.ListEvaluationSetsOptions{
-				EntityID:  entity,
-				SortBy:    sortBy,
-				SortDir:   sortDir,
-				Limit:     limit,
-				PageToken: pageToken,
+			req := &extend.EvaluationSetsListRequest{}
+			if entity != "" {
+				req.EntityID = extend.String(entity)
 			}
+			if sortBy != "" {
+				sb, err := extend.NewSortByFromString(sortBy)
+				if err != nil {
+					return fmt.Errorf("--sort-by: %w", err)
+				}
+				req.SortBy = &sb
+			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+
 			var rows [][]string
 			var pages []any
 			for {
-				page, err := cli.ListEvaluationSets(cmd.Context(), opts)
+				page, err := cli.EvaluationSets.List(cmd.Context(), req)
 				if err != nil {
 					return err
 				}
@@ -93,10 +115,11 @@ processor accuracy via 'extend evaluations runs get'.
 				for _, s := range page.Data {
 					rows = append(rows, []string{s.ID, s.Name, relTime(s.CreatedAt)})
 				}
-				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
+				next := deref(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
-				opts.PageToken = page.NextPageToken
+				req.NextPageToken = extend.String(next)
 			}
 			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows, "No evaluation sets.")
@@ -137,7 +160,7 @@ to see the items it contains.`,
 			if err != nil {
 				return err
 			}
-			s, err := cli.GetEvaluationSet(cmd.Context(), args[0])
+			s, err := cli.EvaluationSets.Retrieve(cmd.Context(), args[0], &extend.EvaluationSetsRetrieveRequest{})
 			if err != nil {
 				return err
 			}
@@ -181,11 +204,15 @@ body.`,
 			if err != nil {
 				return err
 			}
+			var req extend.EvaluationSetsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return fmt.Errorf("decode body: %w", err)
+			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			s, err := cli.CreateEvaluationSet(cmd.Context(), body)
+			s, err := cli.EvaluationSets.Create(cmd.Context(), &req)
 			if err != nil {
 				return err
 			}
@@ -253,16 +280,33 @@ accuracy score.
 			if err != nil {
 				return err
 			}
-			opts := client.ListProcessorsOptions{
-				Limit:     limit,
-				SortBy:    sortBy,
-				SortDir:   sortDir,
-				PageToken: pageToken,
+			req := &extend.EvaluationSetItemsListRequest{}
+			if sortBy != "" {
+				sb, err := extend.NewSortByFromString(sortBy)
+				if err != nil {
+					return fmt.Errorf("--sort-by: %w", err)
+				}
+				req.SortBy = &sb
 			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+
 			var rows [][]string
 			var pages []any
 			for {
-				page, err := cli.ListEvaluationItems(cmd.Context(), args[0], opts)
+				page, err := cli.EvaluationSetItems.List(cmd.Context(), args[0], req)
 				if err != nil {
 					return err
 				}
@@ -274,10 +318,11 @@ accuracy score.
 					}
 					rows = append(rows, []string{it.ID, name})
 				}
-				if paginationDone(all, maxN, len(rows), page.NextPageToken) {
+				next := deref(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
 					break
 				}
-				opts.PageToken = page.NextPageToken
+				req.NextPageToken = extend.String(next)
 			}
 			rows = capRowsToMax(rows, maxN)
 			return renderListForCmd(cmd, app, pages, []string{"id", "file"}, rows, "No items.")
@@ -316,7 +361,7 @@ output (the ground-truth that processor runs are scored against).`,
 			if err != nil {
 				return err
 			}
-			it, err := cli.GetEvaluationItem(cmd.Context(), args[0], args[1])
+			it, err := cli.EvaluationSetItems.Retrieve(cmd.Context(), args[0], args[1], &extend.EvaluationSetItemsRetrieveRequest{})
 			if err != nil {
 				return err
 			}
@@ -360,11 +405,15 @@ This is the only create endpoint; there is no per-item POST.`,
 			if err != nil {
 				return err
 			}
+			var req extend.EvaluationSetItemsCreateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return fmt.Errorf("decode body: %w", err)
+			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			resp, err := cli.CreateEvaluationItems(cmd.Context(), args[0], body)
+			resp, err := cli.EvaluationSetItems.Create(cmd.Context(), args[0], &req)
 			if err != nil {
 				return err
 			}
@@ -402,11 +451,15 @@ or - for stdin.`,
 			if err != nil {
 				return err
 			}
+			var req extend.EvaluationSetItemsUpdateRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				return fmt.Errorf("decode body: %w", err)
+			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			it, err := cli.UpdateEvaluationItem(cmd.Context(), args[0], args[1], body)
+			it, err := cli.EvaluationSetItems.Update(cmd.Context(), args[0], args[1], &req)
 			if err != nil {
 				return err
 			}
@@ -451,7 +504,8 @@ prompt (required in non-interactive scripts).`,
 					if err != nil {
 						return err
 					}
-					return c.DeleteEvaluationItem(ctx, setID, itemID)
+					_, err = c.EvaluationSetItems.Delete(ctx, setID, itemID, &extend.EvaluationSetItemsDeleteRequest{})
+					return err
 				})
 		},
 		Configure: func(cmd *cobra.Command) {
@@ -504,7 +558,7 @@ the run produced.`,
 			if err != nil {
 				return err
 			}
-			run, err := cli.GetEvaluationRun(cmd.Context(), args[0])
+			run, err := cli.EvaluationSetRuns.Retrieve(cmd.Context(), args[0], &extend.EvaluationSetRunsRetrieveRequest{})
 			if err != nil {
 				return err
 			}

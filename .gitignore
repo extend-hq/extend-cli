@@ -41,6 +41,10 @@ mise.local.toml
 extend-cli-evals-workspace/
 evals/workspace/
 
+# `go build ./cmd/runner` (or a bare `go run` leftover) drops the runner
+# binary here; it's build output, not source.
+/evals/runner/runner
+
 # Editor/IDE
 # .idea/
 # .vscode/

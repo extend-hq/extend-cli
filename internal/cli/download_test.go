@@ -161,15 +161,20 @@ func TestDownload_WorkflowRun(t *testing.T) {
 				"status": "PROCESSED",
 				"stepRuns": []map[string]any{
 					{
-						"id":     "wsr_1",
-						"status": "PROCESSED",
-						"step":   map[string]any{"id": "step_1", "type": "SPLIT"},
-						"files":  []map[string]any{{"id": "file_w1", "name": "part1.pdf"}},
+						"stepType": "SPLIT",
+						"id":       "wsr_1",
+						"object":   "workflow_step_run",
+						"status":   "PROCESSED",
+						"step":     map[string]any{"id": "step_1", "name": "split-step", "type": "SPLIT", "object": "workflow_step"},
+						"files":    []map[string]any{{"id": "file_w1", "name": "part1.pdf", "object": "file"}},
 					},
 					{
-						"id":     "wsr_2",
-						"status": "PROCESSED",
-						"step":   map[string]any{"id": "step_2", "type": "EXTRACT"},
+						"stepType": "EXTRACT",
+						"id":       "wsr_2",
+						"object":   "workflow_step_run",
+						"status":   "PROCESSED",
+						"step":     map[string]any{"id": "step_2", "name": "extract-step", "type": "EXTRACT", "object": "workflow_step"},
+						"files":    []map[string]any{},
 					},
 				},
 			})
