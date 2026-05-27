@@ -21,18 +21,16 @@ import (
 func newWebhooksDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "webhooks",
-		Summary: "Manage webhook endpoints, subscriptions, and signature verification",
-		WhenToUse: `Use this command group to register receiving URLs, bind specific
-resources to event streams, and verify the HMAC signature on incoming
-webhook payloads.`,
-		Details: `Webhooks in Extend are split into two resources:
-
-- Endpoints define the receiving URL plus its delivery configuration
-  (custom headers, payload format, API version).
-- Subscriptions bind an endpoint to a specific resource and event set.
-
-The 'verify' leaf validates incoming payloads against the signing
-secret returned at endpoint creation.`,
+		Summary: "Manage webhook endpoints, subscriptions, and verify signatures",
+		Group:   "Resources",
+		WhenToUse: `Use these commands to register receiving URLs (endpoints), bind them
+to specific resources via subscriptions, and verify HMAC signatures on
+incoming payloads. Webhooks are the push alternative to polling for
+long-running operations.`,
+		Details: `An endpoint is a destination URL that receives webhook events. A
+subscription binds an endpoint to a specific resource (extractor,
+classifier, splitter, workflow) and a set of event types. Use
+'extend webhooks verify' to confirm an incoming payload's signature.`,
 		Subcommands: []*CommandDoc{
 			newWebhookEndpointsDoc(app),
 			newWebhookSubscriptionsDoc(app),
