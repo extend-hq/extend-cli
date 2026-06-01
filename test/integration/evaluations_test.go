@@ -99,6 +99,48 @@ func TestEvaluationRunsGet_UsesEvaluationSetRunsRoute(t *testing.T) {
 	}
 }
 
+// TestEvaluationRunsCreate_StartsRun verifies the CLI can trigger an
+// evaluation run against an existing eval set (the P0 capability previously
+// missing — the CLI was read-only on runs). Reuses a workspace eval set; if
+// the create is rejected (e.g. the set has no items or no deployed entity to
+// score), it skips rather than fail, since we can't guarantee a runnable
+// fixture exists. Eval runs can't be deleted via the CLI, so this leaks one
+// run — acceptable under the explicit run-ops opt-in.
+//
+// Costs credits — gated behind EXTEND_TEST_RUN_OPS=1.
+func TestEvaluationRunsCreate_StartsRun(t *testing.T) {
+	env := requireEnv(t)
+	requireRunOps(t)
+
+	listRes := runExtend(t, env, "evaluations", "list", "--limit", "1", "-o", "json")
+	listRes.requireOK(t, "evaluations", "list")
+	var page struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	listRes.decodeJSON(t, &page)
+	if len(page.Data) == 0 {
+		t.Skip("no evaluation sets in workspace; cannot exercise runs create")
+	}
+	setID := page.Data[0].ID
+
+	res := runExtend(t, env, "evaluations", "runs", "create", setID, "-o", "json")
+	if res.ExitCode != 0 {
+		t.Skipf("eval set %s not runnable as-is (needs items + a deployable entity); create returned: %s",
+			setID, res.Stderr)
+	}
+
+	var run map[string]any
+	res.decodeJSON(t, &run)
+	if obj, _ := run["object"].(string); obj != "evaluation_set_run" {
+		t.Errorf("object = %q, want evaluation_set_run; stdout: %s", obj, res.Stdout)
+	}
+	if id, _ := run["id"].(string); id == "" {
+		t.Errorf("created run has empty id; stdout: %s", res.Stdout)
+	}
+}
+
 // TestEvaluationItemsCreate_ReturnsEnvelope verifies that bulk-create returns
 // the `{evaluationSetItems:[...]}` envelope (not a bare item) and that we
 // decode the items correctly. Requires an existing evaluation set with a

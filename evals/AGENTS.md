@@ -41,9 +41,9 @@ agent had no way to know that ID. Path B prompts carry every ID;
   `webhook_*`, `webhook_subscription_*`, etc.) and reports any that did
   *not* appear in a prior stub response. Catches the most common
   Path-A failure mode (the agent making up an ID rather than asking).
-- **`judge`** — LLM-judge. Reserved for prose-quality questions
-  ("did the explanation acknowledge the run-type quirk correctly?").
-  Phase 1 ships without the judge wired up; v1+ adds it.
+- **`judge`** — LLM-judge, for prose-quality questions ("did the
+  explanation acknowledge the run-type quirk correctly?"). Runs unless
+  disabled with `-no-judge` (a cheap, judge-free pre-PR sweep).
 
 Most cases use ≥2 types in combination. Stable-answer +
 `must_not_fabricate_ids` together cover the majority of Path-A
@@ -91,6 +91,24 @@ via `stub_config.default_mode`:
 Modes are layered: a `paginated` case can still get the standard
 fixture set on get/upload calls.
 
+## Help-discovery cases and stub help
+
+`H-*` (help-discovery) cases assert that an agent can find a flag or
+capability by consulting `extend <cmd> --help` rather than guessing. The
+fake binary serves per-command help from the `commandHelp` map in
+`evals/stub` — a hand-maintained mirror of the real CLI's flags, scoped
+per command the way `extend <cmd> --help` is. A help-discovery case is
+only meaningful if that mirror carries the flag under test:
+
+- When you add an `H-*` case for a flag, confirm `evals/stub`'s
+  `commandHelp[<command>]` actually lists it (the case will otherwise
+  pass or fail for the wrong reason).
+- Keep `commandHelp` in sync with the real command docs in
+  `internal/cli/`. The integration tests (e.g. `TestEditAdvancedOptions_ExposedInBinary`)
+  guard that the *real* `--help` carries a flag; the stub mirror is what
+  the agent sees in an eval. Drift between the two silently weakens the
+  signal.
+
 ## ID-fabrication checking
 
 The `must_not_fabricate_ids` checker tracks which IDs the stub
@@ -106,9 +124,13 @@ means adding the prefix pattern to the default `patterns` list in
 2. List inputs in `files`. Stage them in `evals/files/`.
 3. Write expectations in priority order (most-specific first).
 4. Run the discriminating-assertion test on each expectation.
-5. Run the case locally against at least one harness; iterate until the
-   expectations stabilise around the agent's actual behaviour rather
-   than your imagined behaviour.
+5. Run the case against at least one harness and iterate until the
+   expectations stabilise around the agent's actual behaviour rather than
+   your imagined behaviour:
+
+       cd evals/runner && go run ./cmd/runner -cases <ID> -harnesses claude_code -runs 1
+
+   See `evals/README.md` for harness auth and runner flags.
 
 Cases that fail the same way against both harnesses are usually a
 SKILL.md problem, not an eval problem; that's the signal we're after.

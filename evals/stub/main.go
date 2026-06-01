@@ -87,7 +87,7 @@ func main() {
 	// matchers (e.g. `runs list`) come before generic ones.
 	switch {
 	case len(args) == 0, isHelpOnly(args):
-		emitHelp()
+		emitHelp(args)
 		return
 	case match(args, "extract", "batch"):
 		emitExtractBatch(args, mode)
@@ -135,6 +135,8 @@ func main() {
 		emitEvaluationsCreate(args, mode)
 	case match(args, "evaluations", "items", "create"):
 		emitEvaluationsItemsCreate(args, mode)
+	case match(args, "evaluations", "runs", "create"):
+		emitEvaluationRunsCreate(args, mode)
 	case match(args, "webhooks", "endpoints", "create"):
 		emitWebhookEndpointsCreate(args, mode)
 	case match(args, "webhooks", "subscriptions", "create"):
@@ -304,38 +306,116 @@ func emitAuthError() {
 	fmt.Fprintln(stderr, "Hint: set EXTEND_API_KEY in your environment to authenticate.")
 }
 
-// emitHelp produces a help-shaped string realistic enough for an
-// agent to read and quote when the user asks "what flags does X
-// accept?". The contents intentionally mirror the real CLI's flag
-// set for a few common commands so H-* cases produce useful output.
-func emitHelp() {
-	fmt.Println(`extend — Extend document AI CLI (eval stub).
+// emitHelp produces a help-shaped string realistic enough for an agent
+// to read and quote when the user asks "what flags does X accept?". The
+// contents intentionally mirror the real CLI's flag set so help-discovery
+// (H-*) cases test true discoverability: an agent that consults
+// `extend <cmd> --help` should see the same flags the real binary exposes.
+//
+// It is command-aware: `extend edit --help` and `extend help edit` both
+// surface edit's flags only, the way the real CLI scopes per-command help.
+// When kept in sync with the real CLI's flags, this is the contract that
+// makes a help-discovery eval meaningful; the integration test
+// TestEditAdvancedOptions_ExposedInBinary guards that the real `--help`
+// carries the same flags.
+func emitHelp(args []string) {
+	if body, ok := commandHelp[helpTopic(args)]; ok {
+		fmt.Println(body)
+		return
+	}
+	fmt.Println(generalHelp)
+}
+
+// helpTopic returns the command whose help was requested, handling both
+// `extend <cmd> --help` (positional[0]) and `extend help <cmd>`
+// (positional after "help"). Returns "" for top-level/unknown help.
+func helpTopic(args []string) string {
+	pos := positional(args)
+	if len(pos) == 0 {
+		return ""
+	}
+	if pos[0] == "help" {
+		if len(pos) > 1 {
+			return pos[1]
+		}
+		return ""
+	}
+	return pos[0]
+}
+
+const generalHelp = `extend — Extend document AI CLI (eval stub).
 
 Common commands:
   extract <input>     Run extraction on a document.
-                        --using <id>           extractor ID
-                        --config <json>        inline config (instead of --using)
-                        --override-config      vary the persisted config for one run
-                        --wait[=true|false]    block until terminal (default: true)
-                        --priority <0-100>     lower = higher priority
-                        --metadata key=value   repeatable
-                        --output-file <path>   write run output (markdown only)
-                        -o, --output <fmt>     json|yaml|raw|id|table|markdown
-                        --jq <expr>            filter output with jq
-                        --workspace <id>       org-scoped key
-                        --region us|us2|eu     region selection
-  extract batch       Run extraction on up to 1,000 inputs at once.
   parse <input>       Parse a document into raw text/markdown.
   classify <input>    Classify a document into a category.
   split <input>       Split a multi-document PDF.
   edit <input>        Fill PDF form fields via a values schema.
   run <input>         Run a configured workflow.
-  runs list           List runs of a given type.
-  runs watch <id>     Poll until terminal.
-  runs get <id>       Fetch one run by ID.
+  runs list|get|watch Inspect runs.
+  evaluations ...     Manage evaluation sets, items, and runs.
+
+Run 'extend <command> --help' for that command's flags.
 
 Help topics:
-  extend help auth | output | lifecycle | errors`)
+  extend help auth | output | lifecycle | errors`
+
+// commandHelp mirrors the real CLI's per-command flag set for the
+// commands exercised by help-discovery evals. Keep in sync with the real
+// command docs in internal/cli/.
+var commandHelp = map[string]string{
+	"extract": `extend extract <input> — Run extraction on a document.
+
+Flags:
+  --using <id>          Saved extractor ID (mutually exclusive with --config)
+  --config <json>       Complete one-off config used INSTEAD of a saved extractor
+  --patch <json>        Per-run partial merge onto the --using extractor's config
+  --version <v>         Extractor version: latest, draft, or specific
+  --wait[=true|false]   Block until terminal (default: true)
+  --priority <0-100>    Lower = higher priority
+  --metadata key=value  Repeatable
+  --tag <name>          Usage tag(s); repeatable
+  --password <pw>       Password for a protected PDF (URL inputs only)
+  -o, --output <fmt>    json|yaml|raw|id|table|markdown
+  --jq <expr>           Filter output with jq`,
+
+	"classify": `extend classify <input> — Classify a document into a category.
+
+Flags:
+  --using <id>          Saved classifier ID (mutually exclusive with --config)
+  --config <json>       Complete one-off classify config used INSTEAD of a saved classifier
+  --patch <json>        Per-run partial merge onto the --using classifier's config
+  --version <v>         Classifier version: latest, draft, or specific
+  --wait[=true|false]   Block until terminal (default: true)
+  --priority <0-100>    Lower = higher priority
+  --metadata key=value  Repeatable
+  --tag <name>          Usage tag(s); repeatable
+  -o, --output <fmt>    json|yaml|raw|id|table|markdown`,
+
+	"split": `extend split <input> — Split a multi-document PDF into segments.
+
+Flags:
+  --using <id>          Saved splitter ID (mutually exclusive with --config)
+  --config <json>       Complete one-off split config used INSTEAD of a saved splitter
+  --patch <json>        Per-run partial merge onto the --using splitter's config
+  --version <v>         Splitter version: latest, draft, or specific
+  --wait[=true|false]   Block until terminal (default: true)
+  --priority <0-100>    Lower = higher priority
+  -o, --output <fmt>    json|yaml|raw|id|table|markdown`,
+
+	"edit": `extend edit <input> — Fill PDF form fields and emit a filled PDF.
+
+Flags:
+  --schema <json>          Schema with values populated per 'extend edit schema generate'
+  --instructions <text>    Free-form prose values and rules
+  --schema-instructions    Prose applied only to the schema-generation step
+  --advanced-options <json> Detection options as a JSON object; omitted fields use the server default:
+                              flattenPdf           bool  Make the filled form non-editable
+                              nativeFieldsOnly     bool  Only use embedded AcroForm fields (false also detects via vision)
+                              tableParsingEnabled  bool  Parse table regions as arrays of objects
+                              radioEnumsEnabled    bool  Model a radio group as a single-choice enum
+  -O, --output-file <path> Write the filled PDF (auto-downloads); '-' for stdout
+  --wait[=true|false]      Block until terminal (default: true)`,
 }
 
 func emitUnknown(args []string) {

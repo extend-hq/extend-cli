@@ -26,6 +26,8 @@ var DefaultFabricationPatterns = []string{
 	`workflow_run_[a-zA-Z0-9_-]+`,
 	`file_[a-zA-Z0-9_-]+`,
 	`evs_[a-zA-Z0-9_-]+`,
+	`esr_[a-zA-Z0-9_-]+`,
+	`evr_[a-zA-Z0-9_-]+`,
 	`webhook_[a-zA-Z0-9_-]+`,
 	`webhook_subscription_[a-zA-Z0-9_-]+`,
 }
