@@ -770,7 +770,7 @@
       "files": [
         "items.json"
       ],
-      "expected_output": "Agent issues `evaluations create` then `evaluations items create`. Does NOT attempt to trigger eval runs from the CLI (no such command).",
+      "expected_output": "Agent issues `evaluations create` then `evaluations items create`. Does NOT trigger an eval run — the prompt only asks to set up the set and add items, not to score a processor. (The guard is against over-running when unasked; `evaluations runs create` exists but isn't wanted here.)",
       "expectations": [
         {
           "type": "extend_call",
@@ -1199,6 +1199,94 @@
           "type": "stable_answer",
           "text": "answer does NOT recommend `extend auth login` (doesn't exist)",
           "answer_must_not_match": "extend\\s+auth\\s+login"
+        }
+      ]
+    },
+    {
+      "id": "H-2",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "How do I make `extend edit` parse form tables and treat a radio-button group as single-select? Show me the exact flag and fields.",
+      "files": [],
+      "expected_output": "Agent consults `extend edit --help` and reports that detection options go in `--advanced-options` JSON, naming the tableParsingEnabled and radioEnumsEnabled fields. Does not invent standalone flags.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent consulted edit help rather than guessing",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "flag": "help"
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer points at the --advanced-options JSON flag",
+          "answer_pattern": "--advanced-options"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names the tableParsingEnabled field",
+          "answer_pattern": "tableParsingEnabled"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names the radioEnumsEnabled field",
+          "answer_pattern": "radioEnumsEnabled"
+        }
+      ]
+    },
+    {
+      "id": "H-3",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "I don't have a saved classifier in Extend. Can `extend classify` take an inline config instead of --using, and if so which flag?",
+      "files": [],
+      "expected_output": "Agent identifies `--config` (a complete one-off classify config, mutually exclusive with --using), e.g. via `extend classify --help`. Does not claim a saved classifier is required or that it's dashboard-only.",
+      "expectations": [
+        {
+          "type": "stable_answer",
+          "text": "answer names the --config flag",
+          "answer_pattern": "--config"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer does not claim a saved classifier / --using is mandatory",
+          "answer_must_not_match": "--using is required|must (use|have) a saved classifier"
+        }
+      ]
+    },
+    {
+      "id": "W-6",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Kick off an evaluation run for eval set evs_q3truth, scoring extractor ex_invoiceQ3.",
+      "files": [],
+      "expected_output": "Agent runs `extend evaluations runs create evs_q3truth` (optionally --entity ex_invoiceQ3). Does NOT claim eval runs can only be started from the dashboard.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent triggered the eval run via the CLI with the given set ID",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "evaluations",
+                "runs",
+                "create"
+              ],
+              "args": [
+                "evs_q3truth"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer does not punt eval-run triggering to the dashboard",
+          "answer_must_not_match": "dashboard only|no such command|only.{0,20}dashboard"
         }
       ]
     }

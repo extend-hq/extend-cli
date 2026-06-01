@@ -427,6 +427,28 @@ func emitEvaluationsItemsCreate(args []string, mode string) {
 	})
 }
 
+// emitEvaluationRunsCreate stubs `extend evaluations runs create <evs_id>`.
+// The eval set ID is the 4th positional (evaluations runs create <id>); it
+// typically arrives from the prompt in Path-B cases. Returns a synthetic
+// evaluation_set_run so the agent sees a created run rather than an error.
+func emitEvaluationRunsCreate(args []string, mode string) {
+	pos := positional(args)
+	setID := ""
+	if len(pos) >= 4 {
+		setID = pos[3]
+	}
+	out := map[string]any{
+		"id":              nowID("esr_"),
+		"object":          "evaluation_set_run",
+		"status":          "PENDING",
+		"evaluationSetId": setID,
+	}
+	if entity := flagValue(args, "entity"); entity != "" {
+		out["entity"] = map[string]any{"id": entity}
+	}
+	emitJSON(out)
+}
+
 func emitWebhookEndpointsCreate(args []string, mode string) {
 	emitJSON(map[string]any{
 		"id":            nowID("webhook_"),
