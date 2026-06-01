@@ -77,13 +77,12 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	if err := runEdit(context.Background(), ta.app, editParams{
-		input:        "file_a",
-		schemaPath:   schema,
-		instructions: "be thorough",
-		wait:         true,
-		nativeOnly:   true,
-		flatten:      true,
-		timeout:      2 * time.Second,
+		input:               "file_a",
+		schemaPath:          schema,
+		instructions:        "be thorough",
+		advancedOptionsPath: `{"flattenPdf":true}`,
+		wait:                true,
+		timeout:             2 * time.Second,
 	}); err != nil {
 		t.Fatalf("runEdit: %v", err)
 	}
@@ -107,8 +106,71 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	if strings.Contains(postBody, `"priority":`) || strings.Contains(postBody, `"metadata":`) {
 		t.Errorf("priority/metadata not supported on edit runs; got %s", postBody)
 	}
+	// --advanced-options JSON must nest under config.advancedOptions.
 	if strings.Contains(postBody, `"flattenPdf":true`) == false {
-		t.Errorf("flattenPdf should be inside config.advancedOptions; got %s", postBody)
+		t.Errorf("flattenPdf (from --advanced-options) should be inside config.advancedOptions; got %s", postBody)
+	}
+}
+
+// TestEdit_AdvancedOptionsForwardedAsJSON locks in that --advanced-options
+// JSON reaches the request body under config.advancedOptions, including the
+// table-parsing and radio-enums fields that were previously unreachable.
+func TestEdit_AdvancedOptionsForwardedAsJSON(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/edit_runs":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		case r.Method == http.MethodGet && r.URL.Path == "/edit_runs/edr_x":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	ta := newTestApp(t, srv)
+	if err := runEdit(context.Background(), ta.app, editParams{
+		input:               "file_a",
+		instructions:        "fill it",
+		advancedOptionsPath: `{"tableParsingEnabled":true,"radioEnumsEnabled":true}`,
+		wait:                true,
+		timeout:             2 * time.Second,
+	}); err != nil {
+		t.Fatalf("runEdit: %v", err)
+	}
+	body := string(srv.requests[0].Body)
+	if !strings.Contains(body, `"config":{`) || !strings.Contains(body, `"advancedOptions":`) {
+		t.Errorf("advanced options must nest under config.advancedOptions; got %s", body)
+	}
+	if !strings.Contains(body, `"tableParsingEnabled":true`) {
+		t.Errorf("body must carry tableParsingEnabled; got %s", body)
+	}
+	if !strings.Contains(body, `"radioEnumsEnabled":true`) {
+		t.Errorf("body must carry radioEnumsEnabled; got %s", body)
+	}
+}
+
+// TestEdit_AdvancedOptionsOmittedByDefault drives the cobra command with no
+// --advanced-options and asserts the body carries no advancedOptions at all,
+// so every detection field is left at the server default.
+func TestEdit_AdvancedOptionsOmittedByDefault(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/edit_runs":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		case r.Method == http.MethodGet && r.URL.Path == "/edit_runs/edr_x":
+			writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PROCESSED"})
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "edit")
+	cmd.SetArgs([]string{"file_a", "--instructions", "fill it"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	body := string(srv.requests[0].Body)
+	if strings.Contains(body, "advancedOptions") {
+		t.Errorf("with no --advanced-options the body must omit advancedOptions; got %s", body)
 	}
 }
 
@@ -149,8 +211,6 @@ func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {
 		schemaPath: schema,
 		outputFile: out,
 		wait:       true,
-		nativeOnly: true,
-		flatten:    true,
 		timeout:    2 * time.Second,
 	})
 	if err != nil {
@@ -200,8 +260,6 @@ func TestEdit_OutputFileStdoutDoesNotAppendRunJSON(t *testing.T) {
 		schemaPath: schema,
 		outputFile: "-",
 		wait:       true,
-		nativeOnly: true,
-		flatten:    true,
 		timeout:    2 * time.Second,
 	})
 	if err != nil {
@@ -276,8 +334,6 @@ func TestEdit_ProcessedButNoOutputFileEmitsWarning(t *testing.T) {
 		input:      "file_a",
 		schemaPath: schema,
 		wait:       true,
-		nativeOnly: true,
-		flatten:    true,
 		timeout:    2 * time.Second,
 	})
 	if err != nil {
@@ -323,8 +379,6 @@ func TestEdit_ProcessedWithOutputFileSilent(t *testing.T) {
 		input:      "file_a",
 		schemaPath: schema,
 		wait:       true,
-		nativeOnly: true,
-		flatten:    true,
 		timeout:    2 * time.Second,
 	})
 	if err != nil {

@@ -24,11 +24,10 @@ func newEditDoc(app *App) *CommandDoc {
 		schemaPath            string
 		instructions          string
 		schemaGenInstructions string
+		advancedOptionsPath   string
 		outputFile            string
 		password              string
 		wait                  bool
-		nativeOnly            bool
-		flatten               bool
 		timeout               time.Duration
 	)
 
@@ -73,18 +72,29 @@ There are two ways to provide values:
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
-files download'.`,
+files download'.
+
+Advanced detection options ride in --advanced-options as a JSON object
+(inline JSON, a path, a file:// URI, or '-' for stdin). Omitted fields use
+the server default:
+
+  flattenPdf           bool  Make the filled form non-editable (server default: true).
+  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled  bool  Parse table regions as arrays of objects so their cells can be filled.
+  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum so only one option fills.`,
 		Examples: []Example{
 			{Label: "Inline instructions", Cmd: `extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15" --output-file filled.pdf`},
 			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
 			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
 			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
+			{Label: "Tune detection", Cmd: `extend edit form.pdf --advanced-options '{"tableParsingEnabled":true,"radioEnumsEnabled":true}'`},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
 		},
 		Gotchas: []string{
 			"--schema and --instructions can be combined; for simple fills, --instructions alone is enough.",
 			"Populate values per the shape emitted by 'extend edit schema generate' — do not invent field names; inspect the generated schema first.",
 			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
+			"Detection toggles (flattenPdf/nativeFieldsOnly/tableParsingEnabled/radioEnumsEnabled) go in --advanced-options JSON; omitted fields use the server default.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
 		},
 		SeeAlso:  []string{"edit schema generate", "runs watch", "runs get", "files download"},
@@ -98,11 +108,10 @@ files download'.`,
 				schemaPath:            schemaPath,
 				instructions:          instructions,
 				schemaGenInstructions: schemaGenInstructions,
+				advancedOptionsPath:   advancedOptionsPath,
 				outputFile:            outputFile,
 				password:              password,
 				wait:                  wait,
-				nativeOnly:            nativeOnly,
-				flatten:               flatten,
 				timeout:               timeout,
 			})
 		},
@@ -110,11 +119,10 @@ files download'.`,
 			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend edit schema generate'. Omit to let the server auto-detect form fields.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
-			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only fill native PDF form fields (set false to detect via vision)")
-			cmd.Flags().BoolVar(&flatten, "flatten", true, "Flatten the PDF after filling")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
 		Subcommands: []*CommandDoc{newEditSchemaDoc(app)},
@@ -126,11 +134,10 @@ type editParams struct {
 	schemaPath            string
 	instructions          string
 	schemaGenInstructions string
+	advancedOptionsPath   string
 	outputFile            string
 	password              string
 	wait                  bool
-	nativeOnly            bool
-	flatten               bool
 	timeout               time.Duration
 }
 
@@ -150,11 +157,17 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		return err
 	}
 
-	cfg := &extend.EditConfig{
-		AdvancedOptions: &extend.EditConfigAdvancedOptions{
-			NativeFieldsOnly: extend.Bool(p.nativeOnly),
-			FlattenPdf:       extend.Bool(p.flatten),
-		},
+	cfg := &extend.EditConfig{}
+	if p.advancedOptionsPath != "" {
+		raw, err := readJSONFile(p.advancedOptionsPath, "--advanced-options")
+		if err != nil {
+			return err
+		}
+		var ao extend.EditConfigAdvancedOptions
+		if err := json.Unmarshal(raw, &ao); err != nil {
+			return fmt.Errorf("--advanced-options: %w", err)
+		}
+		cfg.AdvancedOptions = &ao
 	}
 	if p.instructions != "" {
 		cfg.Instructions = extend.String(p.instructions)
@@ -325,10 +338,10 @@ func newEditSchemaDoc(app *App) *CommandDoc {
 // `extend edit schema generate`.
 func newEditSchemaGenerateDoc(app *App) *CommandDoc {
 	var (
-		nativeOnly      bool
-		instructions    string
-		inputSchemaPath string
-		password        string
+		advancedOptionsPath string
+		instructions        string
+		inputSchemaPath     string
+		password            string
 	)
 	return &CommandDoc{
 		Use:     "generate <input>",
@@ -348,7 +361,14 @@ passed directly to 'extend edit --schema'.
 Use --instructions to guide the schema generator about which fields to
 include or how to interpret ambiguous form layouts. Use --input-schema to
 seed the generator with an existing schema, in which case detected fields
-are overlaid onto your starting point.`,
+are overlaid onto your starting point.
+
+Detection options ride in --advanced-options as a JSON object (omitted
+fields use the server default):
+
+  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled  bool  Parse table regions as arrays of objects.
+  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend edit schema generate form.pdf > schema.json"},
 			{Label: "With instructions", Cmd: `extend edit schema generate form.pdf --instructions "skip the signature block"`},
@@ -374,10 +394,17 @@ are overlaid onto your starting point.`,
 			if err != nil {
 				return err
 			}
-			cfg := &extend.EditSchemaGenerationConfig{
-				AdvancedOptions: &extend.EditSchemaGenerationConfigAdvancedOptions{
-					NativeFieldsOnly: extend.Bool(nativeOnly),
-				},
+			cfg := &extend.EditSchemaGenerationConfig{}
+			if advancedOptionsPath != "" {
+				raw, err := readJSONFile(advancedOptionsPath, "--advanced-options")
+				if err != nil {
+					return err
+				}
+				var ao extend.EditSchemaGenerationConfigAdvancedOptions
+				if err := json.Unmarshal(raw, &ao); err != nil {
+					return fmt.Errorf("--advanced-options: %w", err)
+				}
+				cfg.AdvancedOptions = &ao
 			}
 			if instructions != "" {
 				cfg.Instructions = extend.String(instructions)
@@ -419,7 +446,7 @@ are overlaid onto your starting point.`,
 			return renderWithDefault(app, pretty, output.FormatJSON)
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().BoolVar(&nativeOnly, "native-fields-only", true, "Only detect native PDF form fields (set false to detect via vision)")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
 			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
