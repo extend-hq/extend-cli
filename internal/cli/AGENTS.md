@@ -4,9 +4,9 @@ Documentation is a primary artifact of this package, not a side product.
 Every command, group, and help topic is a `*CommandDoc` literal in the
 tree rooted at `RootDoc(app)`. The cobra command tree built by
 `RootDoc(app).Build()` is one of N projections of that tree; downstream
-consumers (the help renderer, future SKILL.md generator, future MCP tool
-manifests) read from the typed tree via `Walk(RootDoc(app))`, never from
-cobra annotations.
+consumers (the help renderer, the `extend skill` SKILL.md generator, and
+planned MCP tool manifests) read from the typed tree via `Walk(RootDoc(app))`,
+never from cobra annotations.
 
 ## Three node kinds
 
@@ -89,6 +89,34 @@ for groups when nil.
 
 **`Configure`** — runs after annotation application; bind flags, set
 hooks here. The closure captures local-var pointers shared with `RunE`.
+
+## Flags vs. JSON config
+
+When a command needs to set fields of an API **config object**
+(`config`, `advancedOptions`, `blockOptions`, processor config, an
+edit/extract/classify/split config), take the whole object as a single
+JSON flag — `--config` / `--advanced-options` / `--block-options` /
+`--from-file` (inline JSON, a path, a `file://` URI, or `-`) — and
+unmarshal it into the SDK struct. Do **not** mint one flag per field.
+
+Rationale: per-field flags are high-maintenance (every new API field
+needs a flag + wiring + a test) and can't represent nested objects or
+arrays (e.g. parse's `pageRanges`, `returnOcr`); a JSON flag is one
+unmarshal and absorbs the whole shape. It's also the consistent shape
+across the action verbs (`extract`/`classify`/`split` configs, parse's
+deep options, edit's `advancedOptions`).
+
+Discoverability — the reason these knobs existed-but-were-invisible in
+the first place — is satisfied by **documenting the field catalog in
+`Details`** (field name, type, one-line meaning, default), not by
+promoting fields to flags. The agent reads `extend <cmd> --help`, sees
+the JSON shape, and builds it.
+
+Reserve typed flags for: run/IO controls (`--wait`, `--output-file`,
+`--using`, `--version`, `-o/--output`) and a small set of genuinely
+common, flat, stable knobs a command wants to promote (parse's
+`--target`/`--chunk-strategy`/`--engine`). Everything else in a config
+object goes through the JSON flag.
 
 ## Adding a new command
 

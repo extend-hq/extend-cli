@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,7 @@ func newClassifyDoc(app *App) *CommandDoc {
 		classifierID string
 		version      string
 		patchPath    string
+		configPath   string
 		password     string
 		wait         bool
 		priority     int
@@ -51,20 +53,32 @@ with a confidence score.
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
+The classifier comes from one of two forms. Exactly one of --using or
+--config is required:
+
+  # Run a saved classifier as-is (optionally tweaked with --patch).
+  extend classify <input> --using cl_xxx
+
+  # Run a one-off classifier config without saving it (prototyping).
+  extend classify <input> --config inline-config.json
+
 --patch applies a per-run partial merge onto the --using classifier's
-saved config. Source: inline JSON, a plain file path, an absolute
-file:// URI, or '-' to read from stdin. --patch does NOT replace the
-classifier; pass --using to pick the classifier and --patch to vary it
-without modifying the persisted version.`,
+saved config; it requires --using and is NOT interchangeable with --config
+(which is a complete standalone config). For both, the value may be inline
+JSON, a path, a file:// URI, or '-' to read from stdin.
+
+` + actionConfigDoc(classifyConfigFields),
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend classify invoice.pdf --using cl_abc"},
 			{Label: "URL with JSON output", Cmd: "extend classify https://example.com/x.pdf --using cl_abc -o json"},
 			{Label: "Patch a saved classifier for this run", Cmd: "extend classify invoice.pdf --using cl_abc --patch tweaks.json"},
 			{Label: "Inline patch", Cmd: `extend classify invoice.pdf --using cl_abc --patch '{"foo":"bar"}'`},
+			{Label: "One-off config with no saved classifier", Cmd: "extend classify invoice.pdf --config inline-config.json"},
 			{Label: "Filter via jq", Cmd: "extend classify invoice.pdf --using cl_abc --jq '.output.id' -o raw"},
 		},
 		Gotchas: []string{
-			"--using is required (no inline-config option for classify).",
+			"Exactly one of --using or --config is required (server schema rejects both or neither).",
+			"--patch requires --using; for a standalone config use --config instead.",
 		},
 		SeeAlso:  []string{"extract", "parse", "classify batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
@@ -76,11 +90,18 @@ without modifying the persisted version.`,
 			if err != nil {
 				return err
 			}
+			if (classifierID == "") == (configPath == "") {
+				return errors.New("exactly one of --using or --config is required: --using <id> runs a saved classifier; --config <json> provides a standalone inline config")
+			}
+			if configPath != "" && patchPath != "" {
+				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
+			}
 			return runClassify(cmd.Context(), app, classifyParams{
 				input:        args[0],
 				classifierID: classifierID,
 				version:      version,
 				patchPath:    patchPath,
+				configPath:   configPath,
 				password:     password,
 				wait:         wait,
 				priority:     priority,
@@ -89,15 +110,15 @@ without modifying the persisted version.`,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&classifierID, "using", "", "Classifier ID (required)")
+			cmd.Flags().StringVar(&classifierID, "using", "", "Saved classifier ID (mutually exclusive with --config)")
 			cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
 			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using classifier's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off classify config used INSTEAD of a saved classifier. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
-			_ = cmd.MarkFlagRequired("using")
 		},
 		Subcommands: []*CommandDoc{newClassifyBatchDoc(app)},
 	}
@@ -108,6 +129,7 @@ type classifyParams struct {
 	classifierID string
 	version      string
 	patchPath    string
+	configPath   string
 	password     string
 	wait         bool
 	priority     int
@@ -131,26 +153,38 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 		return err
 	}
 
-	classifier := &extend.ClassifyRunsCreateRequestClassifier{ID: p.classifierID}
-	if p.version != "" {
-		v := extend.ProcessorVersionString(p.version)
-		classifier.Version = &v
+	req := &extend.ClassifyRunsCreateRequest{
+		File: file,
 	}
-	if p.patchPath != "" {
-		raw, err := readJSONFile(p.patchPath, "--patch")
+	switch {
+	case p.configPath != "":
+		raw, err := readJSONFile(p.configPath, "--config")
 		if err != nil {
 			return err
 		}
-		var override extend.ClassifyOverrideConfig
-		if err := json.Unmarshal(raw, &override); err != nil {
-			return fmt.Errorf("--patch: %w", err)
+		var cfg extend.ClassifyConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return fmt.Errorf("--config: %w", err)
 		}
-		classifier.OverrideConfig = &override
-	}
-
-	req := &extend.ClassifyRunsCreateRequest{
-		Classifier: classifier,
-		File:       file,
+		req.Config = &cfg
+	case p.classifierID != "":
+		classifier := &extend.ClassifyRunsCreateRequestClassifier{ID: p.classifierID}
+		if p.version != "" {
+			v := extend.ProcessorVersionString(p.version)
+			classifier.Version = &v
+		}
+		if p.patchPath != "" {
+			raw, err := readJSONFile(p.patchPath, "--patch")
+			if err != nil {
+				return err
+			}
+			var override extend.ClassifyOverrideConfig
+			if err := json.Unmarshal(raw, &override); err != nil {
+				return fmt.Errorf("--patch: %w", err)
+			}
+			classifier.OverrideConfig = &override
+		}
+		req.Classifier = classifier
 	}
 	if p.metadata != nil {
 		md := extend.RunMetadata(p.metadata)

@@ -23,6 +23,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 		pluralNoun: "workflows",
 		exampleID:  "workflow_abc",
 		runVerb:    "run",
+		bodyDoc:    workflowBodyDoc,
 		rowFields: func(w *extend.WorkflowSummary) []string {
 			return []string{w.ID, w.Name, relTime(w.CreatedAt)}
 		},

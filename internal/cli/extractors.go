@@ -19,6 +19,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 		pluralNoun: "extractors",
 		exampleID:  "ex_abc",
 		runVerb:    "extract",
+		bodyDoc:    processorBodyDoc(extractConfigFields),
 		rowFields: func(e *extend.ExtractorSummary) []string {
 			return []string{e.ID, e.Name, relTime(e.CreatedAt)}
 		},

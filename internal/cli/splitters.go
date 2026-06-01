@@ -19,6 +19,7 @@ func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSumm
 		pluralNoun: "splitters",
 		exampleID:  "spl_abc",
 		runVerb:    "split",
+		bodyDoc:    processorBodyDoc(splitConfigFields),
 		rowFields: func(s *extend.SplitterSummary) []string {
 			return []string{s.ID, s.Name, relTime(s.CreatedAt)}
 		},
