@@ -124,6 +124,47 @@ func TestEvaluationRunsGet_UsesEvaluationSetRunsRoute(t *testing.T) {
 	}
 }
 
+func TestEvaluationRunsCreate_PostsToEvaluationSetRuns(t *testing.T) {
+	// Server route is POST /evaluation_set_runs; the set ID travels in the
+	// body, not the path. Entity + item subset come from flags.
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/evaluation_set_runs" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"id": "esr_new", "object": "evaluation_set_run"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "evaluations", "runs", "create")
+	cmd.SetArgs([]string{"evs_abc", "--entity", "ex_abc", "--entity-version", "2.0", "--item", "esi_a", "--item", "esi_b"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	if !strings.Contains(body, `"evaluationSetId":"evs_abc"`) {
+		t.Errorf("body missing evaluationSetId: %s", body)
+	}
+	if !strings.Contains(body, `"id":"ex_abc"`) || !strings.Contains(body, `"version":"2.0"`) {
+		t.Errorf("body missing entity {id, version}: %s", body)
+	}
+	if !strings.Contains(body, `"esi_a"`) || !strings.Contains(body, `"esi_b"`) {
+		t.Errorf("body missing evaluationSetItemIds: %s", body)
+	}
+}
+
+func TestEvaluationRunsCreate_EntityVersionRequiresEntity(t *testing.T) {
+	// --entity-version without --entity is rejected before any HTTP call.
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("no request expected; got %s %s", r.Method, r.URL.Path)
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "evaluations", "runs", "create")
+	cmd.SetArgs([]string{"evs_abc", "--entity-version", "2.0"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--entity-version requires --entity") {
+		t.Errorf("expected --entity-version requires --entity error, got %v", err)
+	}
+}
+
 func writeFile(path string, data []byte) error {
 	return writeFileForTest(path, data)
 }

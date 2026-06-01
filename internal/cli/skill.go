@@ -403,8 +403,12 @@ When the values live in a source document (e.g. fill a 1040 from a W-2):
    ` + "`{evaluationSetItems: [...]}`" + `.
 3. Iterate on the extractor draft, then publish a new version
    (` + "`extend extractors versions create`" + ` as in workflow 1).
-4. Run the evaluation set from the dashboard (CLI does not trigger eval
-   runs), then inspect the resulting run's per-item accuracy and metrics:
+4. Trigger an evaluation run (e.g. against the new version) and capture
+   its ID:
+
+       extend evaluations runs create evs_yyy --entity ex_xxx --entity-version 2.0
+
+5. Runs are async; poll for per-item accuracy and metrics once it finishes:
 
        extend evaluations runs get esr_zzz -o json
 

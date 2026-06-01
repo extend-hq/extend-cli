@@ -23,9 +23,10 @@ func newEvaluationsDoc(app *App) *CommandDoc {
 		Summary: "Manage evaluation sets and items",
 		Group:   "Resources",
 		WhenToUse: `Use these commands to manage evaluation sets (named bundles of
-ground-truth items used to measure processor accuracy) and the items
-inside them. Evaluation runs themselves are created via the dashboard;
-this CLI surfaces them read-only via 'extend evaluations runs get'.`,
+ground-truth items used to measure processor accuracy), the items inside
+them, and the runs that score a processor against them. Trigger a run with
+'extend evaluations runs create' and inspect results with
+'extend evaluations runs get'.`,
 		Details: `An evaluation set is scoped to one extractor, classifier, or splitter.
 Each item in the set pairs a file with its expected output. Running the
 set against a processor version produces an evaluation run with per-field
@@ -517,13 +518,101 @@ prompt (required in non-interactive scripts).`,
 func newEvaluationRunsDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "runs",
-		Summary: "Inspect evaluation runs (read-only)",
-		WhenToUse: `Use this group to inspect evaluation runs. Runs are created via the
-dashboard, not the CLI; only read-only inspection is exposed.`,
-		Details: `Currently only 'get <run-id>' is supported. Listing evaluation runs
-is not yet exposed via the external API.`,
+		Summary: "Create and inspect evaluation runs",
+		WhenToUse: `Use this group to trigger evaluation runs and inspect their results.
+'create <set-id>' scores a processor version against the set's ground-truth
+items; 'get <run-id>' returns per-item results and accuracy metrics.`,
+		Details: `Listing evaluation runs is not yet exposed via the external API; capture
+the run ID printed by 'create' (or from the dashboard) and pass it to 'get'.`,
 		Subcommands: []*CommandDoc{
+			newEvaluationRunsCreateDoc(app),
 			newEvaluationRunsGetDoc(app),
+		},
+	}
+}
+
+func newEvaluationRunsCreateDoc(app *App) *CommandDoc {
+	var (
+		fromFile      string
+		entity        string
+		entityVersion string
+		items         []string
+	)
+	return &CommandDoc{
+		Use:     "create <evaluation-set-id>",
+		Summary: "Start an evaluation set run",
+		Triggers: []string{
+			"run an evaluation set against a processor",
+			"trigger an evaluation set run",
+			"score a processor version on ground truth",
+			"start an eval run to measure accuracy",
+			"kick off an evaluation run from the cli",
+		},
+		WhenToUse: `Use to trigger an evaluation run that scores a processor version against
+an evaluation set's ground-truth items — for example, to gate a deploy in
+CI on accuracy. Inspect the results afterward with 'extend evaluations runs
+get <run-id>'.`,
+		Details: `Pass the evaluation set ID as the positional argument. By default the run
+scores the processor the set is scoped to; pass --entity (and optionally
+--entity-version) to evaluate a specific processor or version, and --item to
+restrict the run to a subset of the set's items.
+
+--from-file supplies the full request body (inline JSON, path, file:// URI,
+or '-' for stdin) for fields not covered by flags; the positional set ID and
+any flags override the file. Runs are asynchronous — poll the returned run ID
+with 'extend evaluations runs get'.`,
+		Examples: []Example{
+			{Label: "Whole set, default entity", Cmd: "extend evaluations runs create evs_abc"},
+			{Label: "Pin a processor version", Cmd: "extend evaluations runs create evs_abc --entity ex_abc --entity-version 2.0"},
+			{Label: "Subset of items", Cmd: "extend evaluations runs create evs_abc --item esi_a --item esi_b"},
+		},
+		Gotchas: []string{
+			"--entity-version requires --entity (a version with no processor ID is rejected).",
+			"Runs are asynchronous; this prints the created run, then poll 'extend evaluations runs get <run-id>' for accuracy metrics.",
+		},
+		SeeAlso: []string{"evaluations runs get", "evaluations get", "evaluations items create"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var req extend.EvaluationSetRunsCreateRequest
+			if fromFile != "" {
+				body, err := readJSONFile(fromFile, "--from-file")
+				if err != nil {
+					return err
+				}
+				if err := json.Unmarshal(body, &req); err != nil {
+					return fmt.Errorf("--from-file: %w", err)
+				}
+			}
+			req.EvaluationSetID = args[0]
+			if entity != "" {
+				e := &extend.EvaluationSetRunsCreateRequestEntity{ID: entity}
+				if entityVersion != "" {
+					v := extend.ProcessorVersionString(entityVersion)
+					e.Version = &v
+				}
+				req.Entity = e
+			} else if entityVersion != "" {
+				return fmt.Errorf("--entity-version requires --entity")
+			}
+			if len(items) > 0 {
+				req.EvaluationSetItemIDs = items
+			}
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			run, err := cli.EvaluationSetRuns.Create(cmd.Context(), &req)
+			if err != nil {
+				return err
+			}
+			return renderWithDefault(app, run, output.FormatJSON)
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin (flags override)")
+			cmd.Flags().StringVar(&entity, "entity", "", "Processor ID to evaluate (defaults to the set's scoped entity)")
+			cmd.Flags().StringVar(&entityVersion, "entity-version", "", "Processor version to evaluate (requires --entity)")
+			cmd.Flags().StringArrayVar(&items, "item", nil, "Restrict the run to specific evaluation item IDs (repeatable)")
 		},
 	}
 }
