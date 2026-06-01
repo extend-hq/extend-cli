@@ -19,6 +19,7 @@ func classifierAccessor() processorAccessor[*extend.Classifier, *extend.Classifi
 		pluralNoun: "classifiers",
 		exampleID:  "cl_abc",
 		runVerb:    "classify",
+		bodyDoc:    processorBodyDoc(classifyConfigFields),
 		rowFields: func(c *extend.ClassifierSummary) []string {
 			return []string{c.ID, c.Name, relTime(c.CreatedAt)}
 		},

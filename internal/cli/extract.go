@@ -69,7 +69,9 @@ of --using or --config is required:
 For both --patch and --config, the value may be inline JSON, a path,
 a file:// URI, or '-' to read from stdin. They are NOT interchangeable:
 --patch is a partial merge onto a --using extractor; --config is a
-complete standalone config that replaces the need for one entirely.`,
+complete standalone config that replaces the need for one entirely.
+
+` + actionConfigDoc(extractConfigFields),
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
 			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,7 @@ func newSplitDoc(app *App) *CommandDoc {
 		splitterID string
 		version    string
 		patchPath  string
+		configPath string
 		password   string
 		wait       bool
 		priority   int
@@ -51,20 +53,32 @@ when the input is a single document and you only need its category.`,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
 
---patch applies a per-run partial merge onto the --using splitter's
-saved config. Source: inline JSON, a plain file path, an absolute
-file:// URI, or '-' to read from stdin. --patch does NOT replace the
-splitter; pass --using to pick the splitter and --patch to vary it
-without modifying the persisted version.`,
+The splitter comes from one of two forms. Exactly one of --using or
+--config is required:
+
+  # Run a saved splitter as-is (optionally tweaked with --patch).
+  extend split <input> --using spl_xxx
+
+  # Run a one-off splitter config without saving it (prototyping).
+  extend split <input> --config inline-config.json
+
+--patch applies a per-run partial merge onto the --using splitter's saved
+config; it requires --using and is NOT interchangeable with --config (which
+is a complete standalone config). For both, the value may be inline JSON, a
+path, a file:// URI, or '-' to read from stdin.
+
+` + actionConfigDoc(splitConfigFields),
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend split combined.pdf --using spl_abc"},
 			{Label: "JSON output", Cmd: "extend split combined.pdf --using spl_abc -o json"},
 			{Label: "Patch a saved splitter for this run", Cmd: "extend split combined.pdf --using spl_abc --patch tweaks.json"},
 			{Label: "Inline patch", Cmd: `extend split combined.pdf --using spl_abc --patch '{"foo":"bar"}'`},
+			{Label: "One-off config with no saved splitter", Cmd: "extend split combined.pdf --config inline-config.json"},
 			{Label: "Count segments via jq", Cmd: "extend split combined.pdf --using spl_abc --jq '.output.splits | length' -o raw"},
 		},
 		Gotchas: []string{
-			"--using is required (no inline-config option for split).",
+			"Exactly one of --using or --config is required (server schema rejects both or neither).",
+			"--patch requires --using; for a standalone config use --config instead.",
 		},
 		SeeAlso:  []string{"parse", "split batch", "runs watch", "runs get"},
 		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
@@ -76,11 +90,18 @@ without modifying the persisted version.`,
 			if err != nil {
 				return err
 			}
+			if (splitterID == "") == (configPath == "") {
+				return errors.New("exactly one of --using or --config is required: --using <id> runs a saved splitter; --config <json> provides a standalone inline config")
+			}
+			if configPath != "" && patchPath != "" {
+				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
+			}
 			return runSplit(cmd.Context(), app, splitParams{
 				input:      args[0],
 				splitterID: splitterID,
 				version:    version,
 				patchPath:  patchPath,
+				configPath: configPath,
 				password:   password,
 				wait:       wait,
 				priority:   priority,
@@ -89,15 +110,15 @@ without modifying the persisted version.`,
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&splitterID, "using", "", "Splitter ID (required)")
+			cmd.Flags().StringVar(&splitterID, "using", "", "Saved splitter ID (mutually exclusive with --config)")
 			cmd.Flags().StringVar(&version, "version", "", "Splitter version: latest, draft, or specific (e.g. 1.0)")
 			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using splitter's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off split config used INSTEAD of a saved splitter. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
-			_ = cmd.MarkFlagRequired("using")
 		},
 		Subcommands: []*CommandDoc{newSplitBatchDoc(app)},
 	}
@@ -108,6 +129,7 @@ type splitParams struct {
 	splitterID string
 	version    string
 	patchPath  string
+	configPath string
 	password   string
 	wait       bool
 	priority   int
@@ -131,26 +153,38 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 		return err
 	}
 
-	splitter := &extend.SplitRunsCreateRequestSplitter{ID: p.splitterID}
-	if p.version != "" {
-		v := extend.ProcessorVersionString(p.version)
-		splitter.Version = &v
+	req := &extend.SplitRunsCreateRequest{
+		File: file,
 	}
-	if p.patchPath != "" {
-		raw, err := readJSONFile(p.patchPath, "--patch")
+	switch {
+	case p.configPath != "":
+		raw, err := readJSONFile(p.configPath, "--config")
 		if err != nil {
 			return err
 		}
-		var override extend.SplitOverrideConfig
-		if err := json.Unmarshal(raw, &override); err != nil {
-			return fmt.Errorf("--patch: %w", err)
+		var cfg extend.SplitConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return fmt.Errorf("--config: %w", err)
 		}
-		splitter.OverrideConfig = &override
-	}
-
-	req := &extend.SplitRunsCreateRequest{
-		Splitter: splitter,
-		File:     file,
+		req.Config = &cfg
+	case p.splitterID != "":
+		splitter := &extend.SplitRunsCreateRequestSplitter{ID: p.splitterID}
+		if p.version != "" {
+			v := extend.ProcessorVersionString(p.version)
+			splitter.Version = &v
+		}
+		if p.patchPath != "" {
+			raw, err := readJSONFile(p.patchPath, "--patch")
+			if err != nil {
+				return err
+			}
+			var override extend.SplitOverrideConfig
+			if err := json.Unmarshal(raw, &override); err != nil {
+				return fmt.Errorf("--patch: %w", err)
+			}
+			splitter.OverrideConfig = &override
+		}
+		req.Splitter = splitter
 	}
 	if p.metadata != nil {
 		md := extend.RunMetadata(p.metadata)

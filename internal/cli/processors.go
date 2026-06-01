@@ -51,7 +51,14 @@ type processorAccessor[T any, TS any, V any, VS any] struct {
 	// For extractors it's "extract"; for classifiers, "classify";
 	// for splitters, "split"; for workflows, "run". Used to populate
 	// SeeAlso references back to the action verb in the list doc.
-	runVerb     string
+	runVerb string
+	// bodyDoc documents the create/update request-body shape (the JSON
+	// envelope plus the per-family config field catalog) for this
+	// family. Rendered into the create and update command Details so
+	// `--help` enumerates the JSON shape rather than punting to "copy
+	// an existing one" (per the Flags-vs-JSON-config contract in
+	// AGENTS.md). Built from the shared catalogs in configdocs.go.
+	bodyDoc     string
 	rowFields   func(TS) []string
 	listFn      func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (resp any, data []TS, nextPageToken string, err error)
 	getFn       func(ctx context.Context, c *sdkclient.Client, id string) (T, error)
@@ -514,11 +521,15 @@ you're ready to deploy.`, articleFor(a.noun), a.noun, a.noun, a.pluralNoun),
 		Details: fmt.Sprintf(`Pass --from-file with the full API body (inline JSON, path, file:// URI, or
 - for stdin); --name overrides any name in the body.
 
-For the request body shape, copy from an existing %s:
+%s
 
-    extend %s versions get <existing-id> 1.0 > template.json
+To clone the shape of an existing %s instead of authoring the body by hand,
+dump one and edit it (use "draft" for the working copy, or a published
+version like "1.0"):
 
-Then edit and pass via --from-file.`, a.noun, a.pluralNoun),
+    extend %s versions get <existing-id> draft > template.json
+
+Then edit and pass via --from-file.`, a.bodyDoc, a.noun, a.pluralNoun),
 		Examples: []Example{
 			{Label: "From file with name", Cmd: fmt.Sprintf(`extend %s create --from-file %s.json --name "My %s"`, a.pluralNoun, a.noun, a.noun)},
 			{Label: "From stdin", Cmd: fmt.Sprintf("cat %s.json | extend %s create --from-file -", a.noun, a.pluralNoun)},
@@ -569,8 +580,10 @@ func (a processorAccessor[T, TS, V, VS]) updateDoc(app *App) *CommandDoc {
 draft version only; they do NOT affect already-deployed versions. Use
 'extend %s versions create' to publish the updated draft as a new
 version.`, a.noun, a.pluralNoun),
-		Details: `Pass --from-file with a full or partial JSON body (inline JSON, path,
-file:// URI, or - for stdin); --name overrides any name in the body.`,
+		Details: fmt.Sprintf(`Pass --from-file with a full or partial JSON body (inline JSON, path,
+file:// URI, or - for stdin); --name overrides any name in the body.
+
+%s`, a.bodyDoc),
 		Examples: []Example{
 			{Label: "From patch file", Cmd: fmt.Sprintf("extend %s update %s --from-file patch.json", a.pluralNoun, a.exampleID)},
 			{Label: "Rename only", Cmd: fmt.Sprintf(`extend %s update %s --name "New name"`, a.pluralNoun, a.exampleID)},
