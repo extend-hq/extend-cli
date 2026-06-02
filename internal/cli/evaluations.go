@@ -189,7 +189,12 @@ or splitter. The set is created empty; add ground-truth items afterward
 with 'extend evaluations items create <set-id>'.`,
 		Details: `Pass --from-file with the API body (inline JSON, path, file:// URI, or -
 for stdin); --name and --description override their counterparts in the
-body.`,
+body. The request body is a JSON object:
+
+  - entityId (string, required) — the extractor/classifier/splitter the set
+    is scoped to (ex_/cl_/spl_); every item is scored against this processor.
+  - name (string, required) — human-readable set name (or pass --name).
+  - description (string) — optional notes (or pass --description).`,
 		Examples: []Example{
 			{Label: "From file", Cmd: `extend evaluations create --name "Q3 invoices" --from-file body.json`},
 			{Label: "Inline body", Cmd: `extend evaluations create --from-file '{"name":"smoke","entityId":"ex_abc"}'`},

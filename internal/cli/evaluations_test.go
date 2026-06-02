@@ -168,3 +168,14 @@ func TestEvaluationRunsCreate_EntityVersionRequiresEntity(t *testing.T) {
 func writeFile(path string, data []byte) error {
 	return writeFileForTest(path, data)
 }
+
+// TestEvaluationsCreateHelp_NamesEntityID guards the P1 discoverability fix:
+// the required entityId field is named in the create help's body catalog,
+// not only buried inside an example string.
+func TestEvaluationsCreateHelp_NamesEntityID(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "evaluations", "create")
+	if !strings.Contains(cmd.Long, "entityId") {
+		t.Errorf("evaluations create --help should name entityId in its catalog; got:\n%s", cmd.Long)
+	}
+}
