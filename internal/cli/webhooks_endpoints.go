@@ -234,7 +234,9 @@ JSON event body; pass --payload-format=url to swap to a link-only payload
 once the body exceeds --url-threshold-bytes.
 
 Use 'extend webhooks verify' to validate incoming payloads against the
-returned signing secret.`,
+returned signing secret.
+
+` + webhookEventsDoc,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend webhooks endpoints create --url https://x.com/hook --name prod --events extract_run.processed,extract_run.failed"},
 			{Label: "With custom headers", Cmd: "extend webhooks endpoints create --url https://x.com/hook --name prod --events extract_run.processed --header X-Tenant=acme --header X-Token=$WT"},
@@ -339,7 +341,11 @@ migrate.
 Setting --header replaces the entire custom-headers map; pass each header
 to keep, plus any new ones. The server does not support clearing all
 custom headers via --header. To remove every custom header, recreate the
-endpoint without --header instead.`,
+endpoint without --header instead.
+
+--events replaces the full enabled-events list.
+
+` + webhookEventsDoc,
 		Examples: []Example{
 			{Label: "Change URL", Cmd: "extend webhooks endpoints update whe_abc --url https://new.example.com/hook"},
 			{Label: "Disable", Cmd: "extend webhooks endpoints update whe_abc --disable"},

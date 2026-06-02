@@ -178,7 +178,9 @@ func newWebhookSubscriptionsCreateDoc(app *App) *CommandDoc {
 classifier, splitter, or workflow) for a chosen event set.`,
 		Details: `The resource type is auto-detected from the resource ID prefix
 (ex_=extractor, cl_=classifier, spl_=splitter, workflow_=workflow);
-pass --resource-type to override or for unknown prefixes.`,
+pass --resource-type to override or for unknown prefixes.
+
+` + webhookEventsDoc,
 		Examples: []Example{
 			{Label: "Workflow events", Cmd: "extend webhooks subscriptions create --endpoint whe_x --resource workflow_abc --events workflow_run.completed"},
 			{Label: "Override resource type", Cmd: "extend webhooks subscriptions create --endpoint whe_x --resource ex_abc --resource-type extractor --events extract_run.processed"},
@@ -247,7 +249,9 @@ func newWebhookSubscriptionsUpdateDoc(app *App) *CommandDoc {
 and resource are immutable; recreate the subscription to change those.`,
 		Details: `The server only allows updating the enabledEvents field; the bound
 endpoint and resource are immutable. To change endpoint or resource,
-delete and recreate the subscription.`,
+delete and recreate the subscription.
+
+` + webhookEventsDoc,
 		Examples: []Example{
 			{Label: "Replace events", Cmd: "extend webhooks subscriptions update whs_abc --events extract_run.processed,extract_run.failed"},
 		},
