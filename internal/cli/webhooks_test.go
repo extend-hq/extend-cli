@@ -4,13 +4,17 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	extend "github.com/extend-hq/extend-go-sdk"
 )
 
 func TestWebhooksVerify_ValidSignature(t *testing.T) {
@@ -331,4 +335,63 @@ func signTest(secret, ts string, body []byte) string {
 	mac.Write([]byte("v0:" + ts + ":"))
 	mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// TestWebhookEventTypesCoverSDK is the drift guard for the --events
+// catalog. The event-type wire string is a free-form string in the SDK,
+// so rather than checking strings we wrote, it asks the SDK: for every
+// variant on WebhookEvent, instantiate it, marshal, and read back the
+// "eventType" discriminator the SDK emits — then assert that exact wire
+// value appears in webhookEventsDoc. A new event type from an SDK regen
+// is then covered automatically.
+func TestWebhookEventTypesCoverSDK(t *testing.T) {
+	typ := reflect.TypeOf(extend.WebhookEvent{})
+	checked := 0
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		// The discriminator string field and any unexported field are not
+		// variant payloads; those are the exported pointer-to-struct fields.
+		if f.Name == "EventType" || f.PkgPath != "" || f.Type.Kind() != reflect.Ptr {
+			continue
+		}
+		wrapper := reflect.New(typ)
+		wrapper.Elem().Field(i).Set(reflect.New(f.Type.Elem()))
+		data, err := json.Marshal(wrapper.Interface())
+		if err != nil {
+			t.Fatalf("marshal WebhookEvent for field %s: %v", f.Name, err)
+		}
+		var probe struct {
+			EventType string `json:"eventType"`
+		}
+		if err := json.Unmarshal(data, &probe); err != nil {
+			t.Fatalf("unmarshal probe for field %s: %v", f.Name, err)
+		}
+		if probe.EventType == "" {
+			continue
+		}
+		checked++
+		if !strings.Contains(webhookEventsDoc, probe.EventType) {
+			t.Errorf("webhookEventsDoc is missing SDK event type %q (from field %s) — document it in webhooks.go", probe.EventType, f.Name)
+		}
+	}
+	if checked < 30 {
+		t.Fatalf("only %d webhook event types cross-checked; expected the full WebhookEvent set — reflection probe likely broke", checked)
+	}
+}
+
+// TestWebhookCreateHelpDocumentsEvents asserts the event catalog reaches
+// the create-help for both endpoints and subscriptions.
+func TestWebhookCreateHelpDocumentsEvents(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	for _, path := range [][]string{
+		{"webhooks", "endpoints", "create"},
+		{"webhooks", "subscriptions", "create"},
+	} {
+		cmd := findCmd(t, ta.app, path...)
+		for _, want := range []string{"extract_run.processed", "workflow_run.completed", "extractor.version.published"} {
+			if !strings.Contains(cmd.Long, want) {
+				t.Errorf("%v --help missing event %q", path, want)
+			}
+		}
+	}
 }

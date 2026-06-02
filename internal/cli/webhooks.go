@@ -140,6 +140,37 @@ func deleteWithConfirm(ctx context.Context, app *App, label, id string, yes bool
 	return nil
 }
 
+// webhookEventsDoc enumerates the valid --events values for endpoint and
+// subscription create/update. The event-type wire string is a free-form
+// string in the SDK (no closed enum), so this hand-maintained catalog is
+// the discoverability surface; TestWebhookEventTypesCoverSDK guards it
+// against drift by probing every WebhookEvent variant the SDK knows.
+const webhookEventsDoc = `Valid --events values:
+
+  Run completion:
+    parse_run.processed, parse_run.failed,
+    extract_run.processed, extract_run.failed,
+    classify_run.processed, classify_run.failed,
+    split_run.processed, split_run.failed,
+    edit_run.processed, edit_run.failed
+  Batch completion:
+    batch_parse_run.processed, batch_parse_run.failed,
+    batch_processor_run.processed, batch_processor_run.failed
+  Workflow runs:
+    workflow_run.completed, workflow_run.failed, workflow_run.needs_review,
+    workflow_run.rejected, workflow_run.cancelled, workflow_run.step_run.processed
+  Extractor lifecycle:
+    extractor.created, extractor.updated, extractor.deleted,
+    extractor.draft.updated, extractor.version.published
+  Classifier lifecycle:
+    classifier.created, classifier.updated, classifier.deleted,
+    classifier.draft.updated, classifier.version.published
+  Splitter lifecycle:
+    splitter.created, splitter.updated, splitter.deleted,
+    splitter.draft.updated, splitter.version.published
+  Workflow lifecycle:
+    workflow.created, workflow.deployed, workflow.deleted`
+
 // splitCSV expands a slice of strings that may contain comma-separated
 // values into a flat slice of trimmed, non-empty tokens. Lets users
 // pass --events extract_run.processed,extract_run.failed in one flag
