@@ -46,31 +46,34 @@ workflow_run_, edr_).`,
 func newRunsUpdateDoc(app *App) *CommandDoc {
 	var (
 		fromFile string
+		name     string
 		meta     metaFlags
 	)
 	return &CommandDoc{
 		Use:     "update <workflow-run-id>",
-		Summary: "Update workflow run metadata (workflow runs only)",
+		Summary: "Update workflow run name and metadata (workflow runs only)",
 		Triggers: []string{
 			"update metadata on a workflow run",
+			"rename a workflow run",
 			"tag a completed workflow run",
 			"patch a workflow run's metadata",
 		},
-		WhenToUse: `Use to attach or modify metadata on an in-flight or completed
-workflow run. Only workflow runs (workflow_run_...) support this; other
-run types do not.`,
+		WhenToUse: `Use to rename a workflow run or attach/modify its metadata, in-flight or
+completed. Only workflow runs (workflow_run_...) support this; other run
+types do not.`,
 		Details: `Provide a JSON body with --from-file (inline JSON, path, file:// URI, or
-- for stdin; overrides everything), or use --metadata and --tag to set
-keys individually.`,
+- for stdin; overrides everything), or set fields individually with
+--name (rename the run), --metadata, and --tag.`,
 		Examples: []Example{
+			{Label: "Rename", Cmd: `extend runs update workflow_run_abc --name "Q3 reprocess"`},
 			{Label: "Add metadata + tag", Cmd: "extend runs update workflow_run_abc --metadata customer=acme --tag prod"},
 			{Label: "From patch file", Cmd: "extend runs update workflow_run_abc --from-file patch.json"},
 			{Label: "Inline patch", Cmd: `extend runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`},
 		},
 		Gotchas: []string{
-			"Only workflow runs support metadata updates; the command rejects other run types.",
-			"--from-file overrides --metadata/--tag if both are passed.",
-			"Pass at least one of --from-file, --metadata, or --tag; otherwise the command rejects with 'nothing to update'.",
+			"Only workflow runs support updates; the command rejects other run types.",
+			"--from-file overrides --name/--metadata/--tag if both are passed.",
+			"Pass at least one of --from-file, --name, --metadata, or --tag; otherwise the command rejects with 'nothing to update'.",
 		},
 		SeeAlso: []string{"runs get", "runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
@@ -101,10 +104,16 @@ keys individually.`,
 				if err := json.Unmarshal(raw, &req); err != nil {
 					return fmt.Errorf("--from-file: %w", err)
 				}
-			} else if md != nil {
-				req.Metadata = md
 			} else {
-				return errors.New("nothing to update; pass --from-file, --metadata, or --tag")
+				if name != "" {
+					req.Name = extend.String(name)
+				}
+				if md != nil {
+					req.Metadata = md
+				}
+				if name == "" && md == nil {
+					return errors.New("nothing to update; pass --from-file, --name, --metadata, or --tag")
+				}
 			}
 			run, err := cli.WorkflowRuns.Update(cmd.Context(), id, &req)
 			if err != nil {
@@ -114,6 +123,7 @@ keys individually.`,
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON patch body, path, file:// URI, or '-' for stdin")
+			cmd.Flags().StringVar(&name, "name", "", "New display name for the workflow run")
 			meta.attach(cmd)
 		},
 	}

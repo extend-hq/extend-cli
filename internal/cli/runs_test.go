@@ -365,3 +365,24 @@ func TestRelTime_Buckets(t *testing.T) {
 		t.Errorf("relTimeFromISO should pass through unparseable input, got %q", got)
 	}
 }
+
+// TestRunsUpdate_NameFlag verifies the new --name flag reaches the workflow
+// run update body (previously settable only via raw --from-file).
+func TestRunsUpdate_NameFlag(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workflow_runs/workflow_run_abc" || r.Method != http.MethodPost {
+			t.Fatalf("hit %s %s, want POST /workflow_runs/workflow_run_abc", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"id": "workflow_run_abc", "object": "workflow_run", "status": "PROCESSED"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "runs", "update")
+	cmd.SetArgs([]string{"workflow_run_abc", "--name", "Q3 reprocess"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	if !strings.Contains(body, `"name":"Q3 reprocess"`) {
+		t.Errorf("update body missing name; got %s", body)
+	}
+}
