@@ -112,6 +112,27 @@ func TestEdit_NestsConfigUnderConfigKey(t *testing.T) {
 	}
 }
 
+// TestEditTemplatesGet_UsesRetrieveRoute verifies the new read-only
+// command hits GET /edit_templates/<id> (EditTemplates.Retrieve), which was
+// previously an unexposed SDK service.
+func TestEditTemplatesGet_UsesRetrieveRoute(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/edit_templates/edt_abc" || r.Method != http.MethodGet {
+			t.Fatalf("hit %s %s, want GET /edit_templates/edt_abc", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"id": "edt_abc", "object": "edit_template"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "edit", "templates", "get")
+	cmd.SetArgs([]string{"edt_abc"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(ta.out.String(), "edt_abc") {
+		t.Errorf("expected template JSON, got: %s", ta.out.String())
+	}
+}
+
 // TestEdit_AdvancedOptionsForwardedAsJSON locks in that --advanced-options
 // JSON reaches the request body under config.advancedOptions, including the
 // table-parsing and radio-enums fields that were previously unreachable.

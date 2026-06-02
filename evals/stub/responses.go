@@ -449,6 +449,25 @@ func emitEvaluationRunsCreate(args []string, mode string) {
 	emitJSON(out)
 }
 
+// emitEditTemplatesGet stubs `extend edit templates get <edt_id>`. The ID is
+// the 4th positional (edit templates get <id>); echo it back with a synthetic
+// config/schemaConfig so the agent can answer about the template's defaults.
+func emitEditTemplatesGet(args []string, mode string) {
+	pos := positional(args)
+	id := "edt_stub"
+	if len(pos) >= 4 {
+		id = pos[3]
+	}
+	emitJSON(map[string]any{
+		"id":     id,
+		"object": "edit_template",
+		"config": map[string]any{
+			"instructions": "Fill the form using the provided values.",
+		},
+		"schemaConfig": map[string]any{},
+	})
+}
+
 func emitWebhookEndpointsCreate(args []string, mode string) {
 	emitJSON(map[string]any{
 		"id":            nowID("webhook_"),
