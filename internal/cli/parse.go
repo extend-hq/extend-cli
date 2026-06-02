@@ -64,7 +64,9 @@ Chunking is controlled by --chunk-strategy + --chunk-min-chars/--chunk-max-chars
 For finer-grained block detection (figures, tables, barcodes, etc.), pass
 --block-options as inline JSON, a plain file path, an absolute file:// URI,
 or '-' to read from stdin. --advanced-options accepts the remaining tuning
-knobs verbatim (return-OCR, page ranges, parallelism, etc.) in the same forms.`,
+knobs in the same forms.
+
+` + parseOptionsDoc(),
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend parse contract.pdf"},
 			{Label: "Save raw markdown", Cmd: "extend parse contract.pdf -o markdown > contract.md"},

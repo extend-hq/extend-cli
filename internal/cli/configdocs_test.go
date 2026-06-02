@@ -48,6 +48,20 @@ func TestConfigCatalogsCoverSDKFields(t *testing.T) {
 		{"SplitConfig", reflect.TypeOf(extend.SplitConfig{}), splitConfigFields},
 		{"ExtractConfigJSON", reflect.TypeOf(extend.ExtractConfigJSON{}), extractConfigFields},
 		{"ClassifyConfig", reflect.TypeOf(extend.ClassifyConfig{}), classifyConfigFields},
+		// Parse --block-options: top-level blocks plus every nested block
+		// struct's leaves, all named in parseBlockOptionsFields.
+		{"ParseConfigBlockOptions", reflect.TypeOf(extend.ParseConfigBlockOptions{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsFigures", reflect.TypeOf(extend.ParseConfigBlockOptionsFigures{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsTables", reflect.TypeOf(extend.ParseConfigBlockOptionsTables{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsTablesAgentic", reflect.TypeOf(extend.ParseConfigBlockOptionsTablesAgentic{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsText", reflect.TypeOf(extend.ParseConfigBlockOptionsText{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsTextAgentic", reflect.TypeOf(extend.ParseConfigBlockOptionsTextAgentic{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsKeyValue", reflect.TypeOf(extend.ParseConfigBlockOptionsKeyValue{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsBarcodes", reflect.TypeOf(extend.ParseConfigBlockOptionsBarcodes{}), parseBlockOptionsFields},
+		{"ParseConfigBlockOptionsFormulas", reflect.TypeOf(extend.ParseConfigBlockOptionsFormulas{}), parseBlockOptionsFields},
+		// Parse --advanced-options: top-level plus the returnOcr leaf.
+		{"ParseConfigAdvancedOptions", reflect.TypeOf(extend.ParseConfigAdvancedOptions{}), parseAdvancedOptionsFields},
+		{"ParseConfigAdvancedOptionsReturnOcr", reflect.TypeOf(extend.ParseConfigAdvancedOptionsReturnOcr{}), parseAdvancedOptionsFields},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,5 +171,56 @@ func TestActionVerbConfigHelpDocumentsFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEditSchemaPropsCoverSDK is the drift guard for the edit schema
+// property catalog: every extend_edit:* JSON tag on the SDK's EditJSON
+// must be named in editSchemaPropertyDoc. Reflecting over the tags means
+// a new annotation added by an SDK regen fails until it's documented.
+func TestEditSchemaPropsCoverSDK(t *testing.T) {
+	checked := 0
+	for _, name := range jsonFieldNames(reflect.TypeOf(extend.EditJSON{})) {
+		if !strings.HasPrefix(name, "extend_edit:") {
+			continue
+		}
+		checked++
+		if !strings.Contains(editSchemaPropertyDoc, name) {
+			t.Errorf("editSchemaPropertyDoc is missing EditJSON annotation %q — document it in configdocs.go", name)
+		}
+	}
+	if checked < 9 {
+		t.Fatalf("only %d extend_edit:* keys cross-checked; expected >=9 — reflection probe likely broke", checked)
+	}
+}
+
+// TestParseHelpDocumentsOptions asserts the block/advanced field catalogs
+// reach `extend parse --help`, so an agent building --block-options or
+// --advanced-options JSON can discover the shapes.
+func TestParseHelpDocumentsOptions(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "parse")
+	for _, want := range []string{
+		"advancedChartExtractionEnabled", // block: figures
+		"targetFormat",                   // block: tables
+		"signatureDetectionEnabled",      // block: text
+		"verticalGroupingThreshold",      // advanced
+		"formattingDetection",            // advanced
+	} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("parse --help missing option field %q", want)
+		}
+	}
+}
+
+// TestEditSchemaGenerateHelpDocumentsProps asserts the extend_edit:* key
+// reference reaches `extend edit schema generate --help`.
+func TestEditSchemaGenerateHelpDocumentsProps(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "edit", "schema", "generate")
+	for _, want := range []string{"extend_edit:value", "extend_edit:field_type", "extend_edit:bbox"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("edit schema generate --help missing %q", want)
+		}
 	}
 }
