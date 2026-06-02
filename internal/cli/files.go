@@ -44,6 +44,10 @@ later deletes it (run records remain, but the file content is gone).`,
 
 // newFilesUploadDoc returns the typed documentation for `extend files upload`.
 func newFilesUploadDoc(app *App) *CommandDoc {
+	var (
+		convertToPdf bool
+		password     string
+	)
 	return &CommandDoc{
 		Use:     "upload <path>",
 		Summary: "Upload a local file and print its file_id",
@@ -58,15 +62,22 @@ subsequent runs, or when scripting against the API directly. The action
 verbs (extract, classify, parse, split, edit, run) auto-upload local paths,
 so direct upload is only required for these reuse and scripting cases.`,
 		Details: `Upload a local file to Extend's storage and return the file metadata,
-including the file_id used by subsequent runs.`,
+including the file_id used by subsequent runs.
+
+--convert-to-pdf converts an image/Office/HTML input to PDF at upload time
+(useful when downstream steps need a PDF or spatial output). --password
+unlocks a password-protected PDF on ingest so subsequent runs can read it.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend files upload invoice.pdf"},
 			{Label: "ID-only output", Cmd: "extend files upload doc.pdf -o id"},
+			{Label: "Convert to PDF", Cmd: "extend files upload scan.png --convert-to-pdf"},
+			{Label: "Unlock a protected PDF", Cmd: "extend files upload locked.pdf --password hunter2"},
 			{Label: "Capture and reuse", Cmd: `FID=$(extend files upload doc.pdf -o id) && extend extract "$FID" --using ex_abc`},
 		},
 		Gotchas: []string{
 			"Upload size is bounded by the API; very large files may exceed limits.",
 			"Files persist until explicitly deleted; clean up in long-running pipelines.",
+			"--password here unlocks an uploaded PDF; the action verbs' --password applies only to URL inputs.",
 		},
 		SeeAlso: []string{"files list", "files get", "extract", "parse"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
@@ -76,11 +87,18 @@ including the file_id used by subsequent runs.`,
 			if err != nil {
 				return err
 			}
-			f, err := extendx.UploadFile(cmd.Context(), cli, args[0])
+			f, err := extendx.UploadFileWithOptions(cmd.Context(), cli, args[0], extendx.UploadOptions{
+				ConvertToPdf: convertToPdf,
+				Password:     password,
+			})
 			if err != nil {
 				return fmt.Errorf("upload: %w", err)
 			}
 			return renderWithDefault(app, f, output.FormatJSON)
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVar(&convertToPdf, "convert-to-pdf", false, "Convert an image/Office/HTML input to PDF at upload time")
+			cmd.Flags().StringVar(&password, "password", "", "Password to unlock a password-protected PDF on upload")
 		},
 	}
 }
