@@ -27,6 +27,8 @@ func newRunDoc(app *App) *CommandDoc {
 		outputsPath string
 		secrets     []string
 		password    string
+		text        string
+		name        string
 		meta        metaFlags
 	)
 
@@ -48,6 +50,7 @@ classify, split, parse) when you only need one processor.`,
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
+  - omitted, with --text "<inline text>" to run the workflow on raw text directly
 
 Workflow runs are asynchronous by default because they can take minutes to
 hours; the run ID and dashboard URL are printed immediately.
@@ -82,14 +85,20 @@ Repeatable.`,
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: false},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled, extendx.StatusRejected},
-		Args:     cobra.ExactArgs(1),
+		Args:     cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
 				return err
 			}
+			input := ""
+			if len(args) > 0 {
+				input = args[0]
+			}
 			return runWorkflow(cmd.Context(), app, workflowParams{
-				input:       args[0],
+				input:       input,
+				text:        text,
+				name:        name,
 				workflowID:  workflowID,
 				version:     version,
 				wait:        wait,
@@ -110,6 +119,8 @@ Repeatable.`,
 			cmd.Flags().StringVar(&outputsPath, "outputs", "", "Pre-computed [{processorId, output}] entries that seed the run and skip matching steps. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions (repeatable)")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().StringVar(&text, "text", "", "Run the workflow on this inline text instead of a file/URL/ID input (omit the positional <input>)")
+			cmd.Flags().StringVar(&name, "name", "", "Display name for the input (honored for --text and URL inputs)")
 			meta.attach(cmd)
 			_ = cmd.MarkFlagRequired("using")
 		},
@@ -119,6 +130,8 @@ Repeatable.`,
 
 type workflowParams struct {
 	input       string
+	text        string
+	name        string
 	workflowID  string
 	version     string
 	wait        bool
@@ -136,7 +149,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 		return err
 	}
 
-	ref, err := uploadOrResolveWith(ctx, app, cli, p.input, p.password)
+	ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
 	if err != nil {
 		return err
 	}

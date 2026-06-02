@@ -28,6 +28,8 @@ func newExtractDoc(app *App) *CommandDoc {
 		patchPath   string
 		configPath  string
 		password    string
+		text        string
+		name        string
 		wait        bool
 		priority    int
 		timeout     time.Duration
@@ -52,6 +54,7 @@ typed structured fields back. Prefer 'parse' for raw text or markdown,
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
+  - omitted, with --text "<inline text>" to extract from raw text directly
 
 The extraction config comes from one of these three forms. Exactly one
 of --using or --config is required:
@@ -90,7 +93,7 @@ complete standalone config that replaces the need for one entirely.
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.ExactArgs(1),
+		Args:     cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -102,8 +105,14 @@ complete standalone config that replaces the need for one entirely.
 			if configPath != "" && patchPath != "" {
 				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
 			}
+			input := ""
+			if len(args) > 0 {
+				input = args[0]
+			}
 			return runExtract(cmd.Context(), app, extractParams{
-				input:       args[0],
+				input:       input,
+				text:        text,
+				name:        name,
 				extractorID: extractorID,
 				version:     version,
 				patchPath:   patchPath,
@@ -120,6 +129,8 @@ complete standalone config that replaces the need for one entirely.
 			cmd.Flags().StringVar(&version, "version", "", "Extractor version: latest, draft, or specific (e.g. 1.0)")
 			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using extractor's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off extract config used INSTEAD of a saved extractor. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&text, "text", "", "Extract from this inline text instead of a file/URL/ID input (omit the positional <input>)")
+			cmd.Flags().StringVar(&name, "name", "", "Display name for the input (honored for --text and URL inputs)")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -132,6 +143,8 @@ complete standalone config that replaces the need for one entirely.
 
 type extractParams struct {
 	input       string
+	text        string
+	name        string
 	extractorID string
 	version     string
 	patchPath   string
@@ -149,7 +162,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 		return err
 	}
 
-	ref, err := uploadOrResolveWith(ctx, app, cli, p.input, p.password)
+	ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
 	if err != nil {
 		return err
 	}

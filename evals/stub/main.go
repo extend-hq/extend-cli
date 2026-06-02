@@ -373,6 +373,8 @@ Flags:
   --config <json>       Complete one-off config used INSTEAD of a saved extractor
   --patch <json>        Per-run partial merge onto the --using extractor's config
   --version <v>         Extractor version: latest, draft, or specific
+  --text <text>         Extract from inline text instead of a file/URL/ID input
+  --name <name>         Display name for the input (--text and URL inputs)
   --wait[=true|false]   Block until terminal (default: true)
   --priority <0-100>    Lower = higher priority
   --metadata key=value  Repeatable
@@ -388,6 +390,8 @@ Flags:
   --config <json>       Complete one-off classify config used INSTEAD of a saved classifier
   --patch <json>        Per-run partial merge onto the --using classifier's config
   --version <v>         Classifier version: latest, draft, or specific
+  --text <text>         Classify inline text instead of a file/URL/ID input
+  --name <name>         Display name for the input (--text and URL inputs)
   --wait[=true|false]   Block until terminal (default: true)
   --priority <0-100>    Lower = higher priority
   --metadata key=value  Repeatable
