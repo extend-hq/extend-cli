@@ -370,7 +370,7 @@ func TestWebhookEventTypesCoverSDK(t *testing.T) {
 			continue
 		}
 		checked++
-		if !strings.Contains(webhookEventsDoc, probe.EventType) {
+		if !documentsToken(webhookEventsDoc, probe.EventType) {
 			t.Errorf("webhookEventsDoc is missing SDK event type %q (from field %s) — document it in webhooks.go", probe.EventType, f.Name)
 		}
 	}

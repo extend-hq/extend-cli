@@ -3,11 +3,23 @@ package cli
 import (
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	extend "github.com/extend-hq/extend-go-sdk"
 )
+
+// documentsToken reports whether token appears in doc as a whole token —
+// not embedded in a longer identifier or dotted event string. Underscore
+// and the alphanumerics are treated as token characters, so "text" is not
+// satisfied by "context", and "parse_run.processed" is not satisfied by
+// "batch_parse_run.processed". The drift guards use this instead of a bare
+// substring check so a missing field can't pass on an incidental match.
+func documentsToken(doc, token string) bool {
+	re := regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(token) + `([^A-Za-z0-9_]|$)`)
+	return re.MatchString(doc)
+}
 
 // jsonFieldNames returns the top-level JSON field names declared on a
 // struct type via its `json:"..."` tags, skipping unexported fields and
@@ -66,7 +78,7 @@ func TestConfigCatalogsCoverSDKFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, field := range jsonFieldNames(tc.typ) {
-				if !strings.Contains(tc.catalog, field) {
+				if !documentsToken(tc.catalog, field) {
 					t.Errorf("%s catalog is missing SDK config field %q — document it in configdocs.go", tc.name, field)
 				}
 			}
@@ -108,7 +120,7 @@ func TestWorkflowStepTypesCoverSDK(t *testing.T) {
 			continue // not a discriminated step variant
 		}
 		checked++
-		if !strings.Contains(workflowStepsFields, probe.Type) {
+		if !documentsToken(workflowStepsFields, probe.Type) {
 			t.Errorf("workflowStepsFields is missing SDK step type %q (from field %s) — document it in configdocs.go", probe.Type, f.Name)
 		}
 	}
@@ -185,7 +197,7 @@ func TestEditSchemaPropsCoverSDK(t *testing.T) {
 			continue
 		}
 		checked++
-		if !strings.Contains(editSchemaPropertyDoc, name) {
+		if !documentsToken(editSchemaPropertyDoc, name) {
 			t.Errorf("editSchemaPropertyDoc is missing EditJSON annotation %q — document it in configdocs.go", name)
 		}
 	}
