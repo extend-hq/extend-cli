@@ -1289,6 +1289,68 @@
           "answer_must_not_match": "dashboard only|no such command|only.{0,20}dashboard"
         }
       ]
+    },
+    {
+      "id": "H-4",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "Using `extend parse`, how do I get tables back as HTML instead of markdown? Show the exact flag and field.",
+      "files": [],
+      "expected_output": "Agent consults `extend parse --help` and reports that table format is set via the --block-options JSON object, field tables.targetFormat set to \"html\". Does not invent a standalone flag.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent consulted parse help rather than guessing",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "flag": "help"
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer points at the --block-options JSON flag",
+          "answer_pattern": "--block-options"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names the tables.targetFormat field",
+          "answer_pattern": "targetFormat"
+        }
+      ]
+    },
+    {
+      "id": "H-5",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "I want a webhook to fire when a new version of an extractor is published. Which event type do I subscribe to?",
+      "files": [],
+      "expected_output": "Agent identifies the event type extractor.version.published (e.g. via `extend webhooks endpoints create --help`). Does not invent an event name.",
+      "expectations": [
+        {
+          "type": "stable_answer",
+          "text": "answer names the extractor.version.published event",
+          "answer_pattern": "extractor\\.version\\.published"
+        }
+      ]
+    },
+    {
+      "id": "H-6",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "In an `extend edit` schema, which property forces a specific value into a form field instead of letting the model infer it?",
+      "files": [],
+      "expected_output": "Agent identifies the extend_edit:value key (e.g. via `extend edit schema generate --help`). Does not invent a property name.",
+      "expectations": [
+        {
+          "type": "stable_answer",
+          "text": "answer names the extend_edit:value schema key",
+          "answer_pattern": "extend_edit:value"
+        }
+      ]
     }
   ]
 }
