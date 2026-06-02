@@ -68,17 +68,31 @@ func ResolveInput(input string) (ref FileRef, localPath string, err error) {
 	}
 }
 
+// UploadOptions carries the optional upload-time knobs Files.Upload
+// accepts beyond the file bytes: convert-to-PDF (images/Office/HTML are
+// converted server-side before storage) and a password to unlock a
+// password-protected PDF on ingest.
+type UploadOptions struct {
+	ConvertToPdf bool
+	Password     string
+}
+
 // UploadFile opens path and uploads it via the SDK's Files.Upload
 // endpoint. The returned *extend.File has its ID populated; the
 // caller can pass that ID through FileRef.ID into a subsequent run
 // creation.
 func UploadFile(ctx context.Context, c *client.Client, path string) (*extend.File, error) {
+	return UploadFileWithOptions(ctx, c, path, UploadOptions{})
+}
+
+// UploadFileWithOptions is UploadFile plus the optional upload knobs.
+func UploadFileWithOptions(ctx context.Context, c *client.Client, path string, opts UploadOptions) (*extend.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	return UploadStream(ctx, c, f, filepath.Base(path), GuessContentType(path))
+	return UploadStreamWithOptions(ctx, c, f, filepath.Base(path), GuessContentType(path), opts)
 }
 
 // UploadStream uploads an in-memory or piped reader as a multipart
@@ -92,7 +106,20 @@ func UploadFile(ctx context.Context, c *client.Client, path string) (*extend.Fil
 // as a vague "context deadline exceeded" instead of completing. The
 // caller's context remains the only deadline.
 func UploadStream(ctx context.Context, c *client.Client, body io.Reader, filename, contentType string) (*extend.File, error) {
+	return UploadStreamWithOptions(ctx, c, body, filename, contentType, UploadOptions{})
+}
+
+// UploadStreamWithOptions is UploadStream plus the optional upload knobs
+// (convert-to-PDF, password). The zero UploadOptions reproduces
+// UploadStream exactly, so the common auto-upload path is unaffected.
+func UploadStreamWithOptions(ctx context.Context, c *client.Client, body io.Reader, filename, contentType string, opts UploadOptions) (*extend.File, error) {
 	req := &extend.FilesUploadRequest{}
+	if opts.ConvertToPdf {
+		req.ConvertToPdf = extend.Bool(true)
+	}
+	if opts.Password != "" {
+		req.Password = extend.String(opts.Password)
+	}
 	// Wrap with FileParam when we have metadata to attach; the SDK
 	// detects the wrapper and uses the filename + content-type for
 	// the multipart Part headers. A bare io.Reader produces a part

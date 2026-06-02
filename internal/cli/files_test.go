@@ -173,3 +173,34 @@ func TestFilesList_IDFormat(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// TestFilesUpload_ForwardsConvertAndPassword locks in the two upload-body
+// knobs that were previously unreachable: --convert-to-pdf rides as the
+// convertToPdf query param, --password as the multipart `password` field.
+func TestFilesUpload_ForwardsConvertAndPassword(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "scan.png")
+	if err := os.WriteFile(tmp, []byte("img-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/files/upload" || r.Method != http.MethodPost {
+			t.Fatalf("hit %s %s, want POST /files/upload", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("convertToPdf"); got != "true" {
+			t.Errorf("convertToPdf query = %q, want true", got)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if got := r.FormValue("password"); got != "pw" {
+			t.Errorf("password form field = %q, want pw", got)
+		}
+		writeJSON(w, 200, map[string]any{"id": "file_new", "object": "file"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "files", "upload")
+	cmd.SetArgs([]string{tmp, "--convert-to-pdf", "--password", "pw"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
