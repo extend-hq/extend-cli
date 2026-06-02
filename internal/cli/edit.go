@@ -69,6 +69,10 @@ There are two ways to provide values:
      'single', leave the spouse section blank"), or disambiguation
      between similarly-named fields the schema cannot express.
 
+     Each field in a --schema carries the extend_edit:* keys emitted by
+     'extend edit schema generate' (set extend_edit:value to force a value);
+     run that command's --help for the full key reference.
+
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
@@ -368,7 +372,9 @@ fields use the server default):
 
   nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
   tableParsingEnabled  bool  Parse table regions as arrays of objects.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.`,
+  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.
+
+` + editSchemaPropertyDoc,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend edit schema generate form.pdf > schema.json"},
 			{Label: "With instructions", Cmd: `extend edit schema generate form.pdf --instructions "skip the signature block"`},
