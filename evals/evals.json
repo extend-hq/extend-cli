@@ -1341,13 +1341,25 @@
       "id": "H-6",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "In an `extend edit` schema, which property forces a specific value into a form field instead of letting the model infer it?",
+      "prompt": "I'm hand-editing the schema produced by `extend edit schema generate`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
       "files": [],
-      "expected_output": "Agent identifies the extend_edit:value key (e.g. via `extend edit schema generate --help`). Does not invent a property name.",
+      "expected_output": "Agent consults `extend edit schema generate --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
       "expectations": [
         {
+          "type": "extend_call",
+          "text": "agent consulted edit help rather than answering from memory",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "flag": "help"
+            }
+          ]
+        },
+        {
           "type": "stable_answer",
-          "text": "answer names the extend_edit:value schema key",
+          "text": "answer names the exact extend_edit:value schema key",
           "answer_pattern": "extend_edit:value"
         }
       ]
