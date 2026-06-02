@@ -47,6 +47,18 @@ func TestWebhookEvents_ExposedInBinary(t *testing.T) {
 	}
 }
 
+// TestEditTemplatesGet_ExposedInBinary asserts the new read-only command
+// is wired into the shipped binary and documents the edt_ template ID.
+func TestEditTemplatesGet_ExposedInBinary(t *testing.T) {
+	res := runExtend(t, envSetup{}, "edit", "templates", "get", "--help")
+	res.requireOK(t, "edit", "templates", "get", "--help")
+	for _, want := range []string{"edit template", "edt_"} {
+		if !strings.Contains(string(res.Stdout), want) {
+			t.Errorf("edit templates get --help missing %q; got:\n%s", want, res.Stdout)
+		}
+	}
+}
+
 // TestEditSchemaProps_ExposedInBinary asserts the extend_edit:* key
 // reference is documented in the edit schema generate help.
 func TestEditSchemaProps_ExposedInBinary(t *testing.T) {

@@ -518,6 +518,37 @@
       ]
     },
     {
+      "id": "S-6",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Fetch the saved edit template edt_q3form and tell me its default fill config.",
+      "files": [],
+      "expected_output": "Agent runs `extend edit templates get edt_q3form` and reports the template's default config. Does NOT claim edit templates are dashboard-only or unsupported by the CLI.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend edit templates get` with the given template ID",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit",
+                "templates",
+                "get"
+              ],
+              "args": [
+                "edt_q3form"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer references the fetched template, not a dashboard-only punt",
+          "answer_must_not_match": "dashboard only|no such command|not supported|can't .* edit template"
+        }
+      ]
+    },
+    {
       "id": "F-1",
       "category": "output-format",
       "path": "B",

@@ -129,7 +129,7 @@ the server default:
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
-		Subcommands: []*CommandDoc{newEditSchemaDoc(app)},
+		Subcommands: []*CommandDoc{newEditSchemaDoc(app), newEditTemplatesDoc(app)},
 	}
 }
 
@@ -326,6 +326,61 @@ func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
 
 // newEditSchemaDoc returns the typed documentation for the
 // `extend edit schema` group (a pure umbrella; only generate is meaningful).
+// newEditTemplatesDoc is the `extend edit templates` group: read-only
+// access to saved edit templates (EditTemplates.Retrieve in the SDK).
+func newEditTemplatesDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "templates",
+		Summary: "Inspect saved edit templates",
+		WhenToUse: `Use this group to fetch a saved edit template's source file, default
+edit config, and schema-generation config so you can reuse them with
+'extend edit' and 'extend edit schema generate'.`,
+		Details: `Edit templates are authored in the dashboard; the CLI exposes read-only
+retrieval. Only 'get <template-id>' is available.`,
+		Subcommands: []*CommandDoc{
+			newEditTemplatesGetDoc(app),
+		},
+	}
+}
+
+func newEditTemplatesGetDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "get <template-id>",
+		Summary: "Fetch a saved edit template by ID",
+		Triggers: []string{
+			"get an edit template by id",
+			"fetch a saved edit template",
+			"inspect an edit template's config and schema",
+			"reuse an edt_ template's edit config",
+		},
+		WhenToUse: `Use to retrieve a saved edit template (edt_...) — its source file, default
+edit 'config', and optional 'schemaConfig'. Reuse the returned config with
+'extend edit' and the schemaConfig with 'extend edit schema generate'.`,
+		Details: `Returns the full edit template object as JSON.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit templates get edt_abc"},
+			{Label: "Extract the default config", Cmd: "extend edit templates get edt_abc --jq '.config' -o json"},
+		},
+		Gotchas: []string{
+			"Edit templates are authored in the dashboard; the CLI is read-only on them.",
+		},
+		SeeAlso: []string{"edit", "edit schema generate"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			tmpl, err := cli.EditTemplates.Retrieve(cmd.Context(), args[0], &extend.EditTemplatesRetrieveRequest{})
+			if err != nil {
+				return err
+			}
+			return renderWithDefault(app, tmpl, output.FormatJSON)
+		},
+	}
+}
+
 func newEditSchemaDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:       "schema",

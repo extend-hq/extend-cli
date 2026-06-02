@@ -99,6 +99,8 @@ func main() {
 		emitClassify(args, mode)
 	case match(args, "split"):
 		emitSplit(args, mode)
+	case match(args, "edit", "templates", "get"):
+		emitEditTemplatesGet(args, mode)
 	case match(args, "edit", "schema", "generate"):
 		emitEditSchemaGenerate(args, mode)
 	case match(args, "edit"):
