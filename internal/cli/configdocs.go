@@ -107,18 +107,18 @@ const parseBlockOptionsFields = `  - figures (object) — enabled; figureImageCl
   - text (object) — signatureDetectionEnabled; agentic (object: enabled, customInstructions).
   - keyValue (object) — blankFieldFormattingEnabled (emit detected blank fields).
   - barcodes (object) — readingEnabled (decode barcode values); imageClippingEnabled.
-  - formulas (object) — enabled (detect formulas and emit LaTeX).`
+  - formulas (object) — enabled (detect formulas and include their LaTeX representation).`
 
 // parseAdvancedOptionsFields documents the ParseConfigAdvancedOptions
 // object (parse --advanced-options).
 const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-detect and correct rotated pages.
-  - pageRanges (array) — restrict parsing to page ranges; each entry { start, end } (1-based, inclusive).
-  - excelParsingMode ("basic"|"advanced") — "advanced" enables layout block detection (.xlsx only).
+  - pageRanges (array) — restrict parsing to page ranges; each entry { start, end }.
+  - excelParsingMode ("basic"|"advanced") — "advanced" enables layout block detection for complex spreadsheets; .xls files always use "basic".
   - excelSkipHiddenContent (bool) — drop hidden rows, columns, and sheets.
   - excelUseRawCellValues (bool) — emit raw calculated values instead of locale-formatted ones.
   - excelSkipCalculation (bool) — skip formula recalculation (faster; disable for volatile NOW()/TODAY()).
   - verticalGroupingThreshold (number 0.1–5.0, default 1.0) — line-grouping sensitivity; --target spatial only.
-  - returnOcr (object) — words (bool): include per-word OCR boxes in the response.
+  - returnOcr (object) — words (bool): include word-level raw OCR data in the response.
   - alwaysConvertToPdf (bool) — convert images/Office/HTML to PDF first (enables spatial bboxes).
   - enrichmentFormat ("xml"|"bracket") — annotation style, e.g. <page_number>1</page_number> vs [page_number: 1].
   - imageConversionQuality ("high"|"medium"|"low") — quality when converting to PDF.
