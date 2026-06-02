@@ -710,6 +710,20 @@ func readJSONFile(path, flag string) (json.RawMessage, error) {
 	return data, nil
 }
 
+// readJSONInto reads a JSON source (inline/path/file://-URI/stdin) named by
+// flag and unmarshals it into target. It's the read-then-unmarshal pairing
+// the per-run --patch/--config flags repeat across commands.
+func readJSONInto(path, flag string, target any) error {
+	raw, err := readJSONFile(path, flag)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return fmt.Errorf("%s: %w", flag, err)
+	}
+	return nil
+}
+
 func readJSONSource(source string) ([]byte, error) {
 	trimmed := strings.TrimSpace(source)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {

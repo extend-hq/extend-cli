@@ -32,11 +32,11 @@ const defaultUploadConcurrency = 5
 // Order of the returned slice matches the order of inputs. The first error
 // returned by any worker cancels the remaining work and is propagated to the
 // caller.
-func uploadAllOrResolve(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string) ([]extendx.FileRef, error) {
-	return uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, defaultUploadConcurrency)
+func uploadAllOrResolve(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string, password string) ([]extendx.FileRef, error) {
+	return uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, defaultUploadConcurrency, password)
 }
 
-func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string, concurrency int) ([]extendx.FileRef, error) {
+func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkclient.Client, inputs []string, concurrency int, password string) ([]extendx.FileRef, error) {
 	if concurrency <= 0 {
 		concurrency = defaultUploadConcurrency
 	}
@@ -47,7 +47,7 @@ func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkcl
 		// Fast path: no goroutines for tiny batches.
 		out := make([]extendx.FileRef, 0, len(inputs))
 		for _, in := range inputs {
-			ref, err := uploadOrResolve(ctx, app, cli, in)
+			ref, err := uploadOrResolveWith(ctx, app, cli, in, password)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +79,7 @@ func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkcl
 				if cancelCtx.Err() != nil {
 					return
 				}
-				ref, err := uploadOrResolve(cancelCtx, app, cli, inputs[i])
+				ref, err := uploadOrResolveWith(cancelCtx, app, cli, inputs[i], password)
 				if err != nil {
 					errOnce.Do(func() {
 						firstErr = err
@@ -101,17 +101,27 @@ func uploadAllOrResolveWithConcurrency(ctx context.Context, app *App, cli *sdkcl
 type batchFlags struct {
 	using             string
 	version           string
+	patch             string
 	priority          int
 	filesFrom         string
+	password          string
 	uploadConcurrency int
 	meta              metaFlags
 }
 
-func (f *batchFlags) attach(cmd *cobra.Command, processorFlag string) {
+// attach registers the shared batch flags. withPatch controls whether the
+// per-run --patch (overrideConfig) flag is offered — it applies to the
+// processor batches (extract/classify/split) but not to workflow or parse
+// batches, which have no per-run overrideConfig.
+func (f *batchFlags) attach(cmd *cobra.Command, processorFlag string, withPatch bool) {
 	cmd.Flags().StringVar(&f.using, processorFlag, "", processorFlag+" ID (required)")
 	cmd.Flags().StringVar(&f.version, "version", "", "Processor version (latest, draft, or specific)")
+	if withPatch {
+		cmd.Flags().StringVar(&f.patch, "patch", "", "Per-run patch merged onto the --using processor's saved config (applied to every input). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+	}
 	cmd.Flags().IntVar(&f.priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 	cmd.Flags().StringVar(&f.filesFrom, "files-from", "", "Path to a file with one input path/URL/id per line (- for stdin)")
+	cmd.Flags().StringVar(&f.password, "password", "", "Password for password-protected PDFs (URL inputs only; all inputs must be URLs)")
 	cmd.Flags().IntVar(&f.uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
 	f.meta.attach(cmd)
 	_ = cmd.MarkFlagRequired(processorFlag)
@@ -169,7 +179,7 @@ type batchSubmitPrep struct {
 // Pulling this out collapses ~15 lines of identical orchestration per
 // batch command into one helper call.
 func prepBatchSubmit(ctx context.Context, app *App, args []string, f batchFlags) (*batchSubmitPrep, error) {
-	return prepBatchSubmitArgs(ctx, app, args, f.filesFrom, f.uploadConcurrency, f.meta)
+	return prepBatchSubmitArgs(ctx, app, args, f.filesFrom, f.uploadConcurrency, f.password, f.meta)
 }
 
 // prepBatchSubmitArgs is the underlying helper used by both the
@@ -177,7 +187,7 @@ func prepBatchSubmit(ctx context.Context, app *App, args []string, f batchFlags)
 // and the parse batch, which carries its own flag vars because it has
 // different per-kind flags (--engine, --target, etc.) rather than the
 // `--using <processor-id>` shape.
-func prepBatchSubmitArgs(ctx context.Context, app *App, args []string, filesFrom string, uploadConcurrency int, meta metaFlags) (*batchSubmitPrep, error) {
+func prepBatchSubmitArgs(ctx context.Context, app *App, args []string, filesFrom string, uploadConcurrency int, password string, meta metaFlags) (*batchSubmitPrep, error) {
 	inputs, err := collectBatchInputs(args, filesFrom)
 	if err != nil {
 		return nil, err
@@ -186,7 +196,7 @@ func prepBatchSubmitArgs(ctx context.Context, app *App, args []string, filesFrom
 	if err != nil {
 		return nil, err
 	}
-	refs, err := uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, uploadConcurrency)
+	refs, err := uploadAllOrResolveWithConcurrency(ctx, app, cli, inputs, uploadConcurrency, password)
 	if err != nil {
 		return nil, err
 	}
@@ -249,13 +259,21 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
+			extractor := &extend.ExtractRunsCreateBatchRequestExtractor{
+				ID:      f.using,
+				Version: versionPtr(f.version),
+			}
+			if f.patch != "" {
+				var override extend.ExtractOverrideConfigJSON
+				if err := readJSONInto(f.patch, "--patch", &override); err != nil {
+					return err
+				}
+				extractor.OverrideConfig = &override
+			}
 			br, err := prep.Client.ExtractRuns.CreateBatch(cmd.Context(), &extend.ExtractRunsCreateBatchRequest{
-				Extractor: &extend.ExtractRunsCreateBatchRequestExtractor{
-					ID:      f.using,
-					Version: versionPtr(f.version),
-				},
-				Inputs:   items,
-				Priority: priorityPtr(f.priority),
+				Extractor: extractor,
+				Inputs:    items,
+				Priority:  priorityPtr(f.priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -263,7 +281,7 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 			return renderBatchSubmitted(app, br)
 		},
 		Configure: func(cmd *cobra.Command) {
-			f.attach(cmd, "using")
+			f.attach(cmd, "using", true)
 		},
 	}
 }
@@ -319,13 +337,21 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
+			classifier := &extend.ClassifyRunsCreateBatchRequestClassifier{
+				ID:      f.using,
+				Version: versionPtr(f.version),
+			}
+			if f.patch != "" {
+				var override extend.ClassifyOverrideConfig
+				if err := readJSONInto(f.patch, "--patch", &override); err != nil {
+					return err
+				}
+				classifier.OverrideConfig = &override
+			}
 			br, err := prep.Client.ClassifyRuns.CreateBatch(cmd.Context(), &extend.ClassifyRunsCreateBatchRequest{
-				Classifier: &extend.ClassifyRunsCreateBatchRequestClassifier{
-					ID:      f.using,
-					Version: versionPtr(f.version),
-				},
-				Inputs:   items,
-				Priority: priorityPtr(f.priority),
+				Classifier: classifier,
+				Inputs:     items,
+				Priority:   priorityPtr(f.priority),
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -333,7 +359,7 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 			return renderBatchSubmitted(app, br)
 		},
 		Configure: func(cmd *cobra.Command) {
-			f.attach(cmd, "using")
+			f.attach(cmd, "using", true)
 		},
 	}
 }
@@ -387,11 +413,19 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
+			splitter := &extend.SplitRunsCreateBatchRequestSplitter{
+				ID:      f.using,
+				Version: versionPtr(f.version),
+			}
+			if f.patch != "" {
+				var override extend.SplitOverrideConfig
+				if err := readJSONInto(f.patch, "--patch", &override); err != nil {
+					return err
+				}
+				splitter.OverrideConfig = &override
+			}
 			br, err := prep.Client.SplitRuns.CreateBatch(cmd.Context(), &extend.SplitRunsCreateBatchRequest{
-				Splitter: &extend.SplitRunsCreateBatchRequestSplitter{
-					ID:      f.using,
-					Version: versionPtr(f.version),
-				},
+				Splitter: splitter,
 				Inputs:   items,
 				Priority: priorityPtr(f.priority),
 			})
@@ -401,7 +435,7 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 			return renderBatchSubmitted(app, br)
 		},
 		Configure: func(cmd *cobra.Command) {
-			f.attach(cmd, "using")
+			f.attach(cmd, "using", true)
 		},
 	}
 }
@@ -410,13 +444,19 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 // Composed under newParseDoc via CommandDoc.Subcommands.
 func newParseBatchDoc(app *App) *CommandDoc {
 	var (
-		filesFrom         string
-		target            string
-		engine            string
-		engineVersion     string
-		priority          int
-		uploadConcurrency int
-		meta              metaFlags
+		filesFrom           string
+		target              string
+		engine              string
+		engineVersion       string
+		chunkStrategy       string
+		chunkMinChars       int
+		chunkMaxChars       int
+		blockOptionsPath    string
+		advancedOptionsPath string
+		password            string
+		priority            int
+		uploadConcurrency   int
+		meta                metaFlags
 	)
 	return &CommandDoc{
 		Use:     "batch <input>...",
@@ -433,6 +473,11 @@ track. Prefer single-document 'parse' for one-off requests.`,
 take a processor reference; the engine is selected via --engine and
 --engine-version. Per-input metadata is set via --metadata/--tag.
 
+The same parse tuning as single 'parse' applies to every input:
+--chunk-strategy/--chunk-min-chars/--chunk-max-chars, plus --block-options
+and --advanced-options (see 'extend parse --help' for the JSON field
+catalogs). --password applies to URL inputs only.
+
 Track progress with ` + "`extend batches watch <id>`" + ` or list contained
 runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 		Examples: []Example{
@@ -448,7 +493,23 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 		SeeAlso: []string{"parse", "batches watch", "batches get", "runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			prep, err := prepBatchSubmitArgs(cmd.Context(), app, args, filesFrom, uploadConcurrency, meta)
+			// Build (and validate) the config before uploading, so a bad
+			// --chunk-strategy/--target combination fails fast rather than
+			// after a costly upload of up to 1,000 inputs.
+			cfg, err := buildParseConfig(parseParams{
+				target:              target,
+				engine:              engine,
+				engineVersion:       engineVersion,
+				chunkStrategy:       chunkStrategy,
+				chunkMinChars:       chunkMinChars,
+				chunkMaxChars:       chunkMaxChars,
+				blockOptionsPath:    blockOptionsPath,
+				advancedOptionsPath: advancedOptionsPath,
+			})
+			if err != nil {
+				return err
+			}
+			prep, err := prepBatchSubmitArgs(cmd.Context(), app, args, filesFrom, uploadConcurrency, password, meta)
 			if err != nil {
 				return err
 			}
@@ -462,24 +523,6 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 					File:     file,
 					Metadata: metadataPtr(prep.Metadata),
 				}
-			}
-			cfg := &extend.ParseConfig{}
-			if target != "" {
-				t, err := extend.NewParseConfigTargetFromString(target)
-				if err != nil {
-					return fmt.Errorf("--target: %w", err)
-				}
-				cfg.Target = &t
-			}
-			if engine != "" {
-				e, err := extend.NewParseConfigEngineFromString(engine)
-				if err != nil {
-					return fmt.Errorf("--engine: %w", err)
-				}
-				cfg.Engine = &e
-			}
-			if engineVersion != "" {
-				cfg.EngineVersion = extend.String(engineVersion)
 			}
 			br, err := prep.Client.ParseRuns.CreateBatch(cmd.Context(), &extend.ParseRunsCreateBatchRequest{
 				Inputs:   items,
@@ -496,6 +539,12 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
 			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
+			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
+			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
+			cmd.Flags().IntVar(&chunkMaxChars, "chunk-max-chars", 0, "Maximum characters per chunk (server default if 0)")
+			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "blockOptions for fine-grained block detection (figures/tables/text/barcodes/keyValue/formulas). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "advancedOptions for parse tuning (returnOcr, pageRanges, etc.). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&password, "password", "", "Password for password-protected PDFs (URL inputs only; all inputs must be URLs)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 			cmd.Flags().IntVar(&uploadConcurrency, "upload-concurrency", defaultUploadConcurrency, "Concurrent uploads when local file paths are passed")
 			meta.attach(cmd)
@@ -506,7 +555,10 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 // newWorkflowBatchDoc returns the typed documentation for `extend run
 // batch`. Composed under newRunDoc via CommandDoc.Subcommands.
 func newWorkflowBatchDoc(app *App) *CommandDoc {
-	var f batchFlags
+	var (
+		f       batchFlags
+		secrets []string
+	)
 	return &CommandDoc{
 		Use:     "batch <input>...",
 		Summary: "Run a workflow on up to 1,000 files in one batch",
@@ -554,13 +606,29 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 			if err != nil {
 				return err
 			}
+			// Secrets are a per-input field (the only per-input knob
+			// workflow batch allows besides metadata); the same set is
+			// applied to every input, mirroring how --metadata works on
+			// the processor batches.
+			var secretsPtr *extend.RunSecrets
+			if len(secrets) > 0 {
+				pairs, err := parseKVPairs("--secret", secrets)
+				if err != nil {
+					return err
+				}
+				s := make(extend.RunSecrets, len(pairs))
+				for k, v := range pairs {
+					s[k] = v
+				}
+				secretsPtr = &s
+			}
 			items := make([]*extend.WorkflowRunsCreateBatchRequestInputsItem, len(prep.Refs))
 			for i, r := range prep.Refs {
 				file, err := extendx.BuildWorkflowBatchFile(r)
 				if err != nil {
 					return err
 				}
-				items[i] = &extend.WorkflowRunsCreateBatchRequestInputsItem{File: file}
+				items[i] = &extend.WorkflowRunsCreateBatchRequestInputsItem{File: file, Secrets: secretsPtr}
 			}
 			resp, err := prep.Client.WorkflowRuns.CreateBatch(cmd.Context(), &extend.WorkflowRunsCreateBatchRequest{
 				Workflow: &extend.WorkflowReference{
@@ -575,7 +643,8 @@ is no GET /batch_runs/{id} endpoint for workflow batches and
 			return renderWorkflowBatchSubmitted(app, resp, len(items))
 		},
 		Configure: func(cmd *cobra.Command) {
-			f.attach(cmd, "using")
+			f.attach(cmd, "using", false)
+			cmd.Flags().StringArrayVar(&secrets, "secret", nil, "key=value secret available to step actions, applied to every input (repeatable)")
 		},
 	}
 }

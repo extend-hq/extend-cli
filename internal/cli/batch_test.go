@@ -226,7 +226,7 @@ func TestUploadAllOrResolve_PreservesOrder(t *testing.T) {
 		inputs[i] = path
 	}
 
-	refs, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, 4)
+	refs, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, 4, "")
 	if err != nil {
 		t.Fatalf("uploadAllOrResolve: %v", err)
 	}
@@ -275,10 +275,85 @@ func TestUploadAllOrResolve_BoundsConcurrency(t *testing.T) {
 	}
 
 	const cap = 3
-	if _, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, cap); err != nil {
+	if _, err := uploadAllOrResolveWithConcurrency(context.Background(), ta.app, c, inputs, cap, ""); err != nil {
 		t.Fatalf("uploadAllOrResolve: %v", err)
 	}
 	if got := atomic.LoadInt32(&peak); got > cap {
 		t.Errorf("peak in-flight uploads = %d, want <= %d", got, cap)
+	}
+}
+
+// TestParseBatch_ForwardsConfig locks in batch-vs-single parity: the parse
+// batch must carry the same ParseConfig knobs single `parse` exposes
+// (previously only --target/--engine reached the batch request).
+func TestParseBatch_ForwardsConfig(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/parse_runs/batch" || r.Method != http.MethodPost {
+			t.Fatalf("hit %s %s, want POST /parse_runs/batch", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"id": "bpar_x", "object": "batch_run", "status": "PENDING", "runCount": 1})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "parse", "batch")
+	cmd.SetArgs([]string{"file_a",
+		"--chunk-strategy", "section",
+		"--chunk-max-chars", "4000",
+		"--block-options", `{"tables":{"targetFormat":"html"}}`,
+		"--advanced-options", `{"pageRanges":[{"start":1,"end":2}]}`,
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	for _, want := range []string{`"chunkingStrategy"`, `"section"`, `"targetFormat":"html"`, `"pageRanges"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("parse batch body missing %q; got %s", want, body)
+		}
+	}
+}
+
+// TestExtractBatch_ForwardsPatch verifies --patch reaches the batch
+// extractor ref as overrideConfig (the single verbs had --patch; batch did
+// not). extractionRules is a real ExtractOverrideConfigJSON field, so its
+// presence proves the patch content round-trips, not just the key.
+func TestExtractBatch_ForwardsPatch(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/extract_runs/batch" || r.Method != http.MethodPost {
+			t.Fatalf("hit %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"id": "bpr_x", "object": "batch_run", "status": "PENDING", "runCount": 1})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "extract", "batch")
+	cmd.SetArgs([]string{"file_a", "--using", "ex_abc", "--patch", `{"extractionRules":"ROUNDTRIP"}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	if !strings.Contains(body, `"overrideConfig"`) || !strings.Contains(body, `"extractionRules":"ROUNDTRIP"`) {
+		t.Errorf("extract batch body missing overrideConfig/extractionRules; got %s", body)
+	}
+}
+
+// TestWorkflowBatch_ForwardsSecrets verifies per-input --secret reaches each
+// workflow batch item (single `run` had --secret; `run batch` did not).
+func TestWorkflowBatch_ForwardsSecrets(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workflow_runs/batch" || r.Method != http.MethodPost {
+			t.Fatalf("hit %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{"batchId": "wfb_x"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "run", "batch")
+	cmd.SetArgs([]string{"file_a", "--using", "workflow_abc", "--secret", "API_KEY=xyz"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	body := string(srv.lastRequest().Body)
+	for _, want := range []string{`"secrets"`, `"API_KEY"`, "xyz"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("workflow batch body missing %q; got %s", want, body)
+		}
 	}
 }
