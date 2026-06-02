@@ -403,6 +403,42 @@ Flags:
   --priority <0-100>    Lower = higher priority
   -o, --output <fmt>    json|yaml|raw|id|table|markdown`,
 
+	"parse": `extend parse <input> — Parse a document into text/markdown/spatial.
+
+Flags:
+  --target <t>              markdown (default) or spatial
+  --engine <e>              parse_performance or parse_light
+  --chunk-strategy <s>      page|document|section|none
+  --block-options <json>    Per-block detection. Fields:
+                              figures.advancedChartExtractionEnabled, figures.figureImageClippingEnabled
+                              tables.targetFormat ("markdown"|"html"), tables.cellBlocksEnabled,
+                              tables.tableHeaderContinuationEnabled, text.signatureDetectionEnabled,
+                              barcodes.readingEnabled, formulas.enabled, keyValue.blankFieldFormattingEnabled
+  --advanced-options <json> Parse tuning. Fields:
+                              pageRanges, pageRotationEnabled, returnOcr.words,
+                              excelParsingMode ("basic"|"advanced"), verticalGroupingThreshold,
+                              formattingDetection ([{"type":"change_tracking"}])
+  --wait[=true|false]       Block until terminal (default: true)
+  -o, --output <fmt>        json|yaml|raw|markdown`,
+
+	"webhooks": `extend webhooks — Manage webhook endpoints and subscriptions.
+
+  webhooks endpoints create --url <u> --name <n> --events <e,...>
+  webhooks subscriptions create --endpoint <whe> --resource <id> --events <e,...>
+
+Valid --events values:
+  Runs:    parse_run.processed, parse_run.failed, extract_run.processed, extract_run.failed,
+           classify_run.processed, classify_run.failed, split_run.processed, split_run.failed,
+           edit_run.processed, edit_run.failed
+  Batch:   batch_parse_run.processed, batch_parse_run.failed,
+           batch_processor_run.processed, batch_processor_run.failed
+  Workflow runs: workflow_run.completed, workflow_run.failed, workflow_run.needs_review,
+           workflow_run.rejected, workflow_run.cancelled, workflow_run.step_run.processed
+  Processor lifecycle: extractor.created, extractor.updated, extractor.deleted,
+           extractor.draft.updated, extractor.version.published
+           (classifier.* and splitter.* take the same five suffixes)
+  Workflow lifecycle: workflow.created, workflow.deployed, workflow.deleted`,
+
 	"edit": `extend edit <input> — Fill PDF form fields and emit a filled PDF.
 
 Flags:
@@ -415,7 +451,14 @@ Flags:
                               tableParsingEnabled  bool  Parse table regions as arrays of objects
                               radioEnumsEnabled    bool  Model a radio group as a single-choice enum
   -O, --output-file <path> Write the filled PDF (auto-downloads); '-' for stdout
-  --wait[=true|false]      Block until terminal (default: true)`,
+  --wait[=true|false]      Block until terminal (default: true)
+
+Schema fields ('extend edit schema generate' emits these per field; populate the value keys):
+  extend_edit:value         The value to fill into the field (omit to infer from --instructions)
+  extend_edit:image         Image fill for signature fields (PNG/JPEG URL)
+  extend_edit:field_type    text|signature|checkbox|radio|dropdown|optionList|table
+  extend_edit:bbox, extend_edit:bboxes, extend_edit:page_index, extend_edit:text_edit_options,
+  extend_edit:column_width, extend_edit:row_heights`,
 }
 
 func emitUnknown(args []string) {
