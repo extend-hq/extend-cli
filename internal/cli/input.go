@@ -21,6 +21,38 @@ func uploadOrResolve(ctx context.Context, app *App, cli *sdkclient.Client, input
 	return uploadOrResolveWith(ctx, app, cli, input, "")
 }
 
+// resolveInputOrText turns either a positional input (file path, file_xxx ID,
+// or https:// URL) or an inline --text value into a FileRef. Exactly one of
+// (input, text) must be set. --name sets a display name for --text and URL
+// inputs (uploaded files and file IDs carry their own name). --password is
+// honored only for URL inputs (see uploadOrResolveWith). Used by the verbs
+// whose SDK file union accepts inline text: extract, classify, run.
+func resolveInputOrText(ctx context.Context, app *App, cli *sdkclient.Client, input, text, name, password string) (extendx.FileRef, error) {
+	if text != "" {
+		if input != "" {
+			return extendx.FileRef{}, errors.New("provide either an input argument or --text, not both")
+		}
+		if password != "" {
+			return extendx.FileRef{}, errors.New("--password does not apply to --text inputs")
+		}
+		return extendx.FileRef{Text: text, Name: name}, nil
+	}
+	if input == "" {
+		return extendx.FileRef{}, errors.New("provide an input (a file path, file_xxx ID, or https:// URL) or use --text")
+	}
+	ref, err := uploadOrResolveWith(ctx, app, cli, input, password)
+	if err != nil {
+		return extendx.FileRef{}, err
+	}
+	if name != "" {
+		if ref.URL == "" {
+			return extendx.FileRef{}, errors.New("--name applies only to URL or --text inputs")
+		}
+		ref.Name = name
+	}
+	return ref, nil
+}
+
 // uploadOrResolveWith is the password-aware variant of uploadOrResolve.
 //
 // When password != "":

@@ -549,6 +549,50 @@
       ]
     },
     {
+      "id": "S-7",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Classify this text inline without saving it to a file, using classifier cl_support: \"My package arrived damaged and I want a refund.\"",
+      "files": [],
+      "expected_output": "Agent runs `extend classify --using cl_support --text \"...\"` (discovering --text via classify --help). Does NOT write the text to a temp file and upload it.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent classified inline via the --text flag",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "classify"
+              ],
+              "flag": "text"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent used the given classifier and did not upload a file",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "classify"
+              ],
+              "flag_value": {
+                "using": "cl_support"
+              }
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "files",
+                "upload"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "F-1",
       "category": "output-format",
       "path": "B",

@@ -25,6 +25,8 @@ func newClassifyDoc(app *App) *CommandDoc {
 		patchPath    string
 		configPath   string
 		password     string
+		text         string
+		name         string
 		wait         bool
 		priority     int
 		timeout      time.Duration
@@ -52,6 +54,7 @@ with a confidence score.
   - a local file path (auto-uploaded)
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
+  - omitted, with --text "<inline text>" to classify raw text directly
 
 The classifier comes from one of two forms. Exactly one of --using or
 --config is required:
@@ -84,7 +87,7 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.ExactArgs(1),
+		Args:     cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -96,8 +99,14 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 			if configPath != "" && patchPath != "" {
 				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
 			}
+			input := ""
+			if len(args) > 0 {
+				input = args[0]
+			}
 			return runClassify(cmd.Context(), app, classifyParams{
-				input:        args[0],
+				input:        input,
+				text:         text,
+				name:         name,
 				classifierID: classifierID,
 				version:      version,
 				patchPath:    patchPath,
@@ -114,6 +123,8 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 			cmd.Flags().StringVar(&version, "version", "", "Classifier version: latest, draft, or specific (e.g. 1.0)")
 			cmd.Flags().StringVar(&patchPath, "patch", "", "Per-run patch merged onto the --using classifier's saved config. Requires --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&configPath, "config", "", "Complete one-off classify config used INSTEAD of a saved classifier. Mutually exclusive with --using. Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&text, "text", "", "Classify this inline text instead of a file/URL/ID input (omit the positional <input>)")
+			cmd.Flags().StringVar(&name, "name", "", "Display name for the input (honored for --text and URL inputs)")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
@@ -126,6 +137,8 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 
 type classifyParams struct {
 	input        string
+	text         string
+	name         string
 	classifierID string
 	version      string
 	patchPath    string
@@ -143,7 +156,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 		return err
 	}
 
-	ref, err := uploadOrResolveWith(ctx, app, cli, p.input, p.password)
+	ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
 	if err != nil {
 		return err
 	}
