@@ -2,8 +2,9 @@ name: integration
 
 # Integration tests cost real credits, so they only run on explicit
 # dispatch. The base URL and key flow in via repo secrets
-# (EXTEND_INTEGRATION_BASE_URL, EXTEND_INTEGRATION_API_KEY); the run_ops
-# gate is a dispatch input so the operator opts in per-run.
+# (EXTEND_BASE_URL, EXTEND_API_KEY). If they are absent, the integration
+# tests skip themselves. The run_ops gate is a dispatch input so the
+# operator opts in per-run.
 on:
   workflow_dispatch:
     inputs:
@@ -18,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      EXTEND_BASE_URL: ${{ secrets.EXTEND_INTEGRATION_BASE_URL }}
-      EXTEND_API_KEY: ${{ secrets.EXTEND_INTEGRATION_API_KEY }}
+      EXTEND_BASE_URL: ${{ secrets.EXTEND_BASE_URL }}
+      EXTEND_API_KEY: ${{ secrets.EXTEND_API_KEY }}
       EXTEND_TEST_RUN_OPS: ${{ inputs.run_ops && '1' || '' }}
     steps:
       - uses: actions/checkout@v6
@@ -29,13 +30,6 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-
-      - name: verify secrets present
-        run: |
-          if [ -z "$EXTEND_BASE_URL" ] || [ -z "$EXTEND_API_KEY" ]; then
-            echo "::error::EXTEND_INTEGRATION_BASE_URL and EXTEND_INTEGRATION_API_KEY repo secrets must be set"
-            exit 1
-          fi
 
       - name: run integration tests
         working-directory: test/integration
