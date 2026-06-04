@@ -25,6 +25,26 @@ From source (requires Go toolchain):
 
 Or grab a signed binary from the [releases page](https://github.com/extend-hq/extend-cli/releases).
 
+## Use with coding agents
+
+The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
+agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, etc.)
+to use `extend` correctly without you having to spell out every command.
+
+Install to the cross-client default path:
+
+    extend skill install
+
+This writes `~/.agents/skills/extend/SKILL.md`, the path Codex,
+OpenCode, Cursor, and most other harnesses look at. Claude Code reads
+from `~/.claude/skills/` instead, so point `--target` at it:
+
+    extend skill install --target ~/.claude/skills/extend/SKILL.md
+
+Make sure to re-run
+`extend skill install` after upgrading to pick up new commands and
+flag changes.
+
 ## Authenticate
 
     export EXTEND_API_KEY=sk_xxx
@@ -84,37 +104,3 @@ Run `extend <command> --help` for flags.
 `--jq '<expr>'` filters structured payloads before `json`, `yaml`, `raw`, or
 `id` formatting. Data goes to stdout, status to stderr. Honors `NO_COLOR` and
 `CLICOLOR_FORCE`.
-
-## Use with coding agents
-
-The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
-agent harnesses (Claude Code, Codex, OpenCode, Cursor, Goose, etc.)
-to use `extend` correctly without you having to spell out every command.
-
-Install to the cross-client default path:
-
-    extend skill install
-
-This writes `~/.agents/skills/extend/SKILL.md`, the path Codex,
-OpenCode, Cursor, and most other harnesses look at. Claude Code reads
-from `~/.claude/skills/` instead, so point `--target` at it:
-
-    extend skill install --target ~/.claude/skills/extend/SKILL.md
-
-Or print the body to stdout and redirect wherever you want:
-
-    extend skill > /path/to/SKILL.md
-
-The skill is a pure function of the CLI's doc tree, so re-run
-`extend skill install` after upgrading to pick up new commands and
-flag changes.
-
-## Develop
-
-    mise install
-    go test ./...
-
-Integration tests live in `test/integration/` (separate module). They
-require `EXTEND_BASE_URL` and `EXTEND_API_KEY`; `EXTEND_TEST_RUN_OPS=1`
-enables the credit-spending tests.
-</content>
