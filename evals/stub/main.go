@@ -127,8 +127,12 @@ func main() {
 		emitExtractorVersionCreate(args, mode)
 	case match(args, "classifiers", "list"):
 		emitClassifiersList(args, mode)
+	case match(args, "classifiers", "create"):
+		emitClassifiersCreate(args, mode)
 	case match(args, "splitters", "list"):
 		emitSplittersList(args, mode)
+	case match(args, "splitters", "create"):
+		emitSplittersCreate(args, mode)
 	case match(args, "workflows", "list"):
 		emitWorkflowsList(args, mode)
 	case match(args, "workflows", "create"):
@@ -151,6 +155,8 @@ func main() {
 		emitWebhookEndpointsCreate(args, mode)
 	case match(args, "webhooks", "subscriptions", "create"):
 		emitWebhookSubscriptionsCreate(args, mode)
+	case match(args, "webhooks", "verify"):
+		emitWebhookVerify(args, mode)
 	default:
 		emitUnknown(args)
 	}

@@ -48,6 +48,8 @@ func generate(name, path string) error {
 		return writeJSON(path, sampleExtractorConfig())
 	case base == "workflow-steps.json":
 		return writeJSON(path, sampleWorkflowSteps())
+	case base == "payload.json":
+		return writeJSON(path, sampleWebhookPayload())
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "invoice"):
 		return writeInvoicePDF(path)
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "contract"):
@@ -266,6 +268,16 @@ func sampleWorkflowSteps() any {
 				"next": []map[string]any{{"step": "webhook"}},
 			},
 			{"name": "webhook", "type": "WEBHOOK_RESPONSE"},
+		},
+	}
+}
+
+func sampleWebhookPayload() any {
+	return map[string]any{
+		"type": "workflow_run.completed",
+		"data": map[string]any{
+			"id":     "workflow_run_demo",
+			"status": "PROCESSED",
 		},
 	}
 }

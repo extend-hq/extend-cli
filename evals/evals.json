@@ -1816,6 +1816,101 @@
           "answer_pattern": "output\\.metadata.{0,120}ocrConfidence|ocrConfidence.{0,120}output\\.metadata"
         }
       ]
+    },
+    {
+      "id": "S-9",
+      "category": "classifier-config",
+      "path": "B",
+      "prompt": "Create a reusable classifier named Contract type. It should sort contract PDFs into Master Service Agreement, Statement of Work, NDA, or Other. Save the classifier body in contract-classifier.json and create it in Extend. Please include enough guidance so future users know 'Other' is the catch-all for anything outside those three contract types.",
+      "files": [],
+      "expected_output": "Agent authors a classifier config with four classifications including Other, useful IDs/types/descriptions and contract-focused classificationRules, then runs `extend classifiers create --from-file contract-classifier.json`.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent created the contract classifier from a valid config file",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "classifiers",
+                "create"
+              ],
+              "flag_value_suffix": {
+                "from-file": "contract-classifier.json"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions the catch-all Other class",
+          "answer_pattern": "Other|other|catch-all|catchall"
+        }
+      ]
+    },
+    {
+      "id": "S-10",
+      "category": "splitter-config",
+      "path": "B",
+      "prompt": "Create a reusable splitter named Customer statements. It will receive big PDFs that contain multiple customer statements plus occasional cover pages. We need one segment per customer statement, and miscellaneous cover pages should fall into Other. Save the body as statement-splitter.json and create it in Extend.",
+      "files": [],
+      "expected_output": "Agent authors a splitter config with statement and Other split classifications, includes an identifierKey for the customer statement, adds splitRules about grouping customer statement pages, and runs `extend splitters create --from-file statement-splitter.json`.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent created the statement splitter from a valid config file",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "splitters",
+                "create"
+              ],
+              "flag_value_suffix": {
+                "from-file": "statement-splitter.json"
+              },
+              "exit_code": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H-8",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "I saved a raw webhook delivery body in payload.json. The headers were x-extend-request-signature=sig_test and x-extend-request-timestamp=1700000000, and my signing secret is whsec_test. Use the CLI to verify it rather than writing custom HMAC code.",
+      "files": [
+        "payload.json"
+      ],
+      "expected_output": "Agent uses `extend webhooks verify` with signature, timestamp, secret, and body-file flags; it does not write custom HMAC verification code.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent verified the webhook delivery with the CLI",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "webhooks",
+                "verify"
+              ],
+              "flag_value": {
+                "signature": "sig_test",
+                "timestamp": "1700000000",
+                "secret": "whsec_test"
+              },
+              "flag_value_suffix": {
+                "body-file": "payload.json"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer does not propose writing custom HMAC code",
+          "answer_must_not_match": "custom HMAC|write (a )?(script|code)|Python|Node"
+        }
+      ]
     }
   ]
 }
