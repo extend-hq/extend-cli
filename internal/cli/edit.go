@@ -78,14 +78,31 @@ Pass --output-file to auto-download the filled PDF, or --wait=false to
 return the run ID immediately and fetch the filled PDF later via 'extend
 files download'.
 
-Advanced detection options ride in --advanced-options as a JSON object
-(inline JSON, a path, a file:// URI, or '-' for stdin). Omitted fields use
-the server default:
+Config fields:
+
+  - instructions (string) - natural-language values and rules. Use alone for
+    fast one-off fills, or combine with --schema to steer ambiguous fields.
+  - schemaGenerationInstructions (string) - extra instructions used when the
+    server generates a schema because --schema was omitted.
+  - schema (object) - explicit edit schema. Use this for precise, repeatable
+    fills of the same form type.
+  - advancedOptions (object) - detection and output options. Pass through
+    --advanced-options as inline JSON, a path, a file:// URI, or '-' for stdin.
+    Omitted fields use the server default.
 
   flattenPdf           bool  Make the filled form non-editable (server default: true).
   nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
   tableParsingEnabled  bool  Parse table regions as arrays of objects so their cells can be filled.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum so only one option fills.`,
+  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum so only one option fills.
+
+Prefer schema-driven fills for production/repeated forms. Natural-language
+instructions are fastest for prototypes; schemas with extend_edit:value are
+more deterministic. Flatten final documents; set flattenPdf false only when
+the output must remain editable.
+
+` + editSchemaPropertyDoc + `
+
+` + editOutputDoc,
 		Examples: []Example{
 			{Label: "Inline instructions", Cmd: `extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15" --output-file filled.pdf`},
 			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
@@ -411,7 +428,7 @@ func newEditSchemaGenerateDoc(app *App) *CommandDoc {
 			"generate the json schema for a fillable pdf",
 			"derive an edit schema from a form",
 		},
-		WhenToUse: `Use to scaffold a schema you can hand-edit (populate 'default' values)
+		WhenToUse: `Use to scaffold a schema you can hand-edit (populate extend_edit:value fields)
 and pass to 'extend edit --schema'. This is the one synchronous endpoint
 in the edit family; there is no async variant.`,
 		Details: `Detect form fields in a PDF and emit a starting-point schema that can be
@@ -428,6 +445,8 @@ fields use the server default):
   nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
   tableParsingEnabled  bool  Parse table regions as arrays of objects.
   radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.
+
+` + editSchemaGenerationDoc + `
 
 ` + editSchemaPropertyDoc,
 		Examples: []Example{

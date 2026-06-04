@@ -152,6 +152,22 @@ func TestRenderSkillIsStable(t *testing.T) {
 	}
 }
 
+func TestSkillIncludesWorkflowLifecycleRecipe(t *testing.T) {
+	body := RenderSkill(RootDoc(testAppForDocs()))
+	for _, want := range []string{
+		"### Create, deploy, and run a workflow",
+		"extend workflows create",
+		"extend workflows versions create",
+		"extend run invoice.pdf --using",
+		"classificationId",
+		"cannot use version \"latest\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill body missing workflow lifecycle token %q", want)
+		}
+	}
+}
+
 // TestSkillUnderRecommendedTokenBudget enforces the agentskills.io
 // specification's recommended ceiling of ~5,000 tokens for SKILL.md
 // bodies (the spec's progressive-disclosure principle: just the core

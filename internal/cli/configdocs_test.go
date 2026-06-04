@@ -161,6 +161,84 @@ func TestProcessorCreateHelpDocumentsConfig(t *testing.T) {
 	}
 }
 
+func TestWorkflowHelpDocumentsRoutingAndVersionRules(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	tokens := []string{
+		"extend workflows versions create",
+		"extend run invoice.pdf --using workflow_xxx",
+		"TRIGGER followed by",
+		"WEBHOOK_RESPONSE is terminal",
+		"classificationId",
+		"conditionId",
+		`"result": "pass"`,
+		`"result": "fail"`,
+		`CLASSIFY and SPLIT cannot use "latest"`,
+		"{{ extract.output.value.total }}",
+		"{{ metadata.provider_name }}",
+		"{{ external_validate.output.response.data.requires_review }}",
+		"EQUALS, GTE, LTE, IS_NULL, CONTAINS",
+		"NO_OP",
+		"extend-signature",
+		"failureBehavior",
+		"formula must evaluate to a boolean",
+		"Parse step config takes precedence",
+		"COLLECT",
+		"FILE_CONVERSION",
+	}
+	for _, path := range [][]string{{"workflows", "create"}, {"workflows", "update"}} {
+		cmd := findCmd(t, ta.app, path...)
+		for _, want := range tokens {
+			if !strings.Contains(cmd.Long, want) {
+				t.Errorf("%s --help missing %q in:\n%s", strings.Join(path, " "), want, cmd.Long)
+			}
+		}
+	}
+}
+
+func TestExtractHelpDocumentsSchemaOutputAndOptimization(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	configTokens := []string{
+		"Primitive fields must be nullable",
+		"extend:type",
+		"Currency fields are objects",
+		"iso_4217_currency_code",
+		"anyOf/oneOf/allOf",
+		"citationMode",
+		"arrayCitationStrategy",
+		"advancedMultimodalEnabled",
+		"modelReasoningInsightsEnabled",
+		"Review Agent",
+		"arrayStrategy",
+		"chunkSelectionStrategy",
+		"pageRanges",
+		"text.agentic OCR",
+		"Extract can only return values that",
+	}
+	for _, path := range [][]string{{"extract"}, {"extractors", "create"}, {"extractors", "update"}} {
+		cmd := findCmd(t, ta.app, path...)
+		for _, want := range configTokens {
+			if !strings.Contains(cmd.Long, want) {
+				t.Errorf("%s --help missing %q in:\n%s", strings.Join(path, " "), want, cmd.Long)
+			}
+		}
+	}
+
+	outputTokens := []string{
+		"output.value",
+		"output.metadata",
+		"reviewAgentScore",
+		"logprobsConfidence",
+		"ocrConfidence",
+		"{{extractStep.minConfidence}}",
+	}
+	cmd := findCmd(t, ta.app, "extract")
+	for _, want := range outputTokens {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("extract --help missing %q in:\n%s", want, cmd.Long)
+		}
+	}
+}
+
 // TestActionVerbConfigHelpDocumentsFields asserts the inline --config
 // field catalog reaches the action verbs (extract/classify/split), so an
 // agent building a one-off config can discover the shape from --help.
@@ -230,9 +308,45 @@ func TestParseHelpDocumentsOptions(t *testing.T) {
 func TestEditSchemaGenerateHelpDocumentsProps(t *testing.T) {
 	ta := newTestApp(t, newFakeServer(t, nil))
 	cmd := findCmd(t, ta.app, "edit", "schema", "generate")
-	for _, want := range []string{"extend_edit:value", "extend_edit:field_type", "extend_edit:bbox"} {
+	for _, want := range []string{
+		"extend_edit:value",
+		"extend_edit:field_type",
+		"extend_edit:bbox",
+		"mappingResult",
+		"annotatedSchema",
+		"radioEnumsEnabled",
+		"nativeFieldsOnly",
+		"dependentRequired",
+		"if/then/else",
+	} {
 		if !strings.Contains(cmd.Long, want) {
 			t.Errorf("edit schema generate --help missing %q", want)
+		}
+	}
+}
+
+func TestEditHelpDocumentsConfigOutputAndSchemaProps(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "edit")
+	for _, want := range []string{
+		"schemaGenerationInstructions",
+		"extend_edit:value",
+		"extend_edit:image",
+		"combing",
+		"maxLength",
+		"fontColor",
+		"dependentRequired",
+		"flattenPdf",
+		"tableParsingEnabled",
+		"output.editedFile.id",
+		"output.editedFile.presignedUrl",
+		"expires 15 minutes",
+		"output.filledValues",
+		"processingTimeMs",
+		"failureReason",
+	} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("edit --help missing %q", want)
 		}
 	}
 }

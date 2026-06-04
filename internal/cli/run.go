@@ -55,6 +55,9 @@ classify, split, parse) when you only need one processor.`,
 Workflow runs are asynchronous by default because they can take minutes to
 hours; the run ID and dashboard URL are printed immediately.
 
+Use --version to run "latest", "draft", or a named workflow deploy created
+with extend workflows versions create --name.
+
 Use --wait to block until the run reaches a terminal state. NEEDS_REVIEW
 is treated as terminal because it pauses for human action; use the
 dashboard URL to review and approve.
@@ -70,7 +73,7 @@ Repeatable.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend run invoice.pdf --using workflow_abc"},
 			{Label: "Block until terminal", Cmd: "extend run invoice.pdf --using workflow_abc --wait"},
-			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --using workflow_abc --version 3 --priority 10"},
+			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --using workflow_abc --version v2-with-review --priority 10"},
 			{Label: "Seed processor outputs", Cmd: "extend run invoice.pdf --using workflow_abc --outputs seeded.json"},
 			{Label: "Inline seeded outputs", Cmd: `extend run invoice.pdf --using workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
 			{Label: "Pass a secret", Cmd: "extend run invoice.pdf --using workflow_abc --secret API_KEY=$KEY"},
@@ -112,7 +115,7 @@ Repeatable.`,
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&workflowID, "using", "", "Workflow ID (required, e.g. workflow_xxx)")
-			cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or specific (e.g. 3)")
+			cmd.Flags().StringVar(&version, "version", "", "Workflow version: latest, draft, or named deploy (e.g. v2-with-review)")
 			cmd.Flags().BoolVar(&wait, "wait", false, "Block until the run reaches a terminal state")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 			cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "Maximum total time to wait for the run to reach a terminal state when --wait is set (not a per-HTTP-request timeout; see --http-timeout)")

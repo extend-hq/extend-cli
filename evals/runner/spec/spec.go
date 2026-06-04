@@ -116,8 +116,16 @@ type ExtendCallPredicate struct {
 	// value (matches both `--flag=val` and `--flag val`).
 	FlagValue map[string]string `json:"flag_value,omitempty"`
 
+	// FlagValueSuffix, if set, requires the named flag's value to end
+	// with the given suffix. Useful for paths that may be relative or
+	// file:// absolute URIs.
+	FlagValueSuffix map[string]string `json:"flag_value_suffix,omitempty"`
+
 	// MustNotHaveFlag requires the named long flag to NOT be present.
 	MustNotHaveFlag string `json:"must_not_have_flag,omitempty"`
+
+	// ExitCode, if set, requires the recorded command exit code to match.
+	ExitCode *int `json:"exit_code,omitempty"`
 }
 
 // Load reads and parses evals.json from disk.

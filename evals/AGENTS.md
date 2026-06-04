@@ -33,7 +33,8 @@ agent had no way to know that ID. Path B prompts carry every ID;
   cases to confirm the skill activated at all.
 - **`extend_call`** — mechanical. Walks `extend-calls.jsonl` for argv
   predicates: `must_contain`, `must_not_contain`, `count_under`,
-  `count_at_least`. Both flags and positional args are matchable.
+  `count_at_least`. Flags, positional args, exact/suffix flag values,
+  and exit codes are matchable.
 - **`stable_answer`** — deterministic match against the agent's final
   message. Substring or regex. Cheap; no LLM judge.
 - **`must_not_fabricate_ids`** — scans every recorded `extend` call for
@@ -95,19 +96,14 @@ fixture set on get/upload calls.
 
 `H-*` (help-discovery) cases assert that an agent can find a flag or
 capability by consulting `extend <cmd> --help` rather than guessing. The
-fake binary serves per-command help from the `commandHelp` map in
-`evals/stub` — a hand-maintained mirror of the real CLI's flags, scoped
-per command the way `extend <cmd> --help` is. A help-discovery case is
-only meaningful if that mirror carries the flag under test:
+fake binary delegates help invocations to the real CLI command tree
+(`internal/cli.NewRoot`) and only stubs non-help command execution. This
+keeps eval help text in sync with the same docs users and `extend skill`
+see.
 
-- When you add an `H-*` case for a flag, confirm `evals/stub`'s
-  `commandHelp[<command>]` actually lists it (the case will otherwise
-  pass or fail for the wrong reason).
-- Keep `commandHelp` in sync with the real command docs in
-  `internal/cli/`. The integration tests (e.g. `TestEditAdvancedOptions_ExposedInBinary`)
-  guard that the *real* `--help` carries a flag; the stub mirror is what
-  the agent sees in an eval. Drift between the two silently weakens the
-  signal.
+When you add an `H-*` case for a flag or capability, confirm the real
+`extend <cmd> --help` lists it. If the real help omits it, fix
+`internal/cli/` docs first; do not add a stub-only help string.
 
 ## ID-fabrication checking
 

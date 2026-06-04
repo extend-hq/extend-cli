@@ -288,22 +288,52 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 ### Stand up an extractor and run it
 
-1. Create the extractor draft from a config body:
+1. Author the extractor config. Use a JSON Schema root object; make primitive
+   fields nullable (` + `"type": ["string", "null"]` + `); use clear field
+   names/descriptions; use arrays for repeated rows; use ` + `"extend:type"` + `
+   for date/currency/signature fields. Currency fields must be objects with
+   amount and iso_4217_currency_code, not primitive numbers. If extraction
+   misses a value, inspect parse output before over-tuning the schema.
+2. Create the extractor draft from the config body:
 
        extend extractors create --from-file extractor.json --name "Q3 invoices"
 
    Returns a new ` + "`ex_xxx`" + ` ID. The draft is editable but not yet deployed.
-2. Iterate on the draft as needed:
+3. Iterate on the draft as needed:
 
        extend extractors update ex_xxx --from-file patch.json
 
-3. Publish version 1.0 once the draft is solid:
+4. Publish version 1.0 once the draft is solid:
 
        extend extractors versions create ex_xxx --release-type major
 
-4. Run extraction against a document:
+5. Run extraction against a document:
 
        extend extract invoice.pdf --using ex_xxx
+
+### Create, deploy, and run a workflow
+
+1. Create a workflow draft and capture its ID:
+
+       WORKFLOW=$(extend workflows create --from-file '{"name":"Invoice workflow"}' \
+           --jq '.id' -o raw)
+
+   The draft is editable. It is not runnable until you deploy a version.
+2. Author the step graph in workflow-steps.json, then update the draft:
+
+       extend workflows update "$WORKFLOW" --from-file workflow-steps.json
+
+   Every graph starts TRIGGER -> PARSE. EXTRACT steps reference an extractor
+   by id and version. CLASSIFY/SPLIT routes use classificationId values and
+   cannot use version "latest"; pin semver or use "draft".
+3. Deploy the draft as an immutable named version:
+
+       extend workflows versions create "$WORKFLOW" --name v1
+
+4. Run it asynchronously, or add --wait to block until terminal:
+
+       RUN=$(extend run invoice.pdf --using "$WORKFLOW" --version v1 -o id)
+       extend runs watch "$RUN"
 
 ### Process a folder of inputs and inspect failures
 
@@ -358,7 +388,9 @@ the filled PDF. The server detects form fields and applies the prose:
 
 **Structured fills** (when you already have a populated schema, or want a
 repeatable shape): scaffold the schema once, populate values on each
-field per the generated shape, and then run ` + "`edit --schema`" + `:
+field per the generated shape (` + "`extend_edit:value`" + ` for explicit values;
+` + "`extend_edit:image`" + ` for PNG/JPEG signature images), and then run
+` + "`edit --schema`" + `:
 
     extend edit schema generate form.pdf > schema.json
     # populate values on each field per the generated shape, then:
@@ -371,7 +403,9 @@ schema cannot express:
         --instructions "format dates as MM/DD/YYYY; leave spouse blank if single"
 
 Without ` + "`--output-file`" + `, the filled PDF stays on the server; fetch later
-with ` + "`extend files download <file-id>`" + `.
+with ` + "`extend files download <file-id>`" + `. If you use the response's
+` + "`output.editedFile.presignedUrl`" + ` directly, download it promptly; it expires
+after 15 minutes.
 
 ### Fill a PDF form from values in another document
 

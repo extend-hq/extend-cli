@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/extend-hq/extend-cli/evals/runner/harness"
@@ -159,6 +160,24 @@ func describePredicate(p spec.ExtendCallPredicate) string {
 	}
 	if p.Flag != "" {
 		parts = append(parts, "--"+p.Flag)
+	}
+	appendMap := func(label string, m map[string]string) {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s[%s=%s]", label, k, m[k]))
+		}
+	}
+	appendMap("flag", p.FlagValue)
+	appendMap("flag_suffix", p.FlagValueSuffix)
+	if p.MustNotHaveFlag != "" {
+		parts = append(parts, "no --"+p.MustNotHaveFlag)
+	}
+	if p.ExitCode != nil {
+		parts = append(parts, fmt.Sprintf("exit[%d]", *p.ExitCode))
 	}
 	return strings.Join(parts, " ")
 }

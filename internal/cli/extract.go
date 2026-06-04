@@ -74,7 +74,9 @@ a file:// URI, or '-' to read from stdin. They are NOT interchangeable:
 --patch is a partial merge onto a --using extractor; --config is a
 complete standalone config that replaces the need for one entirely.
 
-` + actionConfigDoc(extractConfigFields),
+` + actionConfigDoc(extractConfigFields) + `
+
+` + extractOutputDoc,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
 			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},
