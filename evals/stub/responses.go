@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -96,6 +99,11 @@ func typeFromPrefix(prefix string) string {
 }
 
 func emitExtract(args []string, mode string) {
+	if err := validateFastInvoiceExtractConfig(flagValue(args, "config")); err != nil {
+		fmt.Fprintf(stderr, "Error: invalid extract config: %v\n", err)
+		exitCode = 1
+		return
+	}
 	wait := !equalsFalse(flagValue(args, "wait"))
 	if !wait {
 		// Async: agent passed --wait=false; emit just the run ID.
@@ -403,6 +411,487 @@ func emitSplittersList(args []string, mode string) {
 
 func emitWorkflowsList(args []string, mode string) {
 	emitJSON(map[string]any{"data": fixtureWorkflows, "nextPageToken": nil})
+}
+
+func emitWorkflowsCreate(args []string, mode string) {
+	name := flagValue(args, "name")
+	if name == "" {
+		name = "Stub workflow"
+	}
+	emitJSON(map[string]any{
+		"id":     nowID("workflow_"),
+		"object": "workflow",
+		"name":   name,
+	})
+}
+
+func emitWorkflowsUpdate(args []string, mode string) {
+	pos := positional(args)
+	id := "workflow_stub"
+	if len(pos) >= 3 {
+		id = pos[2]
+	}
+	if err := validateWorkflowUpdate(id, flagValue(args, "from-file")); err != nil {
+		fmt.Fprintf(stderr, "Error: invalid workflow steps: %v\n", err)
+		exitCode = 1
+		return
+	}
+	emitJSON(map[string]any{
+		"id":     id,
+		"object": "workflow",
+		"name":   "Stub workflow",
+	})
+}
+
+func validateWorkflowUpdate(id, source string) error {
+	source = strings.TrimSpace(source)
+	switch {
+	case id == "workflow_docrouter" || strings.HasSuffix(source, "router-workflow.json"):
+		body, err := readWorkflowJSONSource(source)
+		if err != nil {
+			return err
+		}
+		return validateRouterWorkflow(body)
+	case id == "workflow_vendorcheck" || strings.HasSuffix(source, "vendor-check-workflow.json"):
+		body, err := readWorkflowJSONSource(source)
+		if err != nil {
+			return err
+		}
+		return validateVendorCheckWorkflow(body)
+	}
+	return nil
+}
+
+func readWorkflowJSONSource(source string) ([]byte, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, fmt.Errorf("--from-file is required")
+	}
+	if strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
+		return []byte(source), nil
+	}
+	if strings.HasPrefix(strings.ToLower(source), "file://") {
+		u, err := url.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("parse file URI %q: %w", source, err)
+		}
+		if u.Host != "" && u.Host != "localhost" {
+			return nil, fmt.Errorf("file URI host %q is not supported", u.Host)
+		}
+		source = filepath.FromSlash(u.Path)
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", source, err)
+	}
+	return data, nil
+}
+
+func validateFastInvoiceExtractConfig(source string) error {
+	if !strings.HasSuffix(strings.TrimSpace(source), "fast-invoice-config.json") {
+		return nil
+	}
+	body, err := readWorkflowJSONSource(source)
+	if err != nil {
+		return err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return err
+	}
+	if got := nestedString(cfg, "baseProcessor"); got != "extraction_light" {
+		return fmt.Errorf("baseProcessor = %q, want extraction_light", got)
+	}
+	advanced := mapAt(cfg, "advancedOptions")
+	for _, key := range []string{"citationsEnabled", "modelReasoningInsightsEnabled", "advancedMultimodalEnabled"} {
+		if got, ok := advanced[key].(bool); !ok || got {
+			return fmt.Errorf("advancedOptions.%s must be false", key)
+		}
+	}
+	schema := mapAt(cfg, "schema")
+	if nestedString(schema, "type") != "object" {
+		return fmt.Errorf("schema root must be object")
+	}
+	props := mapAt(schema, "properties")
+	if !nullablePrimitive(mapAt(props, "invoice_number"), "string") {
+		return fmt.Errorf("invoice_number must be nullable string")
+	}
+	invoiceDate := mapAt(props, "invoice_date")
+	if !nullablePrimitive(invoiceDate, "string") || nestedString(invoiceDate, "extend:type") != "date" {
+		return fmt.Errorf("invoice_date must be nullable date string")
+	}
+	if !currencyField(mapAt(props, "total")) {
+		return fmt.Errorf("total must be an object with extend:type currency, amount, and iso_4217_currency_code")
+	}
+	lineItems := mapAt(props, "line_items")
+	if nestedString(lineItems, "type") != "array" {
+		return fmt.Errorf("line_items must be an array")
+	}
+	itemProps := mapAt(mapAt(lineItems, "items"), "properties")
+	if !nullablePrimitive(mapAt(itemProps, "description"), "string") {
+		return fmt.Errorf("line_items.description must be nullable string")
+	}
+	if !nullablePrimitive(mapAt(itemProps, "quantity"), "number") {
+		return fmt.Errorf("line_items.quantity must be nullable number")
+	}
+	if !currencyField(mapAt(itemProps, "line_total")) {
+		return fmt.Errorf("line_items.line_total must be an object with extend:type currency, amount, and iso_4217_currency_code")
+	}
+	return nil
+}
+
+func mapAt(m map[string]any, key string) map[string]any {
+	obj, _ := m[key].(map[string]any)
+	if obj == nil {
+		return map[string]any{}
+	}
+	return obj
+}
+
+func nullablePrimitive(m map[string]any, typ string) bool {
+	vals, ok := m["type"].([]any)
+	if !ok {
+		return false
+	}
+	seenType, seenNull := false, false
+	for _, v := range vals {
+		s, _ := v.(string)
+		if s == typ {
+			seenType = true
+		}
+		if s == "null" {
+			seenNull = true
+		}
+	}
+	return seenType && seenNull
+}
+
+func currencyField(m map[string]any) bool {
+	if nestedString(m, "type") != "object" || nestedString(m, "extend:type") != "currency" {
+		return false
+	}
+	props := mapAt(m, "properties")
+	return nullablePrimitive(mapAt(props, "amount"), "number") &&
+		nullablePrimitive(mapAt(props, "iso_4217_currency_code"), "string")
+}
+
+type workflowStepProbe struct {
+	Name   string           `json:"name"`
+	Type   string           `json:"type"`
+	Config map[string]any   `json:"config"`
+	Next   []map[string]any `json:"next"`
+}
+
+func validateRouterWorkflow(body []byte) error {
+	var req struct {
+		Steps []workflowStepProbe `json:"steps"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return err
+	}
+	if len(req.Steps) == 0 {
+		return fmt.Errorf("body must contain steps")
+	}
+
+	types := map[string]bool{}
+	stepsByName := map[string]*workflowStepProbe{}
+	extractors := map[string]bool{}
+	var classifier *workflowStepProbe
+	for i := range req.Steps {
+		step := &req.Steps[i]
+		types[step.Type] = true
+		stepsByName[step.Name] = step
+		if step.Type == "CLASSIFY" {
+			classifier = step
+		}
+		if step.Type == "EXTRACT" {
+			if id := nestedString(step.Config, "extractor", "id"); id != "" {
+				extractors[id] = true
+			}
+		}
+		if step.Type == "WEBHOOK_RESPONSE" && len(step.Next) > 0 {
+			return fmt.Errorf("WEBHOOK_RESPONSE must not have next")
+		}
+	}
+	for _, typ := range []string{"TRIGGER", "PARSE", "CLASSIFY", "HUMAN_REVIEW", "COLLECT", "WEBHOOK_RESPONSE"} {
+		if !types[typ] {
+			return fmt.Errorf("missing %s step", typ)
+		}
+	}
+	for _, id := range []string{"ex_invoiceQ3", "ex_receiptsQ3"} {
+		if !extractors[id] {
+			return fmt.Errorf("missing extractor %s", id)
+		}
+	}
+	if classifier == nil {
+		return fmt.Errorf("missing CLASSIFY step")
+	}
+	if got := nestedString(classifier.Config, "classifier", "id"); got != "cl_docTypes" {
+		return fmt.Errorf("CLASSIFY classifier id = %q, want cl_docTypes", got)
+	}
+	if got := nestedString(classifier.Config, "classifier", "version"); got != "0.1" {
+		return fmt.Errorf("CLASSIFY classifier version = %q, want 0.1", got)
+	}
+	for _, id := range []string{"cls_invoice", "cls_receipt", "cls_other"} {
+		if !nextHas(classifier.Next, "classificationId", id) {
+			return fmt.Errorf("CLASSIFY next missing classificationId %s", id)
+		}
+	}
+	if err := validateLinearRoute(stepsByName, "TRIGGER", "PARSE"); err != nil {
+		return err
+	}
+	if err := validateLinearRoute(stepsByName, "PARSE", "CLASSIFY"); err != nil {
+		return err
+	}
+	collect := firstStepOfType(stepsByName, "COLLECT")
+	webhook := firstStepOfType(stepsByName, "WEBHOOK_RESPONSE")
+	if collect == nil || webhook == nil {
+		return fmt.Errorf("missing collect or webhook step")
+	}
+	if !nextRoutesToType(stepsByName, collect, "WEBHOOK_RESPONSE") {
+		return fmt.Errorf("COLLECT must route to WEBHOOK_RESPONSE")
+	}
+	checks := map[string]struct {
+		typeName    string
+		extractorID string
+	}{
+		"cls_invoice": {typeName: "EXTRACT", extractorID: "ex_invoiceQ3"},
+		"cls_receipt": {typeName: "EXTRACT", extractorID: "ex_receiptsQ3"},
+		"cls_other":   {typeName: "HUMAN_REVIEW"},
+	}
+	for classID, want := range checks {
+		branch := targetForRoute(stepsByName, classifier.Next, "classificationId", classID)
+		if branch == nil {
+			return fmt.Errorf("classificationId %s does not route to a step", classID)
+		}
+		if branch.Type != want.typeName {
+			return fmt.Errorf("classificationId %s routes to %s, want %s", classID, branch.Type, want.typeName)
+		}
+		if want.extractorID != "" && nestedString(branch.Config, "extractor", "id") != want.extractorID {
+			return fmt.Errorf("classificationId %s extractor mismatch", classID)
+		}
+		if !nextRoutesToType(stepsByName, branch, "COLLECT") {
+			return fmt.Errorf("branch %s must route to COLLECT", branch.Name)
+		}
+	}
+	return nil
+}
+
+func validateVendorCheckWorkflow(body []byte) error {
+	stepsByName, err := parseWorkflowSteps(body)
+	if err != nil {
+		return err
+	}
+	for _, typ := range []string{"TRIGGER", "PARSE", "EXTRACT", "EXTERNAL_DATA_VALIDATION", "CONDITIONAL", "HUMAN_REVIEW", "WEBHOOK_RESPONSE"} {
+		if firstStepOfType(stepsByName, typ) == nil {
+			return fmt.Errorf("missing %s step", typ)
+		}
+	}
+	if err := validateLinearRoute(stepsByName, "TRIGGER", "PARSE"); err != nil {
+		return err
+	}
+	if err := validateLinearRoute(stepsByName, "PARSE", "EXTRACT"); err != nil {
+		return err
+	}
+	parse := firstStepOfType(stepsByName, "PARSE")
+	if got := nestedString(parse.Config, "parseConfig", "target"); got != "markdown" {
+		return fmt.Errorf("PARSE parseConfig.target = %q, want markdown", got)
+	}
+	extract := firstStepOfType(stepsByName, "EXTRACT")
+	if got := nestedString(extract.Config, "extractor", "id"); got != "ex_invoiceQ3" {
+		return fmt.Errorf("EXTRACT extractor id = %q, want ex_invoiceQ3", got)
+	}
+	if got := nestedString(extract.Config, "extractor", "version"); got != "latest" {
+		return fmt.Errorf("EXTRACT extractor version = %q, want latest", got)
+	}
+	if !nextRoutesToType(stepsByName, extract, "EXTERNAL_DATA_VALIDATION") {
+		return fmt.Errorf("EXTRACT must route to EXTERNAL_DATA_VALIDATION")
+	}
+	external := firstStepOfType(stepsByName, "EXTERNAL_DATA_VALIDATION")
+	if got := nestedString(external.Config, "requestOptions", "url"); got != "https://api.example.com/vendor-check" {
+		return fmt.Errorf("external validation url = %q", got)
+	}
+	if got := nestedString(external.Config, "requestOptions", "method"); !strings.EqualFold(got, "POST") {
+		return fmt.Errorf("external validation method = %q, want POST", got)
+	}
+	if got := nestedString(external.Config, "requestOptions", "contentType"); got != "application/json" {
+		return fmt.Errorf("external validation contentType = %q, want application/json", got)
+	}
+	if !nextRoutesToType(stepsByName, external, "CONDITIONAL") {
+		return fmt.Errorf("EXTERNAL_DATA_VALIDATION must route to CONDITIONAL")
+	}
+	conditional := firstStepOfType(stepsByName, "CONDITIONAL")
+	reviewConditionIDs := conditionIDsReferencing(conditional.Config, "output.response.data.requires_review")
+	if len(reviewConditionIDs) == 0 {
+		return fmt.Errorf("CONDITIONAL must reference external validation requires_review")
+	}
+	if !nextConditionRoutesToType(stepsByName, conditional, reviewConditionIDs, "HUMAN_REVIEW") {
+		return fmt.Errorf("CONDITIONAL requires_review branch must route to HUMAN_REVIEW with matching conditionId")
+	}
+	defaultIDs := defaultConditionIDs(conditional.Config)
+	if len(defaultIDs) == 0 {
+		return fmt.Errorf("CONDITIONAL must include a default/NO_OP condition")
+	}
+	if !nextConditionRoutesToType(stepsByName, conditional, defaultIDs, "WEBHOOK_RESPONSE") {
+		return fmt.Errorf("CONDITIONAL default branch must route to WEBHOOK_RESPONSE with matching conditionId")
+	}
+	review := firstStepOfType(stepsByName, "HUMAN_REVIEW")
+	if !nextRoutesToType(stepsByName, review, "WEBHOOK_RESPONSE") {
+		return fmt.Errorf("HUMAN_REVIEW must route to WEBHOOK_RESPONSE")
+	}
+	webhook := firstStepOfType(stepsByName, "WEBHOOK_RESPONSE")
+	if len(webhook.Next) > 0 {
+		return fmt.Errorf("WEBHOOK_RESPONSE must not have next")
+	}
+	return nil
+}
+
+func parseWorkflowSteps(body []byte) (map[string]*workflowStepProbe, error) {
+	var req struct {
+		Steps []workflowStepProbe `json:"steps"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, err
+	}
+	if len(req.Steps) == 0 {
+		return nil, fmt.Errorf("body must contain steps")
+	}
+	stepsByName := map[string]*workflowStepProbe{}
+	for i := range req.Steps {
+		step := &req.Steps[i]
+		stepsByName[step.Name] = step
+	}
+	return stepsByName, nil
+}
+
+func conditionIDsReferencing(config map[string]any, needle string) []string {
+	var ids []string
+	conditions, _ := config["conditions"].([]any)
+	for _, item := range conditions {
+		condition, _ := item.(map[string]any)
+		for _, key := range []string{"leftOperand", "rightOperand"} {
+			value, _ := condition[key].(string)
+			if strings.Contains(value, needle) {
+				if id, _ := condition["id"].(string); id != "" {
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	return ids
+
+}
+
+func defaultConditionIDs(config map[string]any) []string {
+	var ids []string
+	conditions, _ := config["conditions"].([]any)
+	for _, item := range conditions {
+		condition, _ := item.(map[string]any)
+		id, _ := condition["id"].(string)
+		if id == "" {
+			continue
+		}
+		typ, _ := condition["type"].(string)
+		operation, _ := condition["operation"].(string)
+		formula, _ := condition["formula"].(string)
+		if strings.EqualFold(typ, "ELSE") || strings.EqualFold(operation, "NO_OP") || strings.EqualFold(formula, "TRUE") {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func validateLinearRoute(steps map[string]*workflowStepProbe, fromType, toType string) error {
+	from := firstStepOfType(steps, fromType)
+	if from == nil {
+		return fmt.Errorf("missing %s step", fromType)
+	}
+	if !nextRoutesToType(steps, from, toType) {
+		return fmt.Errorf("%s must route to %s", fromType, toType)
+	}
+	return nil
+}
+
+func firstStepOfType(steps map[string]*workflowStepProbe, typeName string) *workflowStepProbe {
+	for _, step := range steps {
+		if step.Type == typeName {
+			return step
+		}
+	}
+	return nil
+}
+
+func nextRoutesToType(steps map[string]*workflowStepProbe, from *workflowStepProbe, toType string) bool {
+	for _, route := range from.Next {
+		name, _ := route["step"].(string)
+		if step := steps[name]; step != nil && step.Type == toType {
+			return true
+		}
+	}
+	return false
+}
+
+func nextConditionRoutesToType(steps map[string]*workflowStepProbe, from *workflowStepProbe, conditionIDs []string, toType string) bool {
+	want := map[string]bool{}
+	for _, id := range conditionIDs {
+		want[id] = true
+	}
+	for _, route := range from.Next {
+		conditionID, _ := route["conditionId"].(string)
+		if !want[conditionID] {
+			continue
+		}
+		name, _ := route["step"].(string)
+		if step := steps[name]; step != nil && step.Type == toType {
+			return true
+		}
+	}
+	return false
+}
+
+func targetForRoute(steps map[string]*workflowStepProbe, next []map[string]any, key, value string) *workflowStepProbe {
+	for _, route := range next {
+		if got, _ := route[key].(string); got != value {
+			continue
+		}
+		name, _ := route["step"].(string)
+		return steps[name]
+	}
+	return nil
+}
+
+func nestedString(m map[string]any, keys ...string) string {
+	var cur any = m
+	for _, key := range keys {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = obj[key]
+	}
+	s, _ := cur.(string)
+	return s
+}
+
+func nextHas(next []map[string]any, key, value string) bool {
+	for _, route := range next {
+		if got, _ := route[key].(string); got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func emitWorkflowVersionCreate(args []string, mode string) {
+	name := flagValue(args, "name")
+	if name == "" {
+		name = "v1"
+	}
+	emitJSON(map[string]any{
+		"id":      nowID("workflow_version_"),
+		"object":  "workflow_version",
+		"version": name,
+	})
 }
 
 func emitFilesUpload(args []string, mode string) {

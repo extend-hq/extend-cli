@@ -958,6 +958,280 @@
       ]
     },
     {
+      "id": "W-7",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Follow the CLI workflow lifecycle: create a workflow named 'Invoice workflow', update its draft with workflow-steps.json, deploy it as version v1, then run invoice.pdf through that deployed version.",
+      "files": [
+        "invoice.pdf",
+        "workflow-steps.json"
+      ],
+      "expected_output": "Agent issues workflows create -> workflows update -> workflows versions create -> run, pins the run to --version v1, and does not try processor-style --release-type or --version latest.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent created the workflow draft",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "create"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent updated the draft with workflow-steps.json",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "update"
+              ],
+              "flag_value": {
+                "from-file": "workflow-steps.json"
+              }
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent deployed a named workflow version",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "flag_value": {
+                "name": "v1"
+              }
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "flag": "release-type"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent ran invoice.pdf through workflow version v1",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "run"
+              ],
+              "args": [
+                "invoice.pdf"
+              ],
+              "flag": "using",
+              "flag_value": {
+                "version": "v1"
+              }
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "run"
+              ],
+              "flag_value": {
+                "version": "latest"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "W-8",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "I need to update our existing document-router workflow workflow_docrouter and deploy it as v2-router. It should look at each uploaded document with our saved classifier cl_docTypes version 0.1. The classifier's stable class IDs are cls_invoice, cls_receipt, and cls_other. Invoices should go through extractor ex_invoiceQ3, receipts through extractor ex_receiptsQ3, and anything else should pause for human review. After those branches are done, send the workflow result to our webhook. Please create the workflow JSON locally as router-workflow.json, update the workflow with it, deploy the draft, and briefly tell me how you wired the routing. Do not run the workflow yet.",
+      "files": [],
+      "expected_output": "Agent infers the workflow step graph, authors a valid workflow JSON using classificationId routes, pins the classifier to 0.1, updates workflow_docrouter successfully, deploys with --name v2-router, and does not run the workflow.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent updated workflow_docrouter with a valid router-workflow.json",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "update"
+              ],
+              "args": [
+                "workflow_docrouter"
+              ],
+              "flag_value": {
+                "from-file": "router-workflow.json"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent deployed the router workflow with a named workflow version",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "args": [
+                "workflow_docrouter"
+              ],
+              "flag_value": {
+                "name": "v2-router"
+              },
+              "exit_code": 0
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "flag": "release-type"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did not run the workflow when only asked to configure it",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "run"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer summarizes cls_invoice classificationId routing",
+          "answer_pattern": "classificationId.{0,120}cls_invoice|cls_invoice.{0,120}classificationId"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer summarizes cls_receipt classificationId routing",
+          "answer_pattern": "classificationId.{0,120}cls_receipt|cls_receipt.{0,120}classificationId"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names classifier version 0.1",
+          "answer_pattern": "cl_docTypes.{0,80}(0\\.1)|0\\.1.{0,80}cl_docTypes"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions COLLECT and WEBHOOK_RESPONSE",
+          "answer_pattern": "COLLECT|collect"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions terminal webhook response",
+          "answer_pattern": "WEBHOOK_RESPONSE|webhook"
+        }
+      ]
+    },
+    {
+      "id": "W-9",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Our AP team wants the existing workflow workflow_vendorcheck to check each invoice against our vendor system before it finishes. We already use extractor ex_invoiceQ3 for the invoice data. Reviewers prefer the parsed document text in markdown, and we want every path through the workflow to use the same parsing behavior. The vendor system has a JSON API at https://api.example.com/vendor-check; it returns a requires_review flag. If that flag is true, send the document to a person for review. Otherwise let it finish normally and notify our webhook. Reviewed documents should notify the webhook too. Please make the workflow change in a local file named vendor-check-workflow.json, deploy it as v3-vendor-check, and tell me briefly what you changed. Don't run the workflow yet.",
+      "files": [],
+      "expected_output": "Agent authors a workflow with PARSE parseConfig.target markdown, EXTRACT, EXTERNAL_DATA_VALIDATION requestOptions, CONDITIONAL routing based on output.response.data.requires_review, HUMAN_REVIEW, and WEBHOOK_RESPONSE; updates workflow_vendorcheck and deploys with --name v3-vendor-check without running it.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent updated workflow_vendorcheck with valid external-validation workflow JSON",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "update"
+              ],
+              "args": [
+                "workflow_vendorcheck"
+              ],
+              "flag_value_suffix": {
+                "from-file": "vendor-check-workflow.json"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent deployed the vendor-check workflow version by name",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "args": [
+                "workflow_vendorcheck"
+              ],
+              "flag_value": {
+                "name": "v3-vendor-check"
+              },
+              "exit_code": 0
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "workflows",
+                "versions",
+                "create"
+              ],
+              "flag": "release-type"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did not run the workflow when only asked to configure it",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "run"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions the external validation requires_review flag",
+          "answer_pattern": "requires_review"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions routing flagged documents to human review",
+          "answer_pattern": "human review|HUMAN_REVIEW|human_review"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer mentions the webhook/default path",
+          "answer_pattern": "webhook|WEBHOOK_RESPONSE"
+        }
+      ]
+    },
+    {
       "id": "Q-1",
       "category": "run-type-quirk",
       "path": "B",
@@ -1436,6 +1710,110 @@
           "type": "stable_answer",
           "text": "answer names the exact extend_edit:value schema key",
           "answer_pattern": "extend_edit:value"
+        }
+      ]
+    },
+    {
+      "id": "H-7",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "I'm mapping our existing edit schema onto a vendor PDF. If I run `extend edit schema generate` with an input schema, what response fields should I inspect to see the final schema and mapping details?",
+      "files": [],
+      "expected_output": "Agent consults edit schema generation help and names schema, annotatedSchema, and mappingResult, including mappingResult's unmatchedInputPaths or unusedFormFieldKeys details.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent consulted edit schema generate help",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit",
+                "schema",
+                "generate"
+              ],
+              "flag": "help"
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names schema",
+          "answer_pattern": "schema"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names annotatedSchema",
+          "answer_pattern": "annotatedSchema"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names mappingResult",
+          "answer_pattern": "mappingResult"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names a mapping detail field",
+          "answer_pattern": "unmatchedInputPaths|unusedFormFieldKeys|matches"
+        }
+      ]
+    },
+    {
+      "id": "S-8",
+      "category": "extraction-config",
+      "path": "B",
+      "prompt": "Run a one-off extraction on invoice.pdf; don't create or use a saved extractor yet. Create fast-invoice-config.json locally and use it with `extend extract`. I need invoice_number, invoice_date normalized as a date, total as amount plus currency code, and line_items with description, quantity, and line_total as amount plus currency code. This is a clean digital PDF and the API path is latency-sensitive, so optimize the config for speed and don't return citations or model reasoning. In your final answer, tell me where I should read the extracted values and per-field OCR confidence in the response.",
+      "files": [
+        "invoice.pdf"
+      ],
+      "expected_output": "Agent authors a valid standalone extract config with nullable primitive fields, extend:type date/currency fields, low-latency options, then runs `extend extract invoice.pdf --config fast-invoice-config.json` without creating or using a saved extractor.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran extract with the authored one-off config",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "args": [
+                "invoice.pdf"
+              ],
+              "flag_value_suffix": {
+                "config": "fast-invoice-config.json"
+              },
+              "exit_code": 0
+            }
+          ],
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag": "using"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did not create a saved extractor",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "create"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer points to output.value for extracted values",
+          "answer_pattern": "output\\.value"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer points to output.metadata and ocrConfidence for per-field confidence",
+          "answer_pattern": "output\\.metadata.{0,120}ocrConfidence|ocrConfidence.{0,120}output\\.metadata"
         }
       ]
     }

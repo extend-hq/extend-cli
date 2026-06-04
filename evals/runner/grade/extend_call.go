@@ -100,10 +100,18 @@ func predicateMatches(p spec.ExtendCallPredicate, c CallRecord) bool {
 			return false
 		}
 	}
+	for k, suffix := range p.FlagValueSuffix {
+		if got := flagValue(c.Argv, k); !strings.HasSuffix(got, suffix) {
+			return false
+		}
+	}
 	if p.MustNotHaveFlag != "" {
 		if hasFlag(c.Argv, p.MustNotHaveFlag) {
 			return false
 		}
+	}
+	if p.ExitCode != nil && c.ExitCode != *p.ExitCode {
+		return false
 	}
 	return true
 }

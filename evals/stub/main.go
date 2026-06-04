@@ -32,6 +32,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	extendcli "github.com/extend-hq/extend-cli/internal/cli"
 )
 
 // stdout and stderr are the writers all emit*() functions go through.
@@ -129,6 +131,12 @@ func main() {
 		emitSplittersList(args, mode)
 	case match(args, "workflows", "list"):
 		emitWorkflowsList(args, mode)
+	case match(args, "workflows", "create"):
+		emitWorkflowsCreate(args, mode)
+	case match(args, "workflows", "update"):
+		emitWorkflowsUpdate(args, mode)
+	case match(args, "workflows", "versions", "create"):
+		emitWorkflowVersionCreate(args, mode)
 	case match(args, "files", "upload"):
 		emitFilesUpload(args, mode)
 	case match(args, "files", "list"):
@@ -308,163 +316,21 @@ func emitAuthError() {
 	fmt.Fprintln(stderr, "Hint: set EXTEND_API_KEY in your environment to authenticate.")
 }
 
-// emitHelp produces a help-shaped string realistic enough for an agent
-// to read and quote when the user asks "what flags does X accept?". The
-// contents intentionally mirror the real CLI's flag set so help-discovery
-// (H-*) cases test true discoverability: an agent that consults
-// `extend <cmd> --help` should see the same flags the real binary exposes.
-//
-// It is command-aware: `extend edit --help` and `extend help edit` both
-// surface edit's flags only, the way the real CLI scopes per-command help.
-// When kept in sync with the real CLI's flags, this is the contract that
-// makes a help-discovery eval meaningful; the integration test
-// TestEditAdvancedOptions_ExposedInBinary guards that the real `--help`
-// carries the same flags.
+// emitHelp delegates to the real CLI command tree so help-discovery evals
+// observe the same --help text users see, while non-help commands still hit
+// the deterministic stub responses below.
 func emitHelp(args []string) {
-	if body, ok := commandHelp[helpTopic(args)]; ok {
-		fmt.Println(body)
-		return
+	root := extendcli.NewRoot()
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if len(args) == 0 {
+		args = []string{"--help"}
 	}
-	fmt.Println(generalHelp)
-}
-
-// helpTopic returns the command whose help was requested, handling both
-// `extend <cmd> --help` (positional[0]) and `extend help <cmd>`
-// (positional after "help"). Returns "" for top-level/unknown help.
-func helpTopic(args []string) string {
-	pos := positional(args)
-	if len(pos) == 0 {
-		return ""
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintf(stderr, "stub: render real help: %v\n", err)
+		exitCode = 1
 	}
-	if pos[0] == "help" {
-		if len(pos) > 1 {
-			return pos[1]
-		}
-		return ""
-	}
-	return pos[0]
-}
-
-const generalHelp = `extend — Extend document AI CLI (eval stub).
-
-Common commands:
-  extract <input>     Run extraction on a document.
-  parse <input>       Parse a document into raw text/markdown.
-  classify <input>    Classify a document into a category.
-  split <input>       Split a multi-document PDF.
-  edit <input>        Fill PDF form fields via a values schema.
-  run <input>         Run a configured workflow.
-  runs list|get|watch Inspect runs.
-  evaluations ...     Manage evaluation sets, items, and runs.
-
-Run 'extend <command> --help' for that command's flags.
-
-Help topics:
-  extend help auth | output | lifecycle | errors`
-
-// commandHelp mirrors the real CLI's per-command flag set for the
-// commands exercised by help-discovery evals. Keep in sync with the real
-// command docs in internal/cli/.
-var commandHelp = map[string]string{
-	"extract": `extend extract <input> — Run extraction on a document.
-
-Flags:
-  --using <id>          Saved extractor ID (mutually exclusive with --config)
-  --config <json>       Complete one-off config used INSTEAD of a saved extractor
-  --patch <json>        Per-run partial merge onto the --using extractor's config
-  --version <v>         Extractor version: latest, draft, or specific
-  --text <text>         Extract from inline text instead of a file/URL/ID input
-  --name <name>         Display name for the input (--text and URL inputs)
-  --wait[=true|false]   Block until terminal (default: true)
-  --priority <0-100>    Lower = higher priority
-  --metadata key=value  Repeatable
-  --tag <name>          Usage tag(s); repeatable
-  --password <pw>       Password for a protected PDF (URL inputs only)
-  -o, --output <fmt>    json|yaml|raw|id|table|markdown
-  --jq <expr>           Filter output with jq`,
-
-	"classify": `extend classify <input> — Classify a document into a category.
-
-Flags:
-  --using <id>          Saved classifier ID (mutually exclusive with --config)
-  --config <json>       Complete one-off classify config used INSTEAD of a saved classifier
-  --patch <json>        Per-run partial merge onto the --using classifier's config
-  --version <v>         Classifier version: latest, draft, or specific
-  --text <text>         Classify inline text instead of a file/URL/ID input
-  --name <name>         Display name for the input (--text and URL inputs)
-  --wait[=true|false]   Block until terminal (default: true)
-  --priority <0-100>    Lower = higher priority
-  --metadata key=value  Repeatable
-  --tag <name>          Usage tag(s); repeatable
-  -o, --output <fmt>    json|yaml|raw|id|table|markdown`,
-
-	"split": `extend split <input> — Split a multi-document PDF into segments.
-
-Flags:
-  --using <id>          Saved splitter ID (mutually exclusive with --config)
-  --config <json>       Complete one-off split config used INSTEAD of a saved splitter
-  --patch <json>        Per-run partial merge onto the --using splitter's config
-  --version <v>         Splitter version: latest, draft, or specific
-  --wait[=true|false]   Block until terminal (default: true)
-  --priority <0-100>    Lower = higher priority
-  -o, --output <fmt>    json|yaml|raw|id|table|markdown`,
-
-	"parse": `extend parse <input> — Parse a document into text/markdown/spatial.
-
-Flags:
-  --target <t>              markdown (default) or spatial
-  --engine <e>              parse_performance or parse_light
-  --chunk-strategy <s>      page|document|section|none
-  --block-options <json>    Per-block detection. Fields:
-                              figures.advancedChartExtractionEnabled, figures.figureImageClippingEnabled
-                              tables.targetFormat ("markdown"|"html"), tables.cellBlocksEnabled,
-                              tables.tableHeaderContinuationEnabled, text.signatureDetectionEnabled,
-                              barcodes.readingEnabled, formulas.enabled, keyValue.blankFieldFormattingEnabled
-  --advanced-options <json> Parse tuning. Fields:
-                              pageRanges, pageRotationEnabled, returnOcr.words,
-                              excelParsingMode ("basic"|"advanced"), verticalGroupingThreshold,
-                              formattingDetection ([{"type":"change_tracking"}])
-  --wait[=true|false]       Block until terminal (default: true)
-  -o, --output <fmt>        json|yaml|raw|markdown`,
-
-	"webhooks": `extend webhooks — Manage webhook endpoints and subscriptions.
-
-  webhooks endpoints create --url <u> --name <n> --events <e,...>
-  webhooks subscriptions create --endpoint <whe> --resource <id> --events <e,...>
-
-Valid --events values:
-  Runs:    parse_run.processed, parse_run.failed, extract_run.processed, extract_run.failed,
-           classify_run.processed, classify_run.failed, split_run.processed, split_run.failed,
-           edit_run.processed, edit_run.failed
-  Batch:   batch_parse_run.processed, batch_parse_run.failed,
-           batch_processor_run.processed, batch_processor_run.failed
-  Workflow runs: workflow_run.completed, workflow_run.failed, workflow_run.needs_review,
-           workflow_run.rejected, workflow_run.cancelled, workflow_run.step_run.processed
-  Processor lifecycle: extractor.created, extractor.updated, extractor.deleted,
-           extractor.draft.updated, extractor.version.published
-           (classifier.* and splitter.* take the same five suffixes)
-  Workflow lifecycle: workflow.created, workflow.deployed, workflow.deleted`,
-
-	"edit": `extend edit <input> — Fill PDF form fields and emit a filled PDF.
-
-Flags:
-  --schema <json>          Schema with values populated per 'extend edit schema generate'
-  --instructions <text>    Free-form prose values and rules
-  --schema-instructions    Prose applied only to the schema-generation step
-  --advanced-options <json> Detection options as a JSON object; omitted fields use the server default:
-                              flattenPdf           bool  Make the filled form non-editable
-                              nativeFieldsOnly     bool  Only use embedded AcroForm fields (false also detects via vision)
-                              tableParsingEnabled  bool  Parse table regions as arrays of objects
-                              radioEnumsEnabled    bool  Model a radio group as a single-choice enum
-  -O, --output-file <path> Write the filled PDF (auto-downloads); '-' for stdout
-  --wait[=true|false]      Block until terminal (default: true)
-
-Schema fields ('extend edit schema generate' emits these per field; populate the value keys):
-  extend_edit:value         The value to fill into the field (omit to infer from --instructions)
-  extend_edit:image         Image fill for signature fields (PNG/JPEG URL)
-  extend_edit:field_type    text|signature|checkbox|radio|dropdown|optionList|table
-  extend_edit:bbox, extend_edit:bboxes, extend_edit:page_index, extend_edit:text_edit_options,
-  extend_edit:column_width, extend_edit:row_heights`,
 }
 
 func emitUnknown(args []string) {
