@@ -405,8 +405,34 @@ func emitClassifiersList(args []string, mode string) {
 	emitJSON(map[string]any{"data": fixtureClassifiers, "nextPageToken": nil})
 }
 
+func emitClassifiersCreate(args []string, mode string) {
+	if err := validateContractClassifierConfig(flagValue(args, "from-file")); err != nil {
+		fmt.Fprintf(stderr, "Error: invalid classifier config: %v\n", err)
+		exitCode = 1
+		return
+	}
+	name := flagValue(args, "name")
+	if name == "" {
+		name = "Stub classifier"
+	}
+	emitJSON(Classifier{ID: nowID("cl_"), Name: name})
+}
+
 func emitSplittersList(args []string, mode string) {
 	emitJSON(map[string]any{"data": fixtureSplitters, "nextPageToken": nil})
+}
+
+func emitSplittersCreate(args []string, mode string) {
+	if err := validateStatementSplitterConfig(flagValue(args, "from-file")); err != nil {
+		fmt.Fprintf(stderr, "Error: invalid splitter config: %v\n", err)
+		exitCode = 1
+		return
+	}
+	name := flagValue(args, "name")
+	if name == "" {
+		name = "Stub splitter"
+	}
+	emitJSON(Splitter{ID: nowID("spl_"), Name: name})
 }
 
 func emitWorkflowsList(args []string, mode string) {
@@ -485,6 +511,108 @@ func readWorkflowJSONSource(source string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", source, err)
 	}
 	return data, nil
+}
+
+func validateContractClassifierConfig(source string) error {
+	if !strings.HasSuffix(strings.TrimSpace(source), "contract-classifier.json") {
+		return nil
+	}
+	body, err := readWorkflowJSONSource(source)
+	if err != nil {
+		return err
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return err
+	}
+	config := mapAt(req, "config")
+	classifications, _ := config["classifications"].([]any)
+	if len(classifications) < 4 {
+		return fmt.Errorf("classifications must include MSA, SOW, NDA, and Other")
+	}
+	want := map[string]bool{"msa": false, "sow": false, "nda": false, "other": false}
+	for _, item := range classifications {
+		c, _ := item.(map[string]any)
+		idType := strings.ToLower(nestedString(c, "id") + " " + nestedString(c, "type"))
+		description := strings.ToLower(nestedString(c, "description"))
+		switch {
+		case strings.Contains(idType, "msa") || strings.Contains(idType, "master service") || strings.Contains(idType, "master agreement"):
+			want["msa"] = true
+		case strings.Contains(idType, "sow") || strings.Contains(idType, "statement of work"):
+			want["sow"] = true
+		case strings.Contains(idType, "nda") || strings.Contains(idType, "non-disclosure") || strings.Contains(idType, "nondisclosure"):
+			want["nda"] = true
+		case strings.Contains(idType, "other"):
+			want["other"] = true
+		case strings.Contains(description, "master service") || strings.Contains(description, "master agreement"):
+			want["msa"] = true
+		case strings.Contains(description, "statement of work"):
+			want["sow"] = true
+		case strings.Contains(description, "non-disclosure") || strings.Contains(description, "nondisclosure"):
+			want["nda"] = true
+		case strings.Contains(description, "catch-all") || strings.Contains(description, "catchall"):
+			want["other"] = true
+		}
+		if nestedString(c, "id") == "" || nestedString(c, "type") == "" || nestedString(c, "description") == "" {
+			return fmt.Errorf("each classification needs id, type, and description")
+		}
+	}
+	for name, ok := range want {
+		if !ok {
+			return fmt.Errorf("missing %s classification", name)
+		}
+	}
+	if rules := strings.ToLower(nestedString(config, "classificationRules")); !strings.Contains(rules, "contract") {
+		return fmt.Errorf("classificationRules should describe contract classification")
+	}
+	return nil
+}
+
+func validateStatementSplitterConfig(source string) error {
+	if !strings.HasSuffix(strings.TrimSpace(source), "statement-splitter.json") {
+		return nil
+	}
+	body, err := readWorkflowJSONSource(source)
+	if err != nil {
+		return err
+	}
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return err
+	}
+	config := mapAt(req, "config")
+	classifications, _ := config["splitClassifications"].([]any)
+	if len(classifications) < 2 {
+		return fmt.Errorf("splitClassifications must include statement and other")
+	}
+	foundStatement, foundOther, hasIdentifier := false, false, false
+	for _, item := range classifications {
+		c, _ := item.(map[string]any)
+		label := strings.ToLower(nestedString(c, "id") + " " + nestedString(c, "type") + " " + nestedString(c, "description"))
+		if strings.Contains(label, "statement") {
+			foundStatement = true
+			if nestedString(c, "identifierKey") != "" {
+				hasIdentifier = true
+			}
+		}
+		if strings.Contains(label, "other") {
+			foundOther = true
+		}
+		if nestedString(c, "id") == "" || nestedString(c, "type") == "" || nestedString(c, "description") == "" {
+			return fmt.Errorf("each split classification needs id, type, and description")
+		}
+	}
+	if !foundStatement || !foundOther {
+		return fmt.Errorf("missing statement or other split classification")
+	}
+	if !hasIdentifier {
+		return fmt.Errorf("statement classification should include identifierKey")
+	}
+	rules := strings.ToLower(nestedString(config, "splitRules"))
+	if !strings.Contains(rules, "customer") || !strings.Contains(rules, "statement") {
+		return fmt.Errorf("splitRules should mention grouping customer statements")
+	}
+	return nil
 }
 
 func validateFastInvoiceExtractConfig(source string) error {
@@ -971,6 +1099,22 @@ func emitWebhookSubscriptionsCreate(args []string, mode string) {
 		"endpointId": flagValue(args, "endpoint"),
 		"resourceId": flagValue(args, "resource"),
 	})
+}
+
+func emitWebhookVerify(args []string, mode string) {
+	for _, flag := range []string{"signature", "timestamp", "secret", "body-file"} {
+		if flagValue(args, flag) == "" {
+			fmt.Fprintf(stderr, "Error: --%s is required\n", flag)
+			exitCode = 1
+			return
+		}
+	}
+	if !strings.HasSuffix(flagValue(args, "body-file"), "payload.json") {
+		fmt.Fprintln(stderr, "Error: --body-file must point at payload.json for this eval")
+		exitCode = 1
+		return
+	}
+	fmt.Fprintln(stderr, "✓ signature valid")
 }
 
 // equalsFalse reports whether the given value is an explicit "false".
