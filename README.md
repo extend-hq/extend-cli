@@ -9,6 +9,10 @@ A CLI for [Extend](https://extend.ai).
 
 ## Install
 
+Install script (macOS, Linux):
+
+    curl -fsSL https://extend.ai/install.sh | sh
+
 Homebrew (macOS, Linux):
 
     brew install extend-hq/tap/extend
@@ -24,6 +28,11 @@ From source (requires Go toolchain):
     go install github.com/extend-hq/extend-cli/cmd/extend@latest
 
 Or grab a signed binary from the [releases page](https://github.com/extend-hq/extend-cli/releases).
+The install script downloads the latest release binary, verifies it with
+`SHA256SUMS`, and installs it to `~/.local/bin` by default. To choose a
+different location, pass `--bin-dir`:
+
+    curl -fsSL https://extend.ai/install.sh | sh -s -- --bin-dir /usr/local/bin
 
 ## Use with coding agents
 
