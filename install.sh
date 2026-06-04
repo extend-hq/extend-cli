@@ -178,7 +178,8 @@ tag=$(resolve_version)
 goos=$(detect_os)
 goarch=$(detect_arch)
 archive="extend_${tag}_${goos}_${goarch}.tar.gz"
-base_url="${EXTEND_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download/${tag}}"
+official_base_url="https://github.com/${REPO}/releases/download/${tag}"
+base_url="${EXTEND_RELEASE_BASE_URL:-$official_base_url}"
 
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t extend-install)
 trap 'rm -rf "$tmp"' 0 INT HUP TERM
@@ -187,7 +188,7 @@ log "downloading ${archive}"
 download_to "$base_url/$archive" "$tmp/$archive" || die "failed to download $archive"
 
 if [ "$SKIP_CHECKSUM" != 1 ]; then
-  download_to "$base_url/SHA256SUMS" "$tmp/SHA256SUMS" || die "failed to download SHA256SUMS"
+  download_to "$official_base_url/SHA256SUMS" "$tmp/SHA256SUMS" || die "failed to download SHA256SUMS"
   expected=$(awk -v file="$archive" '$2 == file { print $1; exit }' "$tmp/SHA256SUMS")
   [ -n "$expected" ] || die "checksum for $archive not found"
   actual=$(hash_file "$tmp/$archive")

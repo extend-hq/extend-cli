@@ -24,21 +24,25 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 
 	tmp := t.TempDir()
 	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
 	binDir := filepath.Join(tmp, "bin")
 	fakePath := filepath.Join(tmp, "fakebin")
 	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
 	mustMkdirAll(t, binDir)
 	mustMkdirAll(t, fakePath)
 
 	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
 	archivePath := filepath.Join(releaseDir, archiveName)
 	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, false)
+	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, officialDir, archiveName, archivePath, false)
 	writeFakeCurl(t, fakePath)
 
 	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
 	cmd.Env = append(os.Environ(),
 		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
 		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	out, err := cmd.CombinedOutput()
@@ -72,21 +76,25 @@ func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 
 	tmp := t.TempDir()
 	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
 	binDir := filepath.Join(tmp, "bin")
 	fakePath := filepath.Join(tmp, "fakebin")
 	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
 	mustMkdirAll(t, binDir)
 	mustMkdirAll(t, fakePath)
 
 	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
 	archivePath := filepath.Join(releaseDir, archiveName)
 	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, releaseDir, archiveName, archivePath, false)
+	writeChecksums(t, officialDir, archiveName, archivePath, true)
 	writeFakeCurl(t, fakePath)
 
 	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
 	cmd.Env = append(os.Environ(),
 		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
 		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	out, err := cmd.CombinedOutput()
@@ -186,6 +194,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$url" in
+  */SHA256SUMS) path=${FAKE_OFFICIAL_RELEASE_DIR:?}/SHA256SUMS ;;
   file://*) path=${url#file://} ;;
   *) echo "unexpected URL: $url" >&2; exit 2 ;;
 esac
