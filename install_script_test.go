@@ -27,6 +27,7 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	officialDir := filepath.Join(tmp, "official")
 	binDir := filepath.Join(tmp, "bin")
 	fakePath := filepath.Join(tmp, "fakebin")
+	skillLog := filepath.Join(tmp, "skill.log")
 	mustMkdirAll(t, releaseDir)
 	mustMkdirAll(t, officialDir)
 	mustMkdirAll(t, binDir)
@@ -42,6 +43,7 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
 	cmd.Env = append(os.Environ(),
 		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"EXTEND_FAKE_SKILL_LOG="+skillLog,
 		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
 		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
@@ -64,6 +66,9 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	if got, want := strings.TrimSpace(string(versionOut)), "extend test v9.9.9"; got != want {
 		t.Fatalf("installed binary output = %q, want %q", got, want)
 	}
+	if got := readFileString(t, skillLog); strings.TrimSpace(got) != "skill install" {
+		t.Fatalf("skill install log = %q, want skill install", got)
+	}
 }
 
 func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
@@ -79,6 +84,7 @@ func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	officialDir := filepath.Join(tmp, "official")
 	binDir := filepath.Join(tmp, "bin")
 	fakePath := filepath.Join(tmp, "fakebin")
+	skillLog := filepath.Join(tmp, "skill.log")
 	mustMkdirAll(t, releaseDir)
 	mustMkdirAll(t, officialDir)
 	mustMkdirAll(t, binDir)
@@ -94,6 +100,7 @@ func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
 	cmd.Env = append(os.Environ(),
 		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"EXTEND_FAKE_SKILL_LOG="+skillLog,
 		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
 		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
@@ -106,6 +113,9 @@ func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(binDir, "extend")); !os.IsNotExist(err) {
 		t.Fatalf("binary should not be installed after checksum mismatch, stat err: %v", err)
+	}
+	if _, err := os.Stat(skillLog); !os.IsNotExist(err) {
+		t.Fatalf("skill should not be installed after checksum mismatch, stat err: %v", err)
 	}
 }
 
@@ -126,8 +136,21 @@ if [ "${1:-}" = "--version" ]; then
   printf '%s\n' 'extend test v9.9.9'
   exit 0
 fi
+if [ "${1:-}" = "skill" ] && [ "${2:-}" = "install" ]; then
+  printf '%s\n' "$*" >> "${EXTEND_FAKE_SKILL_LOG:?}"
+  exit 0
+fi
 printf '%s\n' 'extend test'
 `
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(contents)
 }
 
 func writeReleaseArchive(t *testing.T, path string, binary []byte) {

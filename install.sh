@@ -5,6 +5,7 @@ REPO="${EXTEND_GITHUB_REPO:-extend-hq/extend-cli}"
 VERSION="${EXTEND_VERSION:-latest}"
 INSTALL_DIR="${EXTEND_INSTALL_DIR:-}"
 SKIP_CHECKSUM="${EXTEND_SKIP_CHECKSUM:-0}"
+SKIP_SKILL_INSTALL="${EXTEND_SKIP_SKILL_INSTALL:-0}"
 
 usage() {
   cat <<'EOF'
@@ -18,12 +19,16 @@ Options:
   -b, --bin-dir DIR     Directory to install extend into (default: ~/.local/bin)
   -v, --version VERSION Version to install, e.g. v0.1.0 (default: latest)
       --skip-checksum   Skip SHA256 verification
+      --skip-skill-install
+                        Skip automatic agent skill installation
   -h, --help            Show this help
 
 Environment:
   EXTEND_INSTALL_DIR    Same as --bin-dir
   EXTEND_VERSION        Same as --version
   EXTEND_SKIP_CHECKSUM  Set to 1 to skip SHA256 verification
+  EXTEND_SKIP_SKILL_INSTALL
+                        Set to 1 to skip automatic skill installation
 EOF
 }
 
@@ -66,6 +71,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --skip-checksum)
       SKIP_CHECKSUM=1
+      shift
+      ;;
+    --skip-skill-install)
+      SKIP_SKILL_INSTALL=1
       shift
       ;;
     -h|--help)
@@ -174,6 +183,20 @@ install_binary() {
   fi
 }
 
+install_skill() {
+  if [ "$SKIP_SKILL_INSTALL" = 1 ]; then
+    log "skipping agent skill install"
+    return
+  fi
+
+  if "$target" skill install; then
+    log "installed agent skill"
+  else
+    log "warning: failed to install agent skill"
+    log "run manually: $target skill install"
+  fi
+}
+
 tag=$(resolve_version)
 goos=$(detect_os)
 goarch=$(detect_arch)
@@ -200,6 +223,7 @@ chmod 755 "$tmp/extend" || die "failed to mark downloaded binary executable"
 "$tmp/extend" --version >/dev/null || die "downloaded binary failed to run"
 
 install_binary
+install_skill
 
 log "installed $tag to $target"
 case ":${PATH:-}:" in
