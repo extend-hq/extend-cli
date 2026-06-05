@@ -16,6 +16,7 @@ import (
 
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
 
+	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/version"
@@ -69,6 +70,10 @@ extractors/classifiers/splitters/workflows you configure in the dashboard.`,
 
     export EXTEND_API_KEY=sk_xxx
 
+Or run 'extend setup' for an interactive wizard that selects your region,
+points you to the dashboard to create a key, validates it, and saves it to
+~/.config/extend/config.json (read as a fallback when EXTEND_API_KEY is unset).
+
 Environment variables:
   EXTEND_API_KEY         API key (required)
   EXTEND_BASE_URL        Override base URL (e.g. https://api.extend.ai)
@@ -105,6 +110,8 @@ respective env vars.`,
 			newEvaluationsDoc(app),
 			// Agent surface
 			newSkillDoc(app),
+			// Onboarding (ungrouped: shows under "Additional Commands")
+			newSetupDoc(app),
 			// Help topics
 			newAuthTopicDoc(),
 			newOutputTopicDoc(),
@@ -146,20 +153,16 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
 	app.NewClient = func() (*sdkclient.Client, error) {
-		keyVar := apiKeyEnvVar(app.Env)
-		key := os.Getenv(keyVar)
+		key, region := resolveCredentials(app.Env, app.Region, os.Getenv, config.Load)
 		if key == "" {
-			return nil, fmt.Errorf("%s environment variable is required", keyVar)
+			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
 		}
 
 		cfg := extendx.Config{
 			APIKey:      key,
-			Region:      app.Region,
+			Region:      region,
 			WorkspaceID: app.Workspace,
 			UserAgent:   userAgent(),
-		}
-		if cfg.Region == "" {
-			cfg.Region = os.Getenv(envRegion)
 		}
 		if cfg.WorkspaceID == "" {
 			cfg.WorkspaceID = os.Getenv(envWorkspaceID)
@@ -246,6 +249,34 @@ func applyEnvDefaults(app *App) {
 	if app.Env == "" {
 		app.Env = os.Getenv(envEnv)
 	}
+}
+
+// resolveCredentials resolves the API key and region using the
+// precedence: flag/env > config file > default. The persisted config file
+// (written by `extend setup`) is consulted only for the default
+// environment — an --env label selects an alternate key that must come
+// from the environment, never from the shared file. A malformed or
+// unreadable file is ignored best-effort so a typo can't break every
+// command. getenv and loadFile are injected for testability.
+func resolveCredentials(envLabel, regionFlag string, getenv func(string) string, loadFile func() (config.File, error)) (key, region string) {
+	var fileCfg config.File
+	if envLabel == "" && loadFile != nil {
+		fileCfg, _ = loadFile()
+	}
+
+	key = getenv(apiKeyEnvVar(envLabel))
+	if key == "" {
+		key = fileCfg.APIKey
+	}
+
+	region = regionFlag
+	if region == "" {
+		region = getenv(envRegion)
+	}
+	if region == "" {
+		region = fileCfg.Region
+	}
+	return key, region
 }
 
 // apiKeyEnvVar returns the env var name from which the API key should

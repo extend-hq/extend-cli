@@ -88,6 +88,9 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("Authentication\n\n")
 	b.WriteString("Set EXTEND_API_KEY in your environment to authenticate:\n\n")
 	b.WriteString("  export EXTEND_API_KEY=sk_xxx\n\n")
+	b.WriteString("Or run the interactive wizard, which selects your region, points you\n")
+	b.WriteString("to the dashboard to create a key, validates it, and saves it:\n\n")
+	b.WriteString("  extend setup\n\n")
 	b.WriteString("Environment variables:\n\n")
 	maxNameLen := 0
 	for _, ev := range envVars {
@@ -109,9 +112,13 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	}
 	b.WriteString("\nPrecedence:\n\n")
 	b.WriteString("  --workspace flag     >  EXTEND_WORKSPACE_ID\n")
-	b.WriteString("  --region flag        >  EXTEND_REGION\n")
+	b.WriteString("  --region flag        >  EXTEND_REGION       >  config file (region)\n")
 	b.WriteString("  --env flag           >  EXTEND_ENV\n")
+	b.WriteString("  EXTEND_API_KEY       >  config file (apiKey)\n")
 	b.WriteString("  EXTEND_BASE_URL      >  EXTEND_REGION (base URL bypasses region selection)\n")
+	b.WriteString("\nThe config file (~/.config/extend/config.json, honoring XDG_CONFIG_HOME)\n")
+	b.WriteString("is written by 'extend setup' and read only for the default environment;\n")
+	b.WriteString("--env labels always resolve their key from the environment.\n")
 	b.WriteString("\nMultiple environments:\n\n")
 	b.WriteString("  --env <label> reads the API key from EXTEND_<UPPER>_API_KEY instead of\n")
 	b.WriteString("  EXTEND_API_KEY, so you can keep separate keys for test/prod side-by-side:\n\n")
