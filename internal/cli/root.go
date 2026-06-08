@@ -112,6 +112,7 @@ respective env vars.`,
 			newSkillDoc(app),
 			// Onboarding (ungrouped: shows under "Additional Commands")
 			newSetupDoc(app),
+			newConfigDoc(app),
 			// Help topics
 			newAuthTopicDoc(),
 			newOutputTopicDoc(),
@@ -250,13 +251,33 @@ func applyEnvDefaults(app *App) {
 }
 
 // resolved holds the credential and routing values after the precedence
-// chain has been applied. baseURL is empty when no override is set, in
-// which case region selects the URL inside extendx.
+// chain has been applied, plus a human-readable source for each (where
+// the winning value came from) so `extend config` can report provenance.
+// baseURL is empty when no override is set, in which case region selects
+// the URL inside extendx.
 type resolved struct {
 	key         string
 	region      string
 	baseURL     string
 	workspaceID string
+
+	keySrc       string
+	regionSrc    string
+	baseURLSrc   string
+	workspaceSrc string
+}
+
+// srcCand is a candidate value paired with the label describing where it
+// came from. firstSet returns the first non-empty candidate.
+type srcCand struct{ val, src string }
+
+func firstSet(cands ...srcCand) (val, src string) {
+	for _, c := range cands {
+		if c.val != "" {
+			return c.val, c.src
+		}
+	}
+	return "", ""
 }
 
 // resolveCredentials resolves the API key and routing settings using the
@@ -278,31 +299,37 @@ func resolveCredentials(envLabel, regionFlag, workspaceFlag string, getenv func(
 	}
 
 	var r resolved
-	r.key = getenv(apiKeyEnvVar(envLabel))
-	if r.key == "" && envLabel == "" {
-		r.key = fileCfg.APIKey()
-	}
 
-	r.region = regionFlag
-	if r.region == "" {
-		r.region = getenv(envRegion)
+	// Key: env (label-specific) > config file (default env only).
+	keyEnv := apiKeyEnvVar(envLabel)
+	fileKey := ""
+	if envLabel == "" {
+		fileKey = fileCfg.APIKey()
 	}
-	if r.region == "" {
-		r.region = fileCfg.Region
-	}
+	r.key, r.keySrc = firstSet(
+		srcCand{getenv(keyEnv), "env: " + keyEnv},
+		srcCand{fileKey, "config file"},
+	)
 
-	r.baseURL = getenv(envBaseURL)
-	if r.baseURL == "" {
-		r.baseURL = fileCfg.BaseURL
-	}
+	// Region: --region > EXTEND_REGION > config file.
+	r.region, r.regionSrc = firstSet(
+		srcCand{regionFlag, "flag: --region"},
+		srcCand{getenv(envRegion), "env: " + envRegion},
+		srcCand{fileCfg.Region, "config file"},
+	)
 
-	r.workspaceID = workspaceFlag
-	if r.workspaceID == "" {
-		r.workspaceID = getenv(envWorkspaceID)
-	}
-	if r.workspaceID == "" {
-		r.workspaceID = fileCfg.WorkspaceID
-	}
+	// Base URL: EXTEND_BASE_URL > config file (no flag).
+	r.baseURL, r.baseURLSrc = firstSet(
+		srcCand{getenv(envBaseURL), "env: " + envBaseURL},
+		srcCand{fileCfg.BaseURL, "config file"},
+	)
+
+	// Workspace: --workspace > EXTEND_WORKSPACE_ID > config file.
+	r.workspaceID, r.workspaceSrc = firstSet(
+		srcCand{workspaceFlag, "flag: --workspace"},
+		srcCand{getenv(envWorkspaceID), "env: " + envWorkspaceID},
+		srcCand{fileCfg.WorkspaceID, "config file"},
+	)
 	return r
 }
 

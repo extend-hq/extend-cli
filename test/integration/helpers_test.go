@@ -144,6 +144,32 @@ func runExtendWithStdin(t *testing.T, env envSetup, stdin []byte, args ...string
 	return res
 }
 
+// runExtendBare execs the binary with a fully controlled environment: no
+// injected base URL or API key, and none of the developer's ambient
+// EXTEND_* variables. For hermetic command tests like `extend config`
+// that resolve configuration without hitting the network. NO_COLOR/TERM
+// are always set so stdout assertions are stable.
+func runExtendBare(t *testing.T, env map[string]string, args ...string) extendResult {
+	t.Helper()
+	cmd := exec.Command(extendBinary, args...)
+	full := []string{"NO_COLOR=1", "TERM=dumb"}
+	for k, v := range env {
+		full = append(full, k+"="+v)
+	}
+	cmd.Env = full
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	res := extendResult{Stdout: out.Bytes(), Stderr: errOut.Bytes()}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		res.ExitCode = exitErr.ExitCode()
+	} else if err != nil {
+		t.Fatalf("runExtendBare(%v): exec failed: %v\nstderr=%s", args, err, errOut.String())
+	}
+	return res
+}
+
 // requireOK fails the test if the CLI exited non-zero, dumping stderr.
 func (r extendResult) requireOK(t *testing.T, args ...string) {
 	t.Helper()
