@@ -59,22 +59,22 @@ there is no flag to reveal it in full.`,
 }
 
 func runConfig(app *App) error {
-	rc := resolveCredentials(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+	s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 	pal := paletteFor(app.IO)
 
 	// Only API keys exist today; this line is where OAuth status surfaces.
 	authMethod := "(none)"
-	if rc.key.val != "" {
+	if s.key.val != "" {
 		authMethod = "API key"
 	}
 
 	// An unset region/baseURL means extendx falls back to its default (US
 	// production); show that rather than a blank.
-	region, regionSrc := rc.region.val, rc.region.src
+	region, regionSrc := s.region.val, s.region.src
 	if region == "" {
 		region, regionSrc = "us", "default"
 	}
-	baseURL, baseSrc := rc.baseURL.val, rc.baseURL.src
+	baseURL, baseSrc := s.baseURL.val, s.baseURL.src
 	if baseURL == "" {
 		if u, ok := extendx.RegionBaseURL(region); ok {
 			baseURL = u
@@ -82,13 +82,37 @@ func runConfig(app *App) error {
 		baseSrc = "derived from region"
 	}
 
+	apiVersion := s.apiVersion.val
+	if apiVersion == "" {
+		apiVersion = "(default)"
+	}
+
+	debugOn, debugSrc := resolveDebug(app.Debug, os.Getenv)
+	debugVal := "off"
+	if debugOn {
+		debugVal = "on"
+	}
+
+	httpTimeout, httpSrc := "default", ""
+	if d, ok, src := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(envHTTPTimeout)); ok {
+		httpSrc = src
+		if d == 0 {
+			httpTimeout = "disabled"
+		} else {
+			httpTimeout = d.String()
+		}
+	}
+
 	type row struct{ label, val, note string }
 	rows := []row{
 		{"Auth method", authMethod, ""},
-		{"API key", maskKey(rc.key.val), rc.key.src},
+		{"API key", maskKey(s.key.val), s.key.src},
 		{"Region", region, regionSrc},
 		{"Base URL", baseURL, baseSrc},
-		{"Workspace", orNotSet(rc.workspaceID.val), rc.workspaceID.src},
+		{"Workspace", orNotSet(s.workspaceID.val), s.workspaceID.src},
+		{"API version", apiVersion, s.apiVersion.src},
+		{"Debug", debugVal, debugSrc},
+		{"HTTP timeout", httpTimeout, httpSrc},
 	}
 
 	if path, err := config.Path(); err == nil {
