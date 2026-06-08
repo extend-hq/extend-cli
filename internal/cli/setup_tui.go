@@ -839,7 +839,10 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = stepKey
 			return m, m.input.Focus()
 		}
-		path, err := config.Save(config.File{Region: m.region.id, APIKey: m.apiKey})
+		path, err := config.Save(config.File{
+			Region: m.region.id,
+			Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
+		})
 		m.result = &setupResult{region: m.region, apiKey: m.apiKey, path: path, saveErr: err}
 		if err != nil {
 			// Couldn't save — finish so runSetup reports the error.
