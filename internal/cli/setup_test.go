@@ -3,12 +3,15 @@ package cli
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
@@ -155,15 +158,15 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 	if m.step != stepRegion {
 		t.Fatalf("initial step = %v, want stepRegion", m.step)
 	}
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyDown}) // -> EU
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // -> EU
 	if m.cursor != 1 {
 		t.Fatalf("cursor after down = %d, want 1", m.cursor)
 	}
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyDown}) // clamp at last
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // clamp at last
 	if m.cursor != 1 {
 		t.Fatalf("cursor clamped = %d, want 1", m.cursor)
 	}
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepKey {
 		t.Fatalf("step after enter = %v, want stepKey", m.step)
 	}
@@ -176,8 +179,8 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 // inline error and stays on the key step.
 func TestSetupModel_EmptyKeyRejected(t *testing.T) {
 	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string) error { return nil })
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // pick US
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // submit empty key
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick US
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit empty key
 	if m.step != stepKey {
 		t.Fatalf("step = %v, want stepKey (empty key should not advance)", m.step)
 	}
@@ -199,8 +202,10 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	m.step = stepValidating
 
 	m = drive(t, m, validatedMsg{err: nil})
-	if m.step != stepDone {
-		t.Fatalf("step = %v, want stepDone", m.step)
+	// On success the config is saved immediately and the wizard advances
+	// to the skill-install prompt (not straight to done).
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill", m.step)
 	}
 	if m.result == nil || m.result.saveErr != nil {
 		t.Fatalf("result = %+v, want a saved result with no error", m.result)
@@ -215,6 +220,45 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	}
 	if saved.Region != "eu" || saved.APIKey != "sk_live_123" {
 		t.Errorf("saved config = %+v, want region=eu key=sk_live_123", saved)
+	}
+}
+
+// TestSetupModel_SkillPromptChoice covers the post-validation skill
+// prompt: "Yes" records installSkill, "No" doesn't, and either way the
+// wizard finishes.
+func TestSetupModel_SkillPromptChoice(t *testing.T) {
+	mk := func() setupModel {
+		m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string) error { return nil })
+		m.region = setupRegionChoices[0]
+		m.step = stepSkill
+		m.result = &setupResult{region: m.region, apiKey: "sk_x", path: "/tmp/x"}
+		return m
+	}
+
+	// Default cursor (0 = Yes) + enter installs.
+	yes := drive(t, mk(), tea.KeyPressMsg{Code: tea.KeyEnter})
+	if yes.step != stepDone {
+		t.Errorf("after enter step = %v, want stepDone", yes.step)
+	}
+	if !yes.result.installSkill {
+		t.Error("enter on default (Yes) should set installSkill=true")
+	}
+
+	// Pressing 'n' declines.
+	no := drive(t, mk(), tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if no.step != stepDone {
+		t.Errorf("after 'n' step = %v, want stepDone", no.step)
+	}
+	if no.result.installSkill {
+		t.Error("'n' should set installSkill=false")
+	}
+
+	// Toggling down then enter also declines.
+	m := mk()
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.result.installSkill {
+		t.Error("toggle to No then enter should set installSkill=false")
 	}
 }
 
@@ -264,7 +308,7 @@ func TestSetupModel_ValidateCmdInvokesValidator(t *testing.T) {
 // step.
 func TestSetupModel_CtrlCCancels(t *testing.T) {
 	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string) error { return nil })
-	m = drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !m.canceled {
 		t.Error("ctrl+c should set canceled")
 	}
@@ -291,5 +335,191 @@ func TestBuildLogoGrid(t *testing.T) {
 	}
 	if lit == 0 {
 		t.Error("rasterized logo has no lit cells; threshold likely wrong")
+	}
+}
+
+// TestSetupView_FitsScreenAndShowsBody is a regression test for the
+// layout bug where the compositor canvas was sized to the union of layer
+// bounds (not the screen), clipping the logo on the right and chopping
+// the body content below the first line. The rendered View must be
+// exactly the terminal size and must contain the full region-step body.
+func TestSetupView_FitsScreenAndShowsBody(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	const w, h = 100, 40
+	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	m = next.(setupModel)
+
+	content := m.View().Content
+
+	if gw := lipgloss.Width(content); gw > w {
+		t.Errorf("view width = %d, want <= %d (content overflows screen)", gw, w)
+	}
+	if gh := lipgloss.Height(content); gh != h {
+		t.Errorf("view height = %d, want exactly %d", gh, h)
+	}
+
+	// The whole region-step body must survive — not just the heading.
+	for _, want := range []string{
+		"Document Processing APIs",
+		"Where is your Extend workspace?",
+		"United States",
+		"European Union",
+		"move", // footer hint ("↑/↓ move · enter select · q quit")
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("rendered view is missing %q (content was clipped)", want)
+		}
+	}
+}
+
+// TestSetupView_NarrowAndTallStillFits guards the trim-from-top path: a
+// short, narrow terminal must still produce output no wider/taller than
+// the screen.
+func TestSetupView_NarrowAndTallStillFits(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	const w, h = 60, 20
+	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	m = next.(setupModel)
+
+	content := m.View().Content
+	if gw := lipgloss.Width(content); gw > w {
+		t.Errorf("view width = %d, want <= %d", gw, w)
+	}
+	if gh := lipgloss.Height(content); gh != h {
+		t.Errorf("view height = %d, want exactly %d", gh, h)
+	}
+}
+
+// TestChompAimsLetterInkToMarkCenter verifies the chomp aims each
+// letter's ink center at the mark's ink center (within the half-cell
+// limit of the braille grid), with no systematic leftward bias.
+func TestChompAimsLetterInkToMarkCenter(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 110, Height: 40})
+	m = next.(setupModel)
+	if len(m.regions) < 2 {
+		t.Fatalf("expected mark + letters, got %d regions", len(m.regions))
+	}
+	markInk := m.markCenterCol()
+	for i := 1; i < len(m.regions); i++ {
+		r := m.regions[i]
+		// Mirror the approach-target formula in advanceLogo.
+		target := float64(r.StartCol) + math.Round(markInk-r.InkMid)
+		landedInk := r.InkMid - float64(r.StartCol) + math.Round(target)
+		if off := landedInk - markInk; math.Abs(off) > 0.5 {
+			t.Errorf("letter %d lands ink at %.1f, mark ink %.1f (off %.1f > 0.5)", i, landedInk, markInk, off)
+		}
+	}
+}
+
+// brailleMaxCol returns the rightmost column holding a braille cell in a
+// (ANSI-stripped) line, or -1.
+func brailleMaxCol(line string) int {
+	maxc, col := -1, 0
+	for _, r := range line {
+		if r >= 0x2800 && r <= 0x28FF {
+			maxc = col
+		}
+		col++
+	}
+	return maxc
+}
+
+// TestScanReturnKeepsTextConsumed is a regression test: while the scan's
+// mark glides back home, the wordmark must stay fully consumed (it must
+// NOT un-wipe as the mark passes back over it). The letters only reappear
+// later via the fly-in once the mark is home.
+func TestScanReturnKeepsTextConsumed(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m = next.(setupModel)
+	for i := 0; i < 200; i++ {
+		next, _ = m.Update(logoTickMsg{})
+		m = next.(setupModel)
+	}
+	m.startScan()
+	m.scanSub = scanSubReturn
+	m.scanMarkX = m.regions[0].InkMid + 20 // mark mid-return
+
+	pad := (m.width - m.cols) / 2
+	markRight := pad + int(m.scanMarkX) + m.chompMarkDims.canvasW/4 + 2
+
+	got := -1
+	for _, line := range strings.Split(ansi.Strip(m.renderScan()), "\n") {
+		if c := brailleMaxCol(line); c > got {
+			got = c
+		}
+	}
+	if got > markRight {
+		t.Errorf("wordmark visible during return: braille at col %d past mark right ~%d", got, markRight)
+	}
+}
+
+// TestScanCompletesBackToIntro drives the whole scan effect and asserts
+// it finishes by replaying the wordmark fly-in.
+func TestScanCompletesBackToIntro(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m = next.(setupModel)
+	for i := 0; i < 200; i++ {
+		next, _ = m.Update(logoTickMsg{})
+		m = next.(setupModel)
+	}
+	m.startScan()
+	if m.phase != phaseScanning {
+		t.Fatalf("phase=%v want phaseScanning", m.phase)
+	}
+	sawReturn := false
+	done := false
+	for i := 0; i < 2000; i++ {
+		next, _ = m.Update(logoTickMsg{})
+		m = next.(setupModel)
+		if m.phase == phaseScanning && m.scanSub == scanSubReturn {
+			sawReturn = true
+		}
+		if m.phase == phaseIntro || m.phase == phaseIdle {
+			done = true
+			break
+		}
+	}
+	if !sawReturn {
+		t.Error("scan never entered the return phase")
+	}
+	if !done {
+		t.Errorf("scan did not complete back to fly-in (phase=%v sub=%d)", m.phase, m.scanSub)
+	}
+}
+
+// TestFlyInLetters_KeepsMarkHolds verifies the post-chomp replay holds
+// the mark (region 0) settled in place while the wordmark letters fly in
+// from off-screen right.
+func TestFlyInLetters_KeepsMarkHolds(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(setupModel)
+	for i := 0; i < 200; i++ { // settle the initial fly-in
+		next, _ = m.Update(logoTickMsg{})
+		m = next.(setupModel)
+	}
+	if len(m.regions) < 2 {
+		t.Fatalf("expected mark + letters, got %d regions", len(m.regions))
+	}
+
+	m.flyInLetters()
+
+	if m.phase != phaseIntro {
+		t.Errorf("phase = %v, want phaseIntro", m.phase)
+	}
+	// Region 0 (mark) holds its settled spot.
+	mark := m.regions[0]
+	if mark.Pos != mark.Target {
+		t.Errorf("mark Pos=%.1f, want Target=%.1f (mark should not fly)", mark.Pos, mark.Target)
+	}
+	// Every letter starts off-screen to the right of its target.
+	for i := 1; i < len(m.regions); i++ {
+		r := m.regions[i]
+		if r.Pos <= r.Target {
+			t.Errorf("letter %d Pos=%.1f should start right of Target=%.1f (off-screen)", i, r.Pos, r.Target)
+		}
 	}
 }
