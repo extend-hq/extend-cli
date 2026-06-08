@@ -139,8 +139,9 @@ func runConfig(app *App) error {
 	return nil
 }
 
-// maskKey renders an API key for display: first and last few characters
-// only, never the whole secret. Empty keys read as not set.
+// maskKey renders an API key for display: a short non-secret prefix only
+// (enough to tell sk_live from sk_test), never the secret tail. Empty
+// reads as not set.
 func maskKey(k string) string {
 	if k == "" {
 		return "(not set)"
@@ -148,7 +149,7 @@ func maskKey(k string) string {
 	if len(k) <= 8 {
 		return strings.Repeat("•", len(k))
 	}
-	return k[:4] + "…" + k[len(k)-4:]
+	return k[:4] + "…"
 }
 
 func orNotSet(s string) string {
