@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -184,6 +186,100 @@ func TestResolveSettings(t *testing.T) {
 				t.Errorf("apiVersion = %q, want %q", got.apiVersion.val, tc.wantAPIVersion)
 			}
 		})
+	}
+}
+
+// TestRunSetupNonInteractive_Unconfigured: with no resolvable key and no
+// TTY, setup prints copy-pasteable guidance to stdout (the relayable
+// channel), names both regional dashboards, never claims to be configured,
+// and exits nil. Skill install is skipped here to keep the test off the
+// home dir.
+func TestRunSetupNonInteractive_Unconfigured(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envAPIKey, "")
+	t.Setenv(envRegion, "")
+	t.Setenv(envSkipSkillInstall, "1")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	if err := runSetupNonInteractive(ta.app); err != nil {
+		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
+	}
+
+	out := ta.out.String()
+	for _, want := range []string{
+		"not configured",
+		"export " + envAPIKey,
+		"https://dashboard.extend.ai",
+		"https://dashboard.eu1.extend.ai",
+		"extend config",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q; got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "already configured") {
+		t.Errorf("unconfigured run must not claim configured; got:\n%s", out)
+	}
+	if errs := ta.errOut.String(); !strings.Contains(errs, "Skipping agent skill") {
+		t.Errorf("stderr missing skip note; got:\n%s", errs)
+	}
+}
+
+// TestRunSetupNonInteractive_Configured: when a key already resolves, setup
+// confirms it on stderr (with the region), prints nothing to stdout, and
+// never echoes the key.
+func TestRunSetupNonInteractive_Configured(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envAPIKey, "sk_live_test")
+	t.Setenv(envRegion, "eu")
+	t.Setenv(envSkipSkillInstall, "1")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	if err := runSetupNonInteractive(ta.app); err != nil {
+		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
+	}
+
+	if out := ta.out.String(); out != "" {
+		t.Errorf("configured run must print no guidance to stdout; got:\n%s", out)
+	}
+	errs := ta.errOut.String()
+	if !strings.Contains(errs, "already configured") || !strings.Contains(errs, "region eu") {
+		t.Errorf("stderr should confirm configuration with region; got:\n%s", errs)
+	}
+	if strings.Contains(errs, "sk_live_test") || strings.Contains(ta.out.String(), "sk_live_test") {
+		t.Error("API key value leaked into output")
+	}
+}
+
+// TestRunSetupNonInteractive_InstallsSkill: without the skip knob, the
+// non-interactive path writes the skill to its default location and
+// symlinks it into ~/.claude/skills.
+func TestRunSetupNonInteractive_InstallsSkill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink assertions are unix-specific")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envAPIKey, "sk_x") // configured: keep stdout quiet, focus on the skill
+	t.Setenv(envSkipSkillInstall, "")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	if err := runSetupNonInteractive(ta.app); err != nil {
+		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+		t.Fatalf("skill not installed to default location: %v", err)
+	}
+	link := filepath.Join(home, ".claude", "skills", "extend")
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("claude symlink not created (fi=%v err=%v)", fi, err)
+	}
+	if errs := ta.errOut.String(); !strings.Contains(errs, "Installed the Extend agent skill") || !strings.Contains(errs, "Linked") {
+		t.Errorf("stderr missing install/link status; got:\n%s", errs)
 	}
 }
 

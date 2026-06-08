@@ -30,6 +30,11 @@ const (
 	envDebug         = "EXTEND_DEBUG"
 	envOutput        = "EXTEND_OUTPUT"
 	envEnv           = "EXTEND_ENV"
+	// envSkipSkillInstall, when truthy, makes non-interactive `extend
+	// setup` skip installing the agent skill. Install scripts forward it so
+	// their --skip-skill-install knob still works after delegating to the
+	// CLI. Not in envVars: it's a setup-time knob, not an auth/routing var.
+	envSkipSkillInstall = "EXTEND_SKIP_SKILL_INSTALL"
 )
 
 // defaultAPIVersion is the API version sent on every request unless the
