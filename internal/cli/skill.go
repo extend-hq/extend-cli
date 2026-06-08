@@ -700,6 +700,38 @@ func defaultSkillTarget() (string, error) {
 	return filepath.Join(home, ".agents", "skills", skillName, "SKILL.md"), nil
 }
 
+// linkSkillIntoClaude symlinks the installed skill directory into
+// ~/.claude/skills/<skillName>. Claude Code reads ~/.claude/skills and does
+// not look at the cross-client ~/.agents/skills location, so without this
+// the skill is invisible to it. Returns the link path on success.
+//
+// An existing symlink at the destination is replaced (idempotent); a real
+// directory or file there is left untouched and reported as an error so the
+// caller can warn without clobbering the user's data.
+func linkSkillIntoClaude(skillDir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home directory: %w", err)
+	}
+	claudeSkills := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", claudeSkills, err)
+	}
+	link := filepath.Join(claudeSkills, skillName)
+	if fi, err := os.Lstat(link); err == nil {
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return "", fmt.Errorf("%s exists and is not a symlink; left untouched", link)
+		}
+		if err := os.Remove(link); err != nil {
+			return "", fmt.Errorf("replace existing symlink %s: %w", link, err)
+		}
+	}
+	if err := os.Symlink(skillDir, link); err != nil {
+		return "", fmt.Errorf("symlink %s -> %s: %w", link, skillDir, err)
+	}
+	return link, nil
+}
+
 func newSkillInstallDoc(app *App) *CommandDoc {
 	var target string
 	return &CommandDoc{
@@ -709,6 +741,7 @@ func newSkillInstallDoc(app *App) *CommandDoc {
 			"install the extend cli skill into the agent skills directory",
 			"write the skill to ~/.agents/skills/extend",
 			"deploy the skill markdown for an agent harness",
+			"symlink the skill into ~/.claude/skills for claude code",
 		},
 		WhenToUse: `Use to write the SKILL.md to the cross-client agent skills directory
 in one step, instead of piping ` + "`extend skill > SKILL.md`" + ` yourself. Pass
@@ -724,7 +757,13 @@ Override the target with ` + "`--target <path>`" + `. Useful targets:
 - ` + "`./SKILL.md`" + ` — alongside the agent harness in a checked-in project
 - ` + "`./.agents/skills/extend/SKILL.md`" + ` — project-local cross-client skills dir
 - ` + "`~/.claude/skills/extend/SKILL.md`" + ` — Claude Code-specific
-- ` + "`~/.codex/skills/extend/SKILL.md`" + ` — Codex-specific`,
+- ` + "`~/.codex/skills/extend/SKILL.md`" + ` — Codex-specific
+
+On a default install (no ` + "`--target`" + `), the skill directory is also
+symlinked into ` + "`~/.claude/skills/extend`" + ` — Claude Code reads
+` + "`~/.claude/skills`" + ` rather than the cross-client ` + "`~/.agents/skills`" + `
+location, so the symlink makes ` + "`extend skill install`" + ` work for it too.
+An existing real directory at that path is left untouched.`,
 		Examples: []Example{
 			{Label: "Default location", Cmd: "extend skill install"},
 			{Label: "Project-local", Cmd: "extend skill install --target ./.agents/skills/extend/SKILL.md"},
@@ -733,6 +772,8 @@ Override the target with ` + "`--target <path>`" + `. Useful targets:
 		Gotchas: []string{
 			"Existing target file is overwritten without prompt; pipe to a different path first if you want to compare.",
 			"Pass `--target -` to stream to stdout (equivalent to running `extend skill`).",
+			"A default install also symlinks the skill dir into ~/.claude/skills/extend for Claude Code; a custom --target is written verbatim with no symlink.",
+			"A non-symlink already at ~/.claude/skills/extend is left untouched and the link step is skipped with a warning.",
 		},
 		SeeAlso: []string{"skill"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
@@ -763,8 +804,21 @@ Override the target with ` + "`--target <path>`" + `. Useful targets:
 				return fmt.Errorf("write skill: %w", err)
 			}
 
-			fmt.Fprintf(app.IO.ErrOut, "%s Wrote %d bytes to %s\n",
-				paletteFor(app.IO).Green("✓"), len(body), path)
+			pal := paletteFor(app.IO)
+			fmt.Fprintf(app.IO.ErrOut, "%s Wrote %d bytes to %s\n", pal.Green("✓"), len(body), path)
+
+			// Claude Code reads ~/.claude/skills, not the cross-client
+			// ~/.agents/skills default, so symlink the skill dir there on a
+			// default install. Best-effort: a failure (no symlink support,
+			// or a real dir already present) is a warning, not an error.
+			if target == "" {
+				skillDir := filepath.Dir(path)
+				if link, err := linkSkillIntoClaude(skillDir); err != nil {
+					fmt.Fprintf(app.IO.ErrOut, "%s Skipped ~/.claude/skills link: %v\n", pal.Yellow("!"), err)
+				} else {
+					fmt.Fprintf(app.IO.ErrOut, "%s Linked %s -> %s\n", pal.Green("✓"), link, skillDir)
+				}
+			}
 			return nil
 		},
 		Configure: func(cmd *cobra.Command) {
