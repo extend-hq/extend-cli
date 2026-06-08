@@ -154,38 +154,28 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
 	app.NewClient = func() (*sdkclient.Client, error) {
-		rc := resolveCredentials(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
-		if rc.key.val == "" {
+		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+		if s.key.val == "" {
 			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
 		}
 
 		cfg := extendx.Config{
-			APIKey:      rc.key.val,
-			Region:      rc.region.val,
-			WorkspaceID: rc.workspaceID.val,
+			APIKey:      s.key.val,
+			Region:      s.region.val,
+			WorkspaceID: s.workspaceID.val,
+			APIVersion:  s.apiVersion.val,
 			UserAgent:   userAgent(),
 		}
 		// A non-empty base URL (env or config file) overrides the region.
-		if rc.baseURL.val != "" {
-			cfg.BaseURL = rc.baseURL.val
+		if s.baseURL.val != "" {
+			cfg.BaseURL = s.baseURL.val
 		}
-		if v := os.Getenv(envAPIVersion); v != "" {
-			cfg.APIVersion = v
-		}
-
-		// Debug logging: --debug flag wins; otherwise honor EXTEND_DEBUG.
-		// Truthy values: "1", "true", "yes", "on" (case-insensitive).
-		if app.Debug || debugEnvTruthy(os.Getenv(envDebug)) {
+		if on, _ := resolveDebug(app.Debug, os.Getenv); on {
 			cfg.Debug = app.IO.ErrOut
 		}
-
-		// Per-HTTP-request timeout: --http-timeout flag wins; otherwise
-		// honor EXTEND_HTTP_TIMEOUT. Both override the SDK default.
-		if d, ok := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(envHTTPTimeout)); ok {
-			// A flag value of 0 is impossible to express to extendx
-			// (0 means "leave default"). We use -1 as a sentinel for
-			// "explicitly disable timeout" so the underlying http.Client
-			// timeout becomes zero (no end-to-end deadline).
+		if d, ok, _ := resolveHTTPTimeout(app.HTTPTimeout, os.Getenv(envHTTPTimeout)); ok {
+			// extendx can't express "0 == leave default", so -1 is the
+			// sentinel for "explicitly disable the end-to-end deadline".
 			if d == 0 {
 				cfg.HTTPTimeout = -1
 			} else {
@@ -215,17 +205,18 @@ func NewRoot() *cobra.Command {
 //
 // A returned timeout of 0 is meaningful: it disables the http.Client
 // timeout entirely, leaving the context as the only deadline. Useful
-// in tests and for users debugging slow networks.
-func resolveHTTPTimeout(flag time.Duration, env string) (time.Duration, bool) {
+// in tests and for users debugging slow networks. src names where the
+// value came from, for `extend config`.
+func resolveHTTPTimeout(flag time.Duration, env string) (d time.Duration, ok bool, src string) {
 	if flag > 0 {
-		return flag, true
+		return flag, true, "flag: --http-timeout"
 	}
 	if env != "" {
-		if d, err := time.ParseDuration(env); err == nil && d >= 0 {
-			return d, true
+		if parsed, err := time.ParseDuration(env); err == nil && parsed >= 0 {
+			return parsed, true, "env: " + envHTTPTimeout
 		}
 	}
-	return 0, false
+	return 0, false, "default"
 }
 
 // applyEnvDefaults resolves persistent-flag defaults from environment
@@ -259,12 +250,15 @@ type sourced struct {
 
 // resolved is the effective credential and routing configuration after
 // the precedence chain has been applied. An empty baseURL means region
-// selects the URL inside extendx.
+// selects the URL inside extendx. debug and httpTimeout are resolved
+// separately (resolveDebug / resolveHTTPTimeout) because they're typed,
+// flag/env-only knobs rather than string config-file values.
 type resolved struct {
 	key         sourced
 	region      sourced
 	baseURL     sourced
 	workspaceID sourced
+	apiVersion  sourced
 }
 
 // firstSet returns the first candidate with a non-empty value, or the
@@ -289,8 +283,9 @@ func firstSet(cands ...sourced) sourced {
 // URL, and a non-empty base URL overrides it); workspace precedence is
 // --workspace > EXTEND_WORKSPACE_ID > file.workspaceId. A malformed or
 // unreadable file is ignored best-effort so a typo can't break every
-// command. getenv and loadFile are injected for testability.
-func resolveCredentials(envLabel, regionFlag, workspaceFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
+// command. apiVersion is env-only (EXTEND_API_VERSION). getenv and
+// loadFile are injected for testability.
+func resolveSettings(envLabel, regionFlag, workspaceFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
 	var fileCfg config.File
 	if loadFile != nil {
 		fileCfg, _ = loadFile()
@@ -323,7 +318,21 @@ func resolveCredentials(envLabel, regionFlag, workspaceFlag string, getenv func(
 		sourced{getenv(envWorkspaceID), "env: " + envWorkspaceID},
 		sourced{fileCfg.WorkspaceID, "config file"},
 	)
+	// API version has no flag or config-file field; env-only.
+	r.apiVersion = firstSet(sourced{getenv(envAPIVersion), "env: " + envAPIVersion})
 	return r
+}
+
+// resolveDebug reports whether debug HTTP logging is on and where that was
+// decided (--debug flag, EXTEND_DEBUG, or the off-by-default).
+func resolveDebug(flag bool, getenv func(string) string) (on bool, src string) {
+	if flag {
+		return true, "flag: --debug"
+	}
+	if debugEnvTruthy(getenv(envDebug)) {
+		return true, "env: " + envDebug
+	}
+	return false, "default"
 }
 
 // apiKeyEnvVar returns the env var name from which the API key should

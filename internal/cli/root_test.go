@@ -69,7 +69,7 @@ func TestResolveHTTPTimeout(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := resolveHTTPTimeout(tc.flag, tc.env)
+			got, ok, _ := resolveHTTPTimeout(tc.flag, tc.env)
 			if ok != tc.wantOK {
 				t.Errorf("ok = %v, want %v", ok, tc.wantOK)
 			}

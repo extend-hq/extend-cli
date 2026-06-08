@@ -17,11 +17,11 @@ import (
 	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
-// TestResolveCredentials pins the precedence chain that makes `extend
-// setup` actually wire every command: flag/env win, the config file is
-// the lowest-priority fallback, and an --env label scopes only the API
-// key (the file's region still applies under any label).
-func TestResolveCredentials(t *testing.T) {
+// TestResolveSettings pins the precedence chain that makes `extend setup`
+// actually wire every command: flag/env win, the config file is the
+// lowest-priority fallback, and an --env label scopes only the API key
+// (the file's region still applies under any label).
+func TestResolveSettings(t *testing.T) {
 	file := config.File{Region: "eu", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
 	loadFile := func() (config.File, error) { return file, nil }
 	loadEmpty := func() (config.File, error) { return config.File{}, nil }
@@ -45,6 +45,7 @@ func TestResolveCredentials(t *testing.T) {
 		wantRegion      string
 		wantBaseURL     string
 		wantWorkspaceID string
+		wantAPIVersion  string
 	}{
 		{
 			name:       "env key wins over file",
@@ -157,10 +158,16 @@ func TestResolveCredentials(t *testing.T) {
 			wantRegion:      "eu",
 			wantWorkspaceID: "ws_file",
 		},
+		{
+			name:           "api version comes from its env var",
+			getenv:         env(map[string]string{"EXTEND_API_VERSION": "2025-04-21"}),
+			load:           loadEmpty,
+			wantAPIVersion: "2025-04-21",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveCredentials(tc.envLabel, tc.regionFlag, tc.workspaceFlag, tc.getenv, tc.load)
+			got := resolveSettings(tc.envLabel, tc.regionFlag, tc.workspaceFlag, tc.getenv, tc.load)
 			if got.key.val != tc.wantKey {
 				t.Errorf("key = %q, want %q", got.key.val, tc.wantKey)
 			}
@@ -172,6 +179,9 @@ func TestResolveCredentials(t *testing.T) {
 			}
 			if got.workspaceID.val != tc.wantWorkspaceID {
 				t.Errorf("workspaceID = %q, want %q", got.workspaceID.val, tc.wantWorkspaceID)
+			}
+			if got.apiVersion.val != tc.wantAPIVersion {
+				t.Errorf("apiVersion = %q, want %q", got.apiVersion.val, tc.wantAPIVersion)
 			}
 		})
 	}
