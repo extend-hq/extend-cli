@@ -62,21 +62,19 @@ func runConfig(app *App) error {
 	rc := resolveCredentials(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 	pal := paletteFor(app.IO)
 
-	// Auth method is derived from which credential resolved. Only API
-	// keys exist today; this line is where OAuth status will surface.
+	// Only API keys exist today; this line is where OAuth status surfaces.
 	authMethod := "(none)"
-	if rc.key != "" {
+	if rc.key.val != "" {
 		authMethod = "API key"
 	}
 
-	// Effective region / base URL. An unset region means extendx falls
-	// back to its default (US production); reflect that rather than
-	// printing a blank.
-	region, regionSrc := rc.region, rc.regionSrc
+	// An unset region/baseURL means extendx falls back to its default (US
+	// production); show that rather than a blank.
+	region, regionSrc := rc.region.val, rc.region.src
 	if region == "" {
 		region, regionSrc = "us", "default"
 	}
-	baseURL, baseSrc := rc.baseURL, rc.baseURLSrc
+	baseURL, baseSrc := rc.baseURL.val, rc.baseURL.src
 	if baseURL == "" {
 		if u, ok := extendx.RegionBaseURL(region); ok {
 			baseURL = u
@@ -87,10 +85,10 @@ func runConfig(app *App) error {
 	type row struct{ label, val, note string }
 	rows := []row{
 		{"Auth method", authMethod, ""},
-		{"API key", maskKey(rc.key), rc.keySrc},
+		{"API key", maskKey(rc.key.val), rc.key.src},
 		{"Region", region, regionSrc},
 		{"Base URL", baseURL, baseSrc},
-		{"Workspace", orNotSet(rc.workspaceID), rc.workspaceSrc},
+		{"Workspace", orNotSet(rc.workspaceID.val), rc.workspaceID.src},
 	}
 
 	if path, err := config.Path(); err == nil {

@@ -161,17 +161,17 @@ func TestResolveCredentials(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolveCredentials(tc.envLabel, tc.regionFlag, tc.workspaceFlag, tc.getenv, tc.load)
-			if got.key != tc.wantKey {
-				t.Errorf("key = %q, want %q", got.key, tc.wantKey)
+			if got.key.val != tc.wantKey {
+				t.Errorf("key = %q, want %q", got.key.val, tc.wantKey)
 			}
-			if got.region != tc.wantRegion {
-				t.Errorf("region = %q, want %q", got.region, tc.wantRegion)
+			if got.region.val != tc.wantRegion {
+				t.Errorf("region = %q, want %q", got.region.val, tc.wantRegion)
 			}
-			if got.baseURL != tc.wantBaseURL {
-				t.Errorf("baseURL = %q, want %q", got.baseURL, tc.wantBaseURL)
+			if got.baseURL.val != tc.wantBaseURL {
+				t.Errorf("baseURL = %q, want %q", got.baseURL.val, tc.wantBaseURL)
 			}
-			if got.workspaceID != tc.wantWorkspaceID {
-				t.Errorf("workspaceID = %q, want %q", got.workspaceID, tc.wantWorkspaceID)
+			if got.workspaceID.val != tc.wantWorkspaceID {
+				t.Errorf("workspaceID = %q, want %q", got.workspaceID.val, tc.wantWorkspaceID)
 			}
 		})
 	}

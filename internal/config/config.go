@@ -39,13 +39,10 @@ const (
 // it can later move to an OS keychain without disturbing the rest of the
 // file.
 type Auth struct {
-	// Type selects which of the fields below are meaningful.
-	Type AuthMethod `json:"type"`
-	// APIKey is the bearer token for Type == AuthAPIKey.
-	APIKey string `json:"apiKey,omitempty"`
-	// OAuth fields are reserved for a future interactive-login flow:
-	// AccessToken/RefreshToken string and an expiry timestamp. They are
-	// intentionally omitted until that lands so the shape stays minimal.
+	Type   AuthMethod `json:"type"`
+	APIKey string     `json:"apiKey,omitempty"`
+	// OAuth fields (access/refresh token, expiry) land here as a new
+	// variant when interactive login ships — omitted until then.
 }
 
 // File is the on-disk configuration. Every field is optional; the zero
