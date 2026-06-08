@@ -314,6 +314,9 @@ type setupModel struct {
 	scanLetterIdx int     // next letter region to scan out
 	scanGlyphs    []scanGlyph
 
+	// skipSkill suppresses the skill step (set from EXTEND_SKIP_SKILL_INSTALL).
+	skipSkill bool
+
 	result   *setupResult
 	canceled bool
 	quitting bool
@@ -894,6 +897,13 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID, path: path, saveErr: err}
 		if err != nil {
 			// Couldn't save — finish so runSetup reports the error.
+			m.step = stepDone
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// EXTEND_SKIP_SKILL_INSTALL suppresses the skill without prompting.
+		if m.skipSkill {
+			m.result.installSkill = false
 			m.step = stepDone
 			m.quitting = true
 			return m, tea.Quit
