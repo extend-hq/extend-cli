@@ -153,23 +153,24 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
 	app.NewClient = func() (*sdkclient.Client, error) {
-		key, region := resolveCredentials(app.Env, app.Region, os.Getenv, config.Load)
-		if key == "" {
+		rc := resolveCredentials(app.Env, app.Region, os.Getenv, config.Load)
+		if rc.key == "" {
 			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
 		}
 
 		cfg := extendx.Config{
-			APIKey:      key,
-			Region:      region,
+			APIKey:      rc.key,
+			Region:      rc.region,
 			WorkspaceID: app.Workspace,
 			UserAgent:   userAgent(),
 		}
 		if cfg.WorkspaceID == "" {
 			cfg.WorkspaceID = os.Getenv(envWorkspaceID)
 		}
-		// EXTEND_BASE_URL always wins over region.
-		if v := os.Getenv(envBaseURL); v != "" {
-			cfg.BaseURL = v
+		// Base-URL precedence (EXTEND_BASE_URL > config file) is resolved
+		// in resolveCredentials; a non-empty value overrides the region.
+		if rc.baseURL != "" {
+			cfg.BaseURL = rc.baseURL
 		}
 		if v := os.Getenv(envAPIVersion); v != "" {
 			cfg.APIVersion = v
@@ -251,34 +252,51 @@ func applyEnvDefaults(app *App) {
 	}
 }
 
-// resolveCredentials resolves the API key and region using the
+// resolved holds the credential and routing values after the precedence
+// chain has been applied. baseURL is empty when no override is set, in
+// which case region selects the URL inside extendx.
+type resolved struct {
+	key     string
+	region  string
+	baseURL string
+}
+
+// resolveCredentials resolves the API key and routing settings using the
 // precedence: flag/env > config file > default. Only the API *key* is
 // environment-specific: an --env label selects an alternate key that must
 // come from the environment (EXTEND_<LABEL>_API_KEY), never from the
 // shared file, since the file holds only the default environment's key.
-// Routing settings (region, and later base URL / workspace) are not
-// env-label-specific, so the file's values still apply under any --env.
-// A malformed or unreadable file is ignored best-effort so a typo can't
-// break every command. getenv and loadFile are injected for testability.
-func resolveCredentials(envLabel, regionFlag string, getenv func(string) string, loadFile func() (config.File, error)) (key, region string) {
+// Routing settings (region, base URL) are not env-label-specific, so the
+// file's values still apply under any --env. Base-URL precedence is
+// EXTEND_BASE_URL > file.baseUrl > region (extendx turns region into a
+// URL, and a non-empty base URL overrides it). A malformed or unreadable
+// file is ignored best-effort so a typo can't break every command. getenv
+// and loadFile are injected for testability.
+func resolveCredentials(envLabel, regionFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
 	var fileCfg config.File
 	if loadFile != nil {
 		fileCfg, _ = loadFile()
 	}
 
-	key = getenv(apiKeyEnvVar(envLabel))
-	if key == "" && envLabel == "" {
-		key = fileCfg.APIKey()
+	var r resolved
+	r.key = getenv(apiKeyEnvVar(envLabel))
+	if r.key == "" && envLabel == "" {
+		r.key = fileCfg.APIKey()
 	}
 
-	region = regionFlag
-	if region == "" {
-		region = getenv(envRegion)
+	r.region = regionFlag
+	if r.region == "" {
+		r.region = getenv(envRegion)
 	}
-	if region == "" {
-		region = fileCfg.Region
+	if r.region == "" {
+		r.region = fileCfg.Region
 	}
-	return key, region
+
+	r.baseURL = getenv(envBaseURL)
+	if r.baseURL == "" {
+		r.baseURL = fileCfg.BaseURL
+	}
+	return r
 }
 
 // apiKeyEnvVar returns the env var name from which the API key should

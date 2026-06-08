@@ -25,19 +25,22 @@ func TestResolveCredentials(t *testing.T) {
 	file := config.File{Region: "eu", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
 	loadFile := func() (config.File, error) { return file, nil }
 	loadEmpty := func() (config.File, error) { return config.File{}, nil }
+	fileWithBase := config.File{Region: "eu", BaseURL: "https://self.example", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
+	loadWithBase := func() (config.File, error) { return fileWithBase, nil }
 
 	env := func(m map[string]string) func(string) string {
 		return func(k string) string { return m[k] }
 	}
 
 	cases := []struct {
-		name       string
-		envLabel   string
-		regionFlag string
-		getenv     func(string) string
-		load       func() (config.File, error)
-		wantKey    string
-		wantRegion string
+		name        string
+		envLabel    string
+		regionFlag  string
+		getenv      func(string) string
+		load        func() (config.File, error)
+		wantKey     string
+		wantRegion  string
+		wantBaseURL string
 	}{
 		{
 			name:       "env key wins over file",
@@ -91,15 +94,43 @@ func TestResolveCredentials(t *testing.T) {
 			wantKey:    "",
 			wantRegion: "",
 		},
+		{
+			name:        "base url from file when env unset",
+			getenv:      env(map[string]string{}),
+			load:        loadWithBase,
+			wantKey:     "sk_file",
+			wantRegion:  "eu",
+			wantBaseURL: "https://self.example",
+		},
+		{
+			name:        "base url env wins over file",
+			getenv:      env(map[string]string{"EXTEND_BASE_URL": "https://env.example"}),
+			load:        loadWithBase,
+			wantKey:     "sk_file",
+			wantRegion:  "eu",
+			wantBaseURL: "https://env.example",
+		},
+		{
+			name:        "file base url applies under an env label too",
+			envLabel:    "test",
+			getenv:      env(map[string]string{"EXTEND_TEST_API_KEY": "sk_test"}),
+			load:        loadWithBase,
+			wantKey:     "sk_test",
+			wantRegion:  "eu",
+			wantBaseURL: "https://self.example",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			key, region := resolveCredentials(tc.envLabel, tc.regionFlag, tc.getenv, tc.load)
-			if key != tc.wantKey {
-				t.Errorf("key = %q, want %q", key, tc.wantKey)
+			got := resolveCredentials(tc.envLabel, tc.regionFlag, tc.getenv, tc.load)
+			if got.key != tc.wantKey {
+				t.Errorf("key = %q, want %q", got.key, tc.wantKey)
 			}
-			if region != tc.wantRegion {
-				t.Errorf("region = %q, want %q", region, tc.wantRegion)
+			if got.region != tc.wantRegion {
+				t.Errorf("region = %q, want %q", got.region, tc.wantRegion)
+			}
+			if got.baseURL != tc.wantBaseURL {
+				t.Errorf("baseURL = %q, want %q", got.baseURL, tc.wantBaseURL)
 			}
 		})
 	}

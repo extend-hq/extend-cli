@@ -141,12 +141,19 @@ func installSkillFile(app *App) (string, error) {
 // defaultSetupValidator is the production key checker: it builds a client
 // for the chosen region and makes one cheap authenticated call.
 func defaultSetupValidator(ctx context.Context, region, key string) error {
-	return validateAPIKey(ctx, extendx.Config{
+	cfg := extendx.Config{
 		APIKey:      key,
 		Region:      region,
 		UserAgent:   userAgent(),
 		HTTPTimeout: 30 * time.Second,
-	})
+	}
+	// EXTEND_BASE_URL overrides the region for every real command, so
+	// validate against it too — otherwise the wizard could report success
+	// against the region's URL while commands actually hit a different one.
+	if v := os.Getenv(envBaseURL); v != "" {
+		cfg.BaseURL = v
+	}
+	return validateAPIKey(ctx, cfg)
 }
 
 // validateAPIKey confirms a key works by listing workflows (the lightest
