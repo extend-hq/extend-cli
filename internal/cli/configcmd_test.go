@@ -55,7 +55,7 @@ func TestMaskKey(t *testing.T) {
 	cases := map[string]string{
 		"":                "(not set)",
 		"short":           "•••••",
-		"sk_env_abcdefgh": "sk_e…efgh",
+		"sk_env_abcdefgh": "sk_e…",
 	}
 	for in, want := range cases {
 		if got := maskKey(in); got != want {
