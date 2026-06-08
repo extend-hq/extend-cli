@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	extend "github.com/extend-hq/extend-go-sdk"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
@@ -73,7 +75,9 @@ func runSetup(ctx context.Context, app *App) error {
 	pal := paletteFor(app.IO)
 
 	model := newSetupModel(ctx, app.IO.ColorEnabled(), app.Region, defaultSetupValidator)
-	final, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen()).Run()
+	// v2 moved alt-screen and mouse-mode out of program options and into
+	// View() fields; they're set per-frame in setupModel.View().
+	final, err := tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if err != nil {
 		// A signal (SIGTERM) or interrupt during the TUI is a user
 		// action, not a failure to debug.
@@ -102,8 +106,36 @@ func runSetup(ctx context.Context, app *App) error {
 	fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
 	fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
 		pal.Green("✓"), m.result.region.title, m.result.region.api, m.result.path)
+
+	if m.result.installSkill {
+		if path, err := installSkillFile(app); err != nil {
+			fmt.Fprintf(app.IO.ErrOut, "%s Could not install the agent skill: %v\n", pal.Yellow("!"), err)
+		} else {
+			fmt.Fprintf(app.IO.ErrOut, "%s Installed the Extend agent skill to %s\n", pal.Green("✓"), path)
+		}
+	}
+
 	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend runs list"))
 	return nil
+}
+
+// installSkillFile renders the SKILL.md and writes it to the default
+// cross-client agent skills location, returning the path written.
+func installSkillFile(app *App) (string, error) {
+	path, err := defaultSkillTarget()
+	if err != nil {
+		return "", err
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create directory: %w", err)
+		}
+	}
+	body := RenderSkill(RootDoc(app))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // defaultSetupValidator is the production key checker: it builds a client
