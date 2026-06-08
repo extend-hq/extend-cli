@@ -379,6 +379,14 @@ jobs:
               bin.install "extend"
             end
 
+            def caveats
+              <<~EOS
+                Run 'extend setup' to finish configuring the CLI: pick a region
+                and save an API key. It also installs the agent skill so coding
+                agents can drive the CLI.
+              EOS
+            end
+
             test do
               system "#{bin}/extend", "--version"
             end
