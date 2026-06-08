@@ -10,6 +10,27 @@ import (
 // --help, so an agent can discover them without reading the raw API
 // reference. Pure --help inspection: no API, no credits.
 
+// TestRegionHelp_HidesDeprecatedUS2 guards the "accept but don't
+// advertise" stance: --help and the auth topic present only us|eu, never
+// the legacy us2 region (which still resolves via --region /
+// EXTEND_REGION — that acceptance is covered by extendx unit tests).
+func TestRegionHelp_HidesDeprecatedUS2(t *testing.T) {
+	root := runExtend(t, envSetup{}, "--help")
+	root.requireOK(t, "--help")
+	if !strings.Contains(string(root.Stdout), "us|eu") {
+		t.Errorf("root --help should advertise region as us|eu; got:\n%s", root.Stdout)
+	}
+	if strings.Contains(string(root.Stdout), "us2") {
+		t.Errorf("root --help must not advertise us2; got:\n%s", root.Stdout)
+	}
+
+	auth := runExtend(t, envSetup{}, "help", "auth")
+	auth.requireOK(t, "help", "auth")
+	if got := string(auth.Stdout) + string(auth.Stderr); strings.Contains(got, "us2") {
+		t.Errorf("help auth must not surface us2; got:\n%s", got)
+	}
+}
+
 // TestParseOptions_ExposedInBinary asserts `extend parse --help` enumerates
 // the --block-options and --advanced-options sub-knobs (previously only the
 // flag categories were shown).
