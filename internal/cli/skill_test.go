@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -239,6 +240,100 @@ func TestSkillInstallWritesToTarget(t *testing.T) {
 	}
 	if !strings.Contains(ta.errOut.String(), target) {
 		t.Errorf("stderr should mention the target path; got: %q", ta.errOut.String())
+	}
+}
+
+// TestSkillInstallSymlinksIntoClaude verifies the default install also
+// links the skill dir into ~/.claude/skills/extend (Claude Code doesn't
+// read ~/.agents/skills), and that SKILL.md resolves through the link.
+func TestSkillInstallSymlinksIntoClaude(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink install assertions are unix-specific")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "skill", "install")
+	cmd.SetArgs(nil) // default target
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md not written to default location: %v", err)
+	}
+	link := filepath.Join(home, ".claude", "skills", "extend")
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("claude symlink not created: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s is not a symlink", link)
+	}
+	dest, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".agents", "skills", "extend"); dest != want {
+		t.Errorf("symlink target = %q, want %q", dest, want)
+	}
+	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not reachable via claude link: %v", err)
+	}
+	if !strings.Contains(ta.errOut.String(), "Linked") {
+		t.Errorf("expected Linked status on stderr; got: %q", ta.errOut.String())
+	}
+
+	// Idempotent: a second default install replaces the symlink cleanly.
+	ta2 := newTestApp(t, newFakeServer(t, nil))
+	cmd2 := findCmd(t, ta2.app, "skill", "install")
+	cmd2.SetArgs(nil)
+	if err := cmd2.Execute(); err != nil {
+		t.Fatalf("second install (idempotency): %v", err)
+	}
+}
+
+// TestSkillInstallClaudeLinkSkipsRealDir ensures a real directory already
+// at ~/.claude/skills/extend is left untouched (not clobbered), the link
+// step is skipped with a warning, and the install still succeeds.
+func TestSkillInstallClaudeLinkSkipsRealDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink install assertions are unix-specific")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	realDir := filepath.Join(home, ".claude", "skills", "extend")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(realDir, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "skill", "install")
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install should still succeed despite link skip: %v", err)
+	}
+
+	fi, err := os.Lstat(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("real directory was replaced by a symlink (clobbered)")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("sentinel file removed under the real dir: %v", err)
+	}
+	if !strings.Contains(ta.errOut.String(), "Skipped") {
+		t.Errorf("expected Skipped warning on stderr; got: %q", ta.errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md should still be written: %v", err)
 	}
 }
 
