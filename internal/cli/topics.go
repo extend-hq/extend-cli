@@ -24,7 +24,7 @@ func newAuthTopicDoc() *CommandDoc {
 		Triggers: []string{
 			"how do i authenticate the extend cli",
 			"set up extend api key environment",
-			"choose the right region us eu us2",
+			"choose the right region us or eu",
 			"workspace id for org-scoped api keys",
 			"explain auth precedence and overrides",
 		},
@@ -102,7 +102,7 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 		fmt.Fprintf(&b, "  %-*s  %s\n", maxNameLen, ev.Name, ev.Description)
 	}
 	b.WriteString("\nRegions:\n\n")
-	for _, region := range extendx.KnownRegions() {
+	for _, region := range extendx.AdvertisedRegions() {
 		url, _ := extendx.RegionBaseURL(region)
 		suffix := ""
 		if url == extend.Environments.Production {
