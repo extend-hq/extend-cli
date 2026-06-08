@@ -201,10 +201,3 @@ func needsWorkspacePrompt(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(apiErr.Message), "workspace")
 }
-
-// isWorkspaceNotFound reports whether err is a 404, which the API returns
-// when a supplied workspace ID doesn't belong to the key's organization.
-func isWorkspaceNotFound(err error) bool {
-	status, ok := apiErrorStatus(err)
-	return ok && status == 404
-}

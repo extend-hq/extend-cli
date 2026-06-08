@@ -17,6 +17,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/extend-hq/extend-cli/internal/config"
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 // setupStep is the wizard's linear state machine.
@@ -860,7 +861,7 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.wsInput.Focus()
 			}
 			// A wrong workspace ID (404) sends them back to fix it.
-			if m.workspaceID != "" && isWorkspaceNotFound(msg.err) {
+			if m.workspaceID != "" && extendx.IsNotFound(msg.err) {
 				m.valErr = msg.err
 				m.step = stepWorkspace
 				return m, m.wsInput.Focus()

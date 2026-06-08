@@ -155,20 +155,19 @@ func NewRoot() *cobra.Command {
 
 	app.NewClient = func() (*sdkclient.Client, error) {
 		rc := resolveCredentials(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
-		if rc.key == "" {
+		if rc.key.val == "" {
 			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
 		}
 
 		cfg := extendx.Config{
-			APIKey:      rc.key,
-			Region:      rc.region,
-			WorkspaceID: rc.workspaceID,
+			APIKey:      rc.key.val,
+			Region:      rc.region.val,
+			WorkspaceID: rc.workspaceID.val,
 			UserAgent:   userAgent(),
 		}
-		// Base-URL precedence (EXTEND_BASE_URL > config file) is resolved
-		// in resolveCredentials; a non-empty value overrides the region.
-		if rc.baseURL != "" {
-			cfg.BaseURL = rc.baseURL
+		// A non-empty base URL (env or config file) overrides the region.
+		if rc.baseURL.val != "" {
+			cfg.BaseURL = rc.baseURL.val
 		}
 		if v := os.Getenv(envAPIVersion); v != "" {
 			cfg.APIVersion = v
@@ -250,34 +249,33 @@ func applyEnvDefaults(app *App) {
 	}
 }
 
-// resolved holds the credential and routing values after the precedence
-// chain has been applied, plus a human-readable source for each (where
-// the winning value came from) so `extend config` can report provenance.
-// baseURL is empty when no override is set, in which case region selects
-// the URL inside extendx.
-type resolved struct {
-	key         string
-	region      string
-	baseURL     string
-	workspaceID string
-
-	keySrc       string
-	regionSrc    string
-	baseURLSrc   string
-	workspaceSrc string
+// sourced is a resolved value paired with a short label saying where it
+// came from (a flag, an env var, the config file, or a default), so
+// `extend config` can report provenance. An empty val means unset.
+type sourced struct {
+	val string
+	src string
 }
 
-// srcCand is a candidate value paired with the label describing where it
-// came from. firstSet returns the first non-empty candidate.
-type srcCand struct{ val, src string }
+// resolved is the effective credential and routing configuration after
+// the precedence chain has been applied. An empty baseURL means region
+// selects the URL inside extendx.
+type resolved struct {
+	key         sourced
+	region      sourced
+	baseURL     sourced
+	workspaceID sourced
+}
 
-func firstSet(cands ...srcCand) (val, src string) {
+// firstSet returns the first candidate with a non-empty value, or the
+// zero sourced when none is set.
+func firstSet(cands ...sourced) sourced {
 	for _, c := range cands {
 		if c.val != "" {
-			return c.val, c.src
+			return c
 		}
 	}
-	return "", ""
+	return sourced{}
 }
 
 // resolveCredentials resolves the API key and routing settings using the
@@ -306,29 +304,24 @@ func resolveCredentials(envLabel, regionFlag, workspaceFlag string, getenv func(
 	if envLabel == "" {
 		fileKey = fileCfg.APIKey()
 	}
-	r.key, r.keySrc = firstSet(
-		srcCand{getenv(keyEnv), "env: " + keyEnv},
-		srcCand{fileKey, "config file"},
+	r.key = firstSet(
+		sourced{getenv(keyEnv), "env: " + keyEnv},
+		sourced{fileKey, "config file"},
 	)
-
-	// Region: --region > EXTEND_REGION > config file.
-	r.region, r.regionSrc = firstSet(
-		srcCand{regionFlag, "flag: --region"},
-		srcCand{getenv(envRegion), "env: " + envRegion},
-		srcCand{fileCfg.Region, "config file"},
+	r.region = firstSet(
+		sourced{regionFlag, "flag: --region"},
+		sourced{getenv(envRegion), "env: " + envRegion},
+		sourced{fileCfg.Region, "config file"},
 	)
-
-	// Base URL: EXTEND_BASE_URL > config file (no flag).
-	r.baseURL, r.baseURLSrc = firstSet(
-		srcCand{getenv(envBaseURL), "env: " + envBaseURL},
-		srcCand{fileCfg.BaseURL, "config file"},
+	// Base URL has no flag; EXTEND_BASE_URL > config file.
+	r.baseURL = firstSet(
+		sourced{getenv(envBaseURL), "env: " + envBaseURL},
+		sourced{fileCfg.BaseURL, "config file"},
 	)
-
-	// Workspace: --workspace > EXTEND_WORKSPACE_ID > config file.
-	r.workspaceID, r.workspaceSrc = firstSet(
-		srcCand{workspaceFlag, "flag: --workspace"},
-		srcCand{getenv(envWorkspaceID), "env: " + envWorkspaceID},
-		srcCand{fileCfg.WorkspaceID, "config file"},
+	r.workspaceID = firstSet(
+		sourced{workspaceFlag, "flag: --workspace"},
+		sourced{getenv(envWorkspaceID), "env: " + envWorkspaceID},
+		sourced{fileCfg.WorkspaceID, "config file"},
 	)
 	return r
 }
