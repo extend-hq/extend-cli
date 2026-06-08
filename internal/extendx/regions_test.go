@@ -41,23 +41,26 @@ func TestKnownRegions(t *testing.T) {
 	}
 }
 
-func TestRegionsMapIsExhaustive(t *testing.T) {
-	// Every region returned by KnownRegions must resolve via the
-	// Regions map. This catches drift between the two when a new
-	// region is added — KnownRegions is a manually-maintained list.
-	for _, r := range KnownRegions() {
-		if _, ok := Regions[r]; !ok {
-			t.Errorf("KnownRegions returned %q but Regions map has no entry", r)
-		}
-	}
-	// And vice versa: every map key must appear in KnownRegions.
+func TestAdvertisedRegionsAreKnownAndComplete(t *testing.T) {
 	known := map[string]bool{}
-	for _, r := range KnownRegions() {
-		known[r] = true
+	for _, id := range KnownRegions() {
+		known[id] = true
 	}
-	for r := range Regions {
-		if !known[r] {
-			t.Errorf("Regions has key %q but KnownRegions does not list it", r)
+	for _, r := range AdvertisedRegions() {
+		if !known[r.ID] {
+			t.Errorf("advertised region %q is not in KnownRegions", r.ID)
 		}
+		if r.APIURL == "" || r.Title == "" || r.Dashboard == "" {
+			t.Errorf("advertised region %q is missing display metadata: %+v", r.ID, r)
+		}
+	}
+	// us2 is accepted but must not be advertised to new users.
+	for _, r := range AdvertisedRegions() {
+		if r.ID == "us2" {
+			t.Error("us2 is deprecated and must not be advertised")
+		}
+	}
+	if _, ok := RegionBaseURL("us2"); !ok {
+		t.Error("us2 must still resolve for existing customers")
 	}
 }

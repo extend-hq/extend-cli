@@ -2,34 +2,55 @@ package extendx
 
 import extend "github.com/extend-hq/extend-go-sdk"
 
-// Regions maps the short region selector accepted via --region /
-// EXTEND_REGION to its base URL. We keep our own map (rather than
-// delegating to extend.Environments) so the CLI selector stays compact
-// (us|us2|eu) and stable across SDK regenerations that may rename
-// environment constants.
-var Regions = map[string]string{
-	"us":  extend.Environments.Production,    // https://api.extend.ai
-	"us2": extend.Environments.ProductionUs2, // https://api.us2.extend.app (legacy; not onboarded)
-	"eu":  extend.Environments.ProductionEu1, // https://api.eu1.extend.ai
+// Region is the metadata for one API region. Advertised regions are
+// offered to new users (help text, the setup wizard); non-advertised ones
+// (e.g. us2) are still accepted via --region / EXTEND_REGION for existing
+// deployments but no longer onboarded. Title/Dashboard are presentation
+// fields the wizard renders; keeping them here makes this the single
+// source of truth so adding a region is a one-line change.
+type Region struct {
+	ID         string
+	Title      string
+	APIURL     string
+	Dashboard  string
+	Advertised bool
 }
 
-func RegionBaseURL(region string) (string, bool) {
-	url, ok := Regions[region]
-	return url, ok
+// regions is the single source of truth; every accessor derives from it.
+var regions = []Region{
+	{ID: "us", Title: "United States", APIURL: extend.Environments.Production, Dashboard: "https://dashboard.extend.ai", Advertised: true},
+	{ID: "us2", Title: "United States (US2)", APIURL: extend.Environments.ProductionUs2, Dashboard: "https://dashboard.us2.extend.app", Advertised: false},
+	{ID: "eu", Title: "European Union", APIURL: extend.Environments.ProductionEu1, Dashboard: "https://dashboard.eu1.extend.ai", Advertised: true},
 }
 
-// KnownRegions are every region the CLI accepts via --region /
-// EXTEND_REGION. It includes legacy regions (us2) that are still honored
-// for existing deployments but no longer offered to new users; use it for
-// validation and error messages, not for presenting choices.
+// RegionBaseURL returns the API base URL for a region id.
+func RegionBaseURL(id string) (string, bool) {
+	for _, r := range regions {
+		if r.ID == id {
+			return r.APIURL, true
+		}
+	}
+	return "", false
+}
+
+// KnownRegions lists every accepted region id (advertised or not). Use it
+// for validation and error messages, not for presenting choices.
 func KnownRegions() []string {
-	return []string{"us", "us2", "eu"}
+	ids := make([]string, len(regions))
+	for i, r := range regions {
+		ids[i] = r.ID
+	}
+	return ids
 }
 
-// AdvertisedRegions are the regions offered to new users in help text and
-// the setup wizard. It is a subset of KnownRegions that omits legacy
-// regions (us2) so we don't present an option a new account can't select,
-// while KnownRegions still accepts them.
-func AdvertisedRegions() []string {
-	return []string{"us", "eu"}
+// AdvertisedRegions returns the regions offered to new users, in display
+// order. A subset of KnownRegions that omits legacy regions.
+func AdvertisedRegions() []Region {
+	var out []Region
+	for _, r := range regions {
+		if r.Advertised {
+			out = append(out, r)
+		}
+	}
+	return out
 }
