@@ -183,17 +183,18 @@ install_binary() {
   fi
 }
 
-install_skill() {
-  if [ "$SKIP_SKILL_INSTALL" = 1 ]; then
-    log "skipping agent skill install"
-    return
-  fi
-
-  if "$target" skill install; then
-    log "installed agent skill"
+run_setup() {
+  # Hand onboarding to the CLI: `extend setup` runs the interactive wizard
+  # when it has a terminal, otherwise prints setup guidance and installs the
+  # agent skill. Under `curl | sh` the script's stdin is the install script
+  # itself, so a human is detected via stdout being a terminal and the wizard
+  # is fed the controlling terminal (/dev/tty). EXTEND_SKIP_SKILL_INSTALL is
+  # forwarded so --skip-skill-install still suppresses the skill. Best-effort:
+  # a setup hiccup must not fail an otherwise-successful install.
+  if [ -t 1 ] && [ -r /dev/tty ]; then
+    EXTEND_SKIP_SKILL_INSTALL="$SKIP_SKILL_INSTALL" "$target" setup </dev/tty || true
   else
-    log "warning: failed to install agent skill"
-    log "run manually: $target skill install"
+    EXTEND_SKIP_SKILL_INSTALL="$SKIP_SKILL_INSTALL" "$target" setup || true
   fi
 }
 
@@ -223,7 +224,6 @@ chmod 755 "$tmp/extend" || die "failed to mark downloaded binary executable"
 "$tmp/extend" --version >/dev/null || die "downloaded binary failed to run"
 
 install_binary
-install_skill
 
 log "installed $tag to $target"
 case ":${PATH:-}:" in
@@ -233,3 +233,5 @@ case ":${PATH:-}:" in
     log 'add it with: export PATH="$HOME/.local/bin:$PATH"'
     ;;
 esac
+
+run_setup
