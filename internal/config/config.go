@@ -18,18 +18,85 @@ import (
 	"path/filepath"
 )
 
+// Version is the current on-disk schema version. Save stamps it into
+// every file it writes; Load tolerates older or absent versions and
+// migrates them in memory, so a future schema change (e.g. OAuth login)
+// is an additive bump rather than a breaking rewrite.
+const Version = 1
+
+// AuthMethod discriminates how the stored credential authenticates. Only
+// api_key exists today; oauth is reserved so adding interactive login is
+// a new variant on Auth rather than a schema break.
+type AuthMethod string
+
+const (
+	// AuthAPIKey is a static bearer API key (sk_...).
+	AuthAPIKey AuthMethod = "api_key"
+)
+
+// Auth is the credential block. It is a tagged union keyed by Type; the
+// fields populated depend on the method. Keeping it self-contained means
+// it can later move to an OS keychain without disturbing the rest of the
+// file.
+type Auth struct {
+	// Type selects which of the fields below are meaningful.
+	Type AuthMethod `json:"type"`
+	// APIKey is the bearer token for Type == AuthAPIKey.
+	APIKey string `json:"apiKey,omitempty"`
+	// OAuth fields are reserved for a future interactive-login flow:
+	// AccessToken/RefreshToken string and an expiry timestamp. They are
+	// intentionally omitted until that lands so the shape stays minimal.
+}
+
 // File is the on-disk configuration. Every field is optional; the zero
 // value means "fall back to the next source in the precedence chain".
 // Field names mirror the JSON written to disk so a human can hand-edit
 // the file if they prefer.
 type File struct {
-	// Region is the short region selector (us|us2|eu) used to pick the
-	// API base URL when neither --region nor EXTEND_REGION is set.
+	// Version is the schema version this file was written with. Stamped
+	// by Save; consulted by Load's migration path.
+	Version int `json:"version,omitempty"`
+	// Region is the short region selector (us|eu) used to pick the API
+	// base URL when neither --region nor EXTEND_REGION nor BaseURL is set.
 	Region string `json:"region,omitempty"`
-	// APIKey is the bearer token (sk_...). Stored only for the default
-	// environment; --env labels always resolve their key from the
-	// environment, never from this file.
-	APIKey string `json:"apiKey,omitempty"`
+	// BaseURL overrides the region-derived API URL. For self-hosted or
+	// staging endpoints; EXTEND_BASE_URL takes precedence over it.
+	BaseURL string `json:"baseUrl,omitempty"`
+	// WorkspaceID scopes an organization-level API key to a workspace;
+	// EXTEND_WORKSPACE_ID takes precedence over it.
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	// Auth is the credential block. A nil Auth means no stored credential.
+	Auth *Auth `json:"auth,omitempty"`
+}
+
+// APIKey returns the stored API key, or "" when the file holds no
+// credential or uses a non-key auth method. Callers that only understand
+// API-key auth use this accessor instead of reaching into Auth.
+func (f File) APIKey() string {
+	if f.Auth != nil && f.Auth.Type == AuthAPIKey {
+		return f.Auth.APIKey
+	}
+	return ""
+}
+
+// UnmarshalJSON parses the file and migrates the pre-version flat shape
+// — {"region":...,"apiKey":...} — by folding a top-level apiKey into the
+// auth block. New files never write a top-level apiKey; this only matters
+// for a config written by an earlier build.
+func (f *File) UnmarshalJSON(b []byte) error {
+	type fileAlias File // strips methods to avoid recursion
+	var raw struct {
+		fileAlias
+		LegacyAPIKey string `json:"apiKey"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*f = File(raw.fileAlias)
+	if f.Auth == nil && raw.LegacyAPIKey != "" {
+		f.Auth = &Auth{Type: AuthAPIKey, APIKey: raw.LegacyAPIKey}
+	}
+	return nil
 }
 
 // Path returns the configuration file location. It honors
@@ -89,6 +156,9 @@ func Save(f File) (string, error) {
 }
 
 func saveTo(path string, f File) error {
+	if f.Version == 0 {
+		f.Version = Version
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)

@@ -266,7 +266,7 @@ func resolveCredentials(envLabel, regionFlag string, getenv func(string) string,
 
 	key = getenv(apiKeyEnvVar(envLabel))
 	if key == "" {
-		key = fileCfg.APIKey
+		key = fileCfg.APIKey()
 	}
 
 	region = regionFlag

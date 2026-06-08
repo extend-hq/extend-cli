@@ -21,7 +21,7 @@ import (
 // setup` actually wire every command: flag/env win, the config file is
 // the lowest-priority fallback, and an --env label bypasses the file.
 func TestResolveCredentials(t *testing.T) {
-	file := config.File{Region: "eu", APIKey: "sk_file"}
+	file := config.File{Region: "eu", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
 	loadFile := func() (config.File, error) { return file, nil }
 	loadEmpty := func() (config.File, error) { return config.File{}, nil }
 
@@ -218,8 +218,14 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
 	}
-	if saved.Region != "eu" || saved.APIKey != "sk_live_123" {
+	if saved.Region != "eu" || saved.APIKey() != "sk_live_123" {
 		t.Errorf("saved config = %+v, want region=eu key=sk_live_123", saved)
+	}
+	if saved.Version != config.Version {
+		t.Errorf("saved version = %d, want %d", saved.Version, config.Version)
+	}
+	if saved.Auth == nil || saved.Auth.Type != config.AuthAPIKey {
+		t.Errorf("saved auth = %+v, want type=api_key", saved.Auth)
 	}
 }
 
