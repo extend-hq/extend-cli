@@ -156,7 +156,12 @@ func NewRoot() *cobra.Command {
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 		if s.key.val == "" {
-			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
+			keyEnv := apiKeyEnvVar(app.Env)
+			dash := "https://dashboard.extend.ai"
+			if d, ok := extendx.RegionDashboard(s.region.val); ok {
+				dash = d
+			}
+			return nil, fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
 		}
 
 		cfg := extendx.Config{
@@ -329,7 +334,7 @@ func resolveDebug(flag bool, getenv func(string) string) (on bool, src string) {
 	if flag {
 		return true, "flag: --debug"
 	}
-	if debugEnvTruthy(getenv(envDebug)) {
+	if envTruthy(getenv(envDebug)) {
 		return true, "env: " + envDebug
 	}
 	return false, "default"
@@ -365,11 +370,12 @@ func apiKeyEnvVar(envLabel string) string {
 	return "EXTEND_" + upper + "_API_KEY"
 }
 
-// debugEnvTruthy reports whether EXTEND_DEBUG should enable debug
-// logging. Treats "1", "true", "yes", "on" (case-insensitive) as on,
-// and the empty string or "0"/"false"/"no"/"off" as off. Anything else
-// is treated as on so a user-typed value isn't silently ignored.
-func debugEnvTruthy(s string) bool {
+// envTruthy reports whether a boolean-style env var is on. Treats "1",
+// "true", "yes", "on" (case-insensitive) as on, and the empty string or
+// "0"/"false"/"no"/"off" as off. Anything else is treated as on so a
+// user-typed value isn't silently ignored. Shared by EXTEND_DEBUG and
+// EXTEND_SKIP_SKILL_INSTALL.
+func envTruthy(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", "0", "false", "no", "off":
 		return false

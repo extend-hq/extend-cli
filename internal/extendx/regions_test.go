@@ -27,6 +27,24 @@ func TestRegionBaseURL_Unknown(t *testing.T) {
 	}
 }
 
+func TestRegionDashboard(t *testing.T) {
+	for _, region := range KnownRegions() {
+		url, ok := RegionDashboard(region)
+		if !ok {
+			t.Errorf("RegionDashboard(%q) = (_, false); want true", region)
+		}
+		if !strings.HasPrefix(url, "https://") {
+			t.Errorf("RegionDashboard(%q) = %q; expected https:// URL", region, url)
+		}
+	}
+	if _, ok := RegionDashboard("xx"); ok {
+		t.Error("RegionDashboard(xx) = (_, true); want false")
+	}
+	if _, ok := RegionDashboard(""); ok {
+		t.Error("RegionDashboard(\"\") = (_, true); want false")
+	}
+}
+
 func TestKnownRegions(t *testing.T) {
 	got := KnownRegions()
 	want := []string{"eu", "us", "us2"}

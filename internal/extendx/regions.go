@@ -33,6 +33,17 @@ func RegionBaseURL(id string) (string, bool) {
 	return "", false
 }
 
+// RegionDashboard returns the dashboard URL for a region id (advertised or
+// legacy), used to point users at the right place to create an API key.
+func RegionDashboard(id string) (string, bool) {
+	for _, r := range regions {
+		if r.ID == id {
+			return r.Dashboard, true
+		}
+	}
+	return "", false
+}
+
 // KnownRegions lists every accepted region id (advertised or not). Use it
 // for validation and error messages, not for presenting choices.
 func KnownRegions() []string {

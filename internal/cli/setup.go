@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	extend "github.com/extend-hq/extend-go-sdk"
 
+	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
@@ -24,7 +25,7 @@ import (
 func newSetupDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "setup",
-		Summary: "Interactive wizard to pick a region and save an API key",
+		Summary: "Set up the CLI (interactive wizard or non-interactive guidance)",
 		Triggers: []string{
 			"set up the extend cli with an api key",
 			"configure extend credentials and region",
@@ -32,13 +33,15 @@ func newSetupDoc(app *App) *CommandDoc {
 			"authenticate the cli by pasting an api key",
 			"connect the cli to my extend account",
 		},
-		WhenToUse: `Use for first-time setup or to switch regions/keys. The wizard lets you
-pick a region (US or EU), points you to the right dashboard to create an
-API key, then validates the key you paste and saves it so every command
+		WhenToUse: `Use for first-time setup or to switch regions/keys. In a terminal it runs
+an interactive wizard: pick a region (US or EU), open the right dashboard
+to create an API key, then paste it to validate and save so every command
 works without exporting environment variables.
 
-Prefer setting EXTEND_API_KEY directly in CI, scripts, or any
-non-interactive context — the wizard needs a terminal.`,
+Without a terminal — an installer, CI, or an agent — it can't prompt, so
+it instead confirms when credentials already resolve, prints setup
+guidance when they don't, and installs the agent skill. For fully
+unattended use set EXTEND_API_KEY directly.`,
 		Details: `Walks through these steps:
 
   1. Region    — US (api.extend.ai) or EU (api.eu1.extend.ai).
@@ -54,12 +57,20 @@ non-interactive context — the wizard needs a terminal.`,
 The configuration is saved to ~/.config/extend/config.json (honoring
 XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
 source of the API key, region, base URL, and workspace: command flags and
-environment variables still win (flag > env > config file > default).`,
+environment variables still win (flag > env > config file > default).
+
+Without a TTY, setup does not prompt. It prints setup guidance to stdout
+(the env vars to set and the dashboard URL per region) when no API key
+resolves, says nothing about credentials when one already does, and
+installs the agent skill (idempotent) unless EXTEND_SKIP_SKILL_INSTALL is
+set. It exits 0 in both cases, so an installer can delegate to it safely.`,
 		Examples: []Example{
 			{Label: "Launch the setup wizard", Cmd: "extend setup"},
+			{Label: "Non-interactive (installer/CI), skip the skill", Cmd: "EXTEND_SKIP_SKILL_INSTALL=1 extend setup"},
 		},
 		Gotchas: []string{
-			"The wizard is interactive and requires a terminal; in CI or scripts set EXTEND_API_KEY (and EXTEND_REGION, plus EXTEND_WORKSPACE_ID for org keys) directly.",
+			"Without a terminal the wizard does not run: setup prints setup guidance (or confirms existing credentials), installs the agent skill, and exits 0. Set EXTEND_API_KEY (and EXTEND_REGION, plus EXTEND_WORKSPACE_ID for org keys) for unattended use.",
+			"In non-interactive mode the agent skill is installed automatically; set EXTEND_SKIP_SKILL_INSTALL=1 to skip it.",
 			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
 			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
 			"The key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
@@ -75,7 +86,7 @@ environment variables still win (flag > env > config file > default).`,
 
 func runSetup(ctx context.Context, app *App) error {
 	if !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
-		return errors.New("setup is interactive and needs a terminal; set EXTEND_API_KEY (and EXTEND_REGION) directly, or run 'extend setup' in a terminal")
+		return runSetupNonInteractive(app)
 	}
 
 	pal := paletteFor(app.IO)
@@ -117,16 +128,78 @@ func runSetup(ctx context.Context, app *App) error {
 	}
 
 	if m.result.installSkill {
-		if path, err := installSkillFile(app); err != nil {
-			fmt.Fprintf(app.IO.ErrOut, "%s Could not install the agent skill: %v\n", pal.Yellow("!"), err)
-		} else {
-			fmt.Fprintf(app.IO.ErrOut, "%s Installed the Extend agent skill to %s\n", pal.Green("✓"), path)
-			linkSkillAndReport(app, filepath.Dir(path))
-		}
+		installSkillAndReport(app)
 	}
 
 	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend runs list"))
 	return nil
+}
+
+// runSetupNonInteractive is the fallback when `extend setup` runs without a
+// terminal — an installer, CI, or an agent. It can't prompt, so it does the
+// useful subset: confirm on stderr when credentials already resolve, print
+// copy-pasteable setup guidance to stdout when they don't, and install the
+// agent skill (idempotent) unless EXTEND_SKIP_SKILL_INSTALL is set. It
+// always exits 0 — "not configured yet" is guidance, not a failure — so an
+// installer that delegates here never fails the install.
+func runSetupNonInteractive(app *App) error {
+	pal := paletteFor(app.IO)
+	s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+	if s.key.val == "" {
+		printSetupGuidance(app)
+	} else {
+		region := s.region.val
+		if region == "" {
+			region = "us (default)"
+		}
+		fmt.Fprintf(app.IO.ErrOut, "%s Extend CLI is already configured (region %s, API key from %s).\n",
+			pal.Green("✓"), region, s.key.src)
+	}
+
+	if envTruthy(os.Getenv(envSkipSkillInstall)) {
+		fmt.Fprintf(app.IO.ErrOut, "%s Skipping agent skill install (%s set).\n", pal.Yellow("!"), envSkipSkillInstall)
+		return nil
+	}
+	installSkillAndReport(app)
+	return nil
+}
+
+// printSetupGuidance writes copy-pasteable configuration instructions to
+// stdout — the relayable channel an agent or installer captures. Only the
+// instructions go to stdout; status/skill chatter goes to stderr.
+func printSetupGuidance(app *App) {
+	out := app.IO.Out
+	fmt.Fprintln(out, "The Extend CLI is installed but not configured.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Set an API key to get started:")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "    export %s=sk_...\n", envAPIKey)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Create a key in the dashboard for your region:")
+	for _, r := range extendx.AdvertisedRegions() {
+		fmt.Fprintf(out, "    - %-15s %s\n", r.Title, r.Dashboard)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "For an organization-scoped key, also set %s.\n", envWorkspaceID)
+	fmt.Fprintf(out, "To use the EU region, also set %s=eu.\n", envRegion)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Or run the interactive wizard in a terminal:  extend setup")
+	fmt.Fprintln(out, "Check what's resolved at any time with:       extend config")
+}
+
+// installSkillAndReport writes the agent skill to its default location,
+// symlinks it into ~/.claude/skills, and reports each step to stderr.
+// Best-effort: a write failure is a warning, not an error. Shared by the
+// wizard and the non-interactive path.
+func installSkillAndReport(app *App) {
+	pal := paletteFor(app.IO)
+	path, err := installSkillFile(app)
+	if err != nil {
+		fmt.Fprintf(app.IO.ErrOut, "%s Could not install the agent skill: %v\n", pal.Yellow("!"), err)
+		return
+	}
+	fmt.Fprintf(app.IO.ErrOut, "%s Installed the Extend agent skill to %s\n", pal.Green("✓"), path)
+	linkSkillAndReport(app, filepath.Dir(path))
 }
 
 // installSkillFile renders the SKILL.md and writes it to the default
