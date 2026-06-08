@@ -1573,7 +1573,7 @@ func (m setupModel) renderSkillPrompt() string {
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
 	b.WriteString("\n")
 	b.WriteString(stDim.Render("  Teaches coding agents (Claude Code, Codex, OpenCode, …) how to") + "\n")
-	b.WriteString(stDim.Render("  drive the Extend CLI. Writes ~/.agents/skills/extend/SKILL.md.") + "\n\n")
+	b.WriteString(stDim.Render("  drive the Extend CLI.") + "\n\n")
 
 	choices := []string{"Yes, install it", "No thanks"}
 	for i, c := range choices {
