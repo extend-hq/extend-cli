@@ -732,6 +732,19 @@ func linkSkillIntoClaude(skillDir string) (string, error) {
 	return link, nil
 }
 
+// linkSkillAndReport symlinks an installed skill dir into ~/.claude/skills
+// and prints the outcome to stderr. Best-effort: a failure (no symlink
+// support, or a real dir already there) is a warning, not an error. Shared
+// by `extend skill install` and the setup wizard.
+func linkSkillAndReport(app *App, skillDir string) {
+	pal := paletteFor(app.IO)
+	if link, err := linkSkillIntoClaude(skillDir); err != nil {
+		fmt.Fprintf(app.IO.ErrOut, "%s Skipped ~/.claude/skills link: %v\n", pal.Yellow("!"), err)
+	} else {
+		fmt.Fprintf(app.IO.ErrOut, "%s Linked %s -> %s\n", pal.Green("✓"), link, skillDir)
+	}
+}
+
 func newSkillInstallDoc(app *App) *CommandDoc {
 	var target string
 	return &CommandDoc{
@@ -808,16 +821,10 @@ An existing real directory at that path is left untouched.`,
 			fmt.Fprintf(app.IO.ErrOut, "%s Wrote %d bytes to %s\n", pal.Green("✓"), len(body), path)
 
 			// Claude Code reads ~/.claude/skills, not the cross-client
-			// ~/.agents/skills default, so symlink the skill dir there on a
-			// default install. Best-effort: a failure (no symlink support,
-			// or a real dir already present) is a warning, not an error.
+			// ~/.agents/skills default, so also symlink the skill dir there
+			// on a default install (a custom --target is written verbatim).
 			if target == "" {
-				skillDir := filepath.Dir(path)
-				if link, err := linkSkillIntoClaude(skillDir); err != nil {
-					fmt.Fprintf(app.IO.ErrOut, "%s Skipped ~/.claude/skills link: %v\n", pal.Yellow("!"), err)
-				} else {
-					fmt.Fprintf(app.IO.ErrOut, "%s Linked %s -> %s\n", pal.Green("✓"), link, skillDir)
-				}
+				linkSkillAndReport(app, filepath.Dir(path))
 			}
 			return nil
 		},
