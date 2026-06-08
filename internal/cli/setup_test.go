@@ -19,7 +19,8 @@ import (
 
 // TestResolveCredentials pins the precedence chain that makes `extend
 // setup` actually wire every command: flag/env win, the config file is
-// the lowest-priority fallback, and an --env label bypasses the file.
+// the lowest-priority fallback, and an --env label scopes only the API
+// key (the file's region still applies under any label).
 func TestResolveCredentials(t *testing.T) {
 	file := config.File{Region: "eu", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
 	loadFile := func() (config.File, error) { return file, nil }
@@ -68,12 +69,20 @@ func TestResolveCredentials(t *testing.T) {
 			wantRegion: "us",
 		},
 		{
-			name:       "env label bypasses config file",
+			name:       "env label scopes the key but file region still applies",
 			envLabel:   "test",
 			getenv:     env(map[string]string{"EXTEND_TEST_API_KEY": "sk_test"}),
-			load:       loadFile, // must be ignored
-			wantKey:    "sk_test",
-			wantRegion: "", // file region ignored, no env/flag
+			load:       loadFile,
+			wantKey:    "sk_test", // labeled key from env, never the file's default key
+			wantRegion: "eu",      // region is not env-specific; file value still used
+		},
+		{
+			name:       "env label with no labeled key does not borrow the file's default key",
+			envLabel:   "test",
+			getenv:     env(map[string]string{}), // EXTEND_TEST_API_KEY unset
+			load:       loadFile,
+			wantKey:    "",   // file's default key must not leak into a labeled env
+			wantRegion: "eu", // region still applies
 		},
 		{
 			name:       "nothing set yields empty key",

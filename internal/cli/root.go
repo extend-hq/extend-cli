@@ -77,7 +77,7 @@ points you to the dashboard to create a key, validates it, and saves it to
 Environment variables:
   EXTEND_API_KEY         API key (required)
   EXTEND_BASE_URL        Override base URL (e.g. https://api.extend.ai)
-  EXTEND_REGION          Region: us|us2|eu (ignored if EXTEND_BASE_URL is set)
+  EXTEND_REGION          Region: us|eu (ignored if EXTEND_BASE_URL is set)
   EXTEND_WORKSPACE_ID    Workspace ID for org-scoped API keys
   EXTEND_API_VERSION     Pin the API version sent with each request
   EXTEND_HTTP_TIMEOUT    Per-HTTP-request timeout, e.g. 60s. Distinct
@@ -147,7 +147,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (or EXTEND_OUTPUT; default: command-specific)")
 	root.PersistentFlags().StringVar(&app.JQ, "jq", "", "Filter output with a jq expression")
 	root.PersistentFlags().StringVar(&app.Workspace, "workspace", "", "Workspace ID for org-scoped API keys (or EXTEND_WORKSPACE_ID)")
-	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|us2|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
+	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 	root.PersistentFlags().BoolVar(&app.Debug, "debug", false, "Log every HTTP request to stderr (or EXTEND_DEBUG=1)")
 	root.PersistentFlags().StringVar(&app.Env, "env", "", "Environment label that selects the API key: e.g. --env test reads EXTEND_TEST_API_KEY instead of EXTEND_API_KEY (or EXTEND_ENV)")
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
@@ -252,20 +252,22 @@ func applyEnvDefaults(app *App) {
 }
 
 // resolveCredentials resolves the API key and region using the
-// precedence: flag/env > config file > default. The persisted config file
-// (written by `extend setup`) is consulted only for the default
-// environment — an --env label selects an alternate key that must come
-// from the environment, never from the shared file. A malformed or
-// unreadable file is ignored best-effort so a typo can't break every
-// command. getenv and loadFile are injected for testability.
+// precedence: flag/env > config file > default. Only the API *key* is
+// environment-specific: an --env label selects an alternate key that must
+// come from the environment (EXTEND_<LABEL>_API_KEY), never from the
+// shared file, since the file holds only the default environment's key.
+// Routing settings (region, and later base URL / workspace) are not
+// env-label-specific, so the file's values still apply under any --env.
+// A malformed or unreadable file is ignored best-effort so a typo can't
+// break every command. getenv and loadFile are injected for testability.
 func resolveCredentials(envLabel, regionFlag string, getenv func(string) string, loadFile func() (config.File, error)) (key, region string) {
 	var fileCfg config.File
-	if envLabel == "" && loadFile != nil {
+	if loadFile != nil {
 		fileCfg, _ = loadFile()
 	}
 
 	key = getenv(apiKeyEnvVar(envLabel))
-	if key == "" {
+	if key == "" && envLabel == "" {
 		key = fileCfg.APIKey()
 	}
 
