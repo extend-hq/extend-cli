@@ -188,9 +188,22 @@ type regionChoice struct {
 	dashboard string
 }
 
-var setupRegionChoices = []regionChoice{
-	{id: "us", title: "United States", api: "api.extend.ai", dashboard: "https://dashboard.extend.ai"},
-	{id: "eu", title: "European Union", api: "api.eu1.extend.ai", dashboard: "https://dashboard.eu1.extend.ai"},
+// setupRegionChoices is the wizard's view model, derived from the single
+// region table so adding/removing a region is a one-line change there.
+var setupRegionChoices = advertisedChoices()
+
+func advertisedChoices() []regionChoice {
+	rs := extendx.AdvertisedRegions()
+	choices := make([]regionChoice, len(rs))
+	for i, r := range rs {
+		choices[i] = regionChoice{
+			id:        r.ID,
+			title:     r.Title,
+			api:       strings.TrimPrefix(r.APIURL, "https://"),
+			dashboard: r.Dashboard,
+		}
+	}
+	return choices
 }
 
 // setupValidator verifies a key against a region, optionally scoped to a

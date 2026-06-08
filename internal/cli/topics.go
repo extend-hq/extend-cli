@@ -102,13 +102,12 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 		fmt.Fprintf(&b, "  %-*s  %s\n", maxNameLen, ev.Name, ev.Description)
 	}
 	b.WriteString("\nRegions:\n\n")
-	for _, region := range extendx.AdvertisedRegions() {
-		url, _ := extendx.RegionBaseURL(region)
+	for _, r := range extendx.AdvertisedRegions() {
 		suffix := ""
-		if url == extend.Environments.Production {
+		if r.APIURL == extend.Environments.Production {
 			suffix = " (default)"
 		}
-		fmt.Fprintf(&b, "  %-4s  %s%s\n", region, url, suffix)
+		fmt.Fprintf(&b, "  %-4s  %s%s\n", r.ID, r.APIURL, suffix)
 	}
 	b.WriteString("\nPrecedence:\n\n")
 	b.WriteString("  --workspace flag     >  EXTEND_WORKSPACE_ID\n")
