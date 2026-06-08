@@ -283,6 +283,77 @@ func TestRunSetupNonInteractive_InstallsSkill(t *testing.T) {
 	}
 }
 
+// TestRunSetupNonInteractive_ConfiguredCustomBaseURL: when a custom base
+// URL determines routing, the confirmation reports it instead of claiming
+// the default region.
+func TestRunSetupNonInteractive_ConfiguredCustomBaseURL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envAPIKey, "sk_x")
+	t.Setenv(envRegion, "")
+	t.Setenv(envBaseURL, "https://self.example")
+	t.Setenv(envSkipSkillInstall, "1")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	if err := runSetupNonInteractive(ta.app); err != nil {
+		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
+	}
+	errs := ta.errOut.String()
+	if !strings.Contains(errs, "base URL https://self.example") {
+		t.Errorf("stderr should report the custom base URL; got:\n%s", errs)
+	}
+	if strings.Contains(errs, "region us (default)") {
+		t.Errorf("must not claim default region when a base URL is set; got:\n%s", errs)
+	}
+}
+
+// TestForcedNonInteractive pins the TTY-override escape hatches that keep
+// the wizard from blocking on a human-less pty.
+func TestForcedNonInteractive(t *testing.T) {
+	env := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	cases := []struct {
+		name string
+		m    map[string]string
+		want bool
+	}{
+		{"nothing set", nil, false},
+		{"EXTEND_NONINTERACTIVE truthy", map[string]string{"EXTEND_NONINTERACTIVE": "1"}, true},
+		{"CI truthy", map[string]string{"CI": "true"}, true},
+		{"CI=0 is off", map[string]string{"CI": "0"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := forcedNonInteractive(env(tc.m)); got != tc.want {
+				t.Errorf("forcedNonInteractive = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSetupModel_SkipSkillSkipsPrompt: with skipSkill set (from
+// EXTEND_SKIP_SKILL_INSTALL), a successful validation finishes without the
+// skill prompt and records installSkill=false.
+func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "eu", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[1] // eu
+	m.apiKey = "sk_live_123"
+	m.skipSkill = true
+	m.step = stepValidating
+
+	m = drive(t, m, validatedMsg{err: nil})
+	if m.step != stepDone {
+		t.Fatalf("step = %v, want stepDone (skill prompt skipped)", m.step)
+	}
+	if m.result == nil || m.result.installSkill {
+		t.Errorf("installSkill should be false when skipSkill is set; result = %+v", m.result)
+	}
+}
+
 // TestValidateAPIKey_OK confirms a 2xx from the workflows list endpoint
 // is treated as a valid key.
 func TestValidateAPIKey_OK(t *testing.T) {

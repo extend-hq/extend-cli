@@ -85,13 +85,14 @@ set. It exits 0 in both cases, so an installer can delegate to it safely.`,
 }
 
 func runSetup(ctx context.Context, app *App) error {
-	if !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
+	if forcedNonInteractive(os.Getenv) || !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
 		return runSetupNonInteractive(app)
 	}
 
 	pal := paletteFor(app.IO)
 
 	model := newSetupModel(ctx, app.IO.ColorEnabled(), app.Region, defaultSetupValidator)
+	model.skipSkill = envTruthy(os.Getenv(envSkipSkillInstall))
 	// v2 moved alt-screen and mouse-mode out of program options and into
 	// View() fields; they're set per-frame in setupModel.View().
 	final, err := tea.NewProgram(model, tea.WithContext(ctx)).Run()
@@ -148,12 +149,16 @@ func runSetupNonInteractive(app *App) error {
 	if s.key.val == "" {
 		printSetupGuidance(app)
 	} else {
-		region := s.region.val
-		if region == "" {
-			region = "us (default)"
+		// A custom base URL overrides the region, so report whichever
+		// actually determines where requests go.
+		where := "region " + s.region.val
+		if s.baseURL.val != "" {
+			where = "base URL " + s.baseURL.val
+		} else if s.region.val == "" {
+			where = "region us (default)"
 		}
-		fmt.Fprintf(app.IO.ErrOut, "%s Extend CLI is already configured (region %s, API key from %s).\n",
-			pal.Green("✓"), region, s.key.src)
+		fmt.Fprintf(app.IO.ErrOut, "%s Extend CLI is already configured (%s, API key from %s).\n",
+			pal.Green("✓"), where, s.key.src)
 	}
 
 	if envTruthy(os.Getenv(envSkipSkillInstall)) {
@@ -162,6 +167,12 @@ func runSetupNonInteractive(app *App) error {
 	}
 	installSkillAndReport(app)
 	return nil
+}
+
+// forcedNonInteractive forces the non-interactive path even with a TTY, so
+// the wizard can't block on a pty with no human (docker -t | sh, some CI).
+func forcedNonInteractive(getenv func(string) string) bool {
+	return envTruthy(getenv(envNonInteractive)) || envTruthy(getenv("CI"))
 }
 
 // printSetupGuidance writes copy-pasteable configuration instructions to
