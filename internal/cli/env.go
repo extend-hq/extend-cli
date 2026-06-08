@@ -43,7 +43,7 @@ const defaultAPIVersion = "2026-02-09"
 var envVars = []envVarSpec{
 	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for any command that calls the API."},
 	{Name: envBaseURL, Description: "Override base URL. Wins over EXTEND_REGION."},
-	{Name: envRegion, Description: "Region: us|us2|eu. Selects the regional API endpoint."},
+	{Name: envRegion, Description: "Region: us|eu. Selects the regional API endpoint."},
 	{Name: envWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
 	{Name: envAPIVersion, Description: "Pin the API version sent with each request. Defaults to " + defaultAPIVersion + "."},
 	{Name: envHTTPTimeout, Description: "Per-HTTP-request timeout (e.g. 60s, 2m). Applies to each API call individually; uploads use a separate untimed client. Distinct from per-command --timeout (overall wait). Defaults to 60s."},

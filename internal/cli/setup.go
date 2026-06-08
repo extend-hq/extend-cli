@@ -55,7 +55,7 @@ still win (flag > env > config file > default).`,
 		},
 		Gotchas: []string{
 			"The wizard is interactive and requires a terminal; in CI or scripts set EXTEND_API_KEY (and EXTEND_REGION) directly.",
-			"The saved key is consulted only for the default environment; with --env <label> set EXTEND_<LABEL>_API_KEY yourself.",
+			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region still applies under any --env.",
 			"The key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
 		},
 		SeeAlso: []string{"auth"},
