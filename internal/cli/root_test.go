@@ -1,9 +1,36 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestUnconfiguredKeyError pins the contract of the "no API key" error:
+// it names the right key env var (incl. an --env label), points at
+// `extend setup`, and links the dashboard for the resolved region, with
+// US as the fallback for an unset or unknown region.
+func TestUnconfiguredKeyError(t *testing.T) {
+	cases := []struct {
+		name, keyEnv, region, wantDash string
+	}{
+		{"unset region → US", "EXTEND_API_KEY", "", "https://dashboard.extend.ai"},
+		{"eu", "EXTEND_API_KEY", "eu", "https://dashboard.eu1.extend.ai"},
+		{"legacy us2 still resolves", "EXTEND_API_KEY", "us2", "https://dashboard.us2.extend.app"},
+		{"unknown → US fallback", "EXTEND_API_KEY", "xx", "https://dashboard.extend.ai"},
+		{"env-label key name", "EXTEND_TEST_API_KEY", "", "https://dashboard.extend.ai"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := unconfiguredKeyError(tc.keyEnv, tc.region).Error()
+			for _, want := range []string{tc.keyEnv, tc.wantDash, "extend setup"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q missing %q", msg, want)
+				}
+			}
+		})
+	}
+}
 
 // TestHTTPTimeoutFlagRegistered checks the persistent --http-timeout
 // flag is wired on the production root. Without it, `--http-timeout`

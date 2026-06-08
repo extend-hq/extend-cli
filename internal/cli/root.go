@@ -156,12 +156,7 @@ func NewRoot() *cobra.Command {
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 		if s.key.val == "" {
-			keyEnv := apiKeyEnvVar(app.Env)
-			dash := "https://dashboard.extend.ai"
-			if d, ok := extendx.RegionDashboard(s.region.val); ok {
-				dash = d
-			}
-			return nil, fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
+			return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val)
 		}
 
 		cfg := extendx.Config{
@@ -368,6 +363,17 @@ func apiKeyEnvVar(envLabel string) string {
 		return envAPIKey
 	}
 	return "EXTEND_" + upper + "_API_KEY"
+}
+
+// unconfiguredKeyError is the "no API key" error commands return when none
+// resolves: it names the key env var, points at `extend setup`, and links
+// the resolved region's dashboard (US for unset/unknown).
+func unconfiguredKeyError(keyEnv, region string) error {
+	dash := "https://dashboard.extend.ai"
+	if d, ok := extendx.RegionDashboard(region); ok {
+		dash = d
+	}
+	return fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
 }
 
 // envTruthy reports whether a boolean-style env var is on. Treats "1",

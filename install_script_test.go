@@ -66,8 +66,52 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	if got, want := strings.TrimSpace(string(versionOut)), "extend test v9.9.9"; got != want {
 		t.Fatalf("installed binary output = %q, want %q", got, want)
 	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup" {
-		t.Fatalf("setup log = %q, want setup", got)
+	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup skip=0" {
+		t.Fatalf("setup log = %q, want \"setup skip=0\" (delegated to setup, skip knob forwarded)", got)
+	}
+}
+
+// TestInstallScriptForwardsSkipSkill confirms --skip-skill-install reaches
+// the CLI as EXTEND_SKIP_SKILL_INSTALL=1 (the CLI, not the script, now owns
+// suppressing the skill).
+func TestInstallScriptForwardsSkipSkill(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("install.sh targets Unix-like platforms")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required to run install.sh")
+	}
+
+	tmp := t.TempDir()
+	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
+	binDir := filepath.Join(tmp, "bin")
+	fakePath := filepath.Join(tmp, "fakebin")
+	setupLog := filepath.Join(tmp, "setup.log")
+	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
+	mustMkdirAll(t, binDir)
+	mustMkdirAll(t, fakePath)
+
+	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
+	archivePath := filepath.Join(releaseDir, archiveName)
+	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
+	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, officialDir, archiveName, archivePath, false)
+	writeFakeCurl(t, fakePath)
+
+	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir, "--skip-skill-install")
+	cmd.Env = append(os.Environ(),
+		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"EXTEND_FAKE_SETUP_LOG="+setupLog,
+		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
+		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup skip=1" {
+		t.Fatalf("setup log = %q, want \"setup skip=1\"", got)
 	}
 }
 
@@ -137,7 +181,7 @@ if [ "${1:-}" = "--version" ]; then
   exit 0
 fi
 if [ "${1:-}" = "setup" ]; then
-  printf '%s\n' "$*" >> "${EXTEND_FAKE_SETUP_LOG:?}"
+  printf '%s skip=%s\n' "$*" "${EXTEND_SKIP_SKILL_INSTALL-unset}" >> "${EXTEND_FAKE_SETUP_LOG:?}"
   exit 0
 fi
 printf '%s\n' 'extend test'
