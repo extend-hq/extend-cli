@@ -157,6 +157,14 @@ func AsAPIError(err error) (*APIError, bool) {
 		return nil, false
 	}
 
+	// An already-extracted *APIError (or one wrapped in the chain)
+	// passes through unchanged — our own extractor should recognize our
+	// own type, which also lets callers and tests construct one directly.
+	var ownErr *APIError
+	if errors.As(err, &ownErr) {
+		return ownErr, true
+	}
+
 	// Try the typed wrappers first: they carry a fully-parsed
 	// *extend.APIError body for free.
 	if apiErr, ok := extractTypedBody(err); ok {

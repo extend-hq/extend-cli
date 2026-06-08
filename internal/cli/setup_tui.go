@@ -26,6 +26,7 @@ const (
 	stepRegion setupStep = iota
 	stepKey
 	stepValidating
+	stepWorkspace
 	stepSkill
 	stepDone
 )
@@ -191,18 +192,24 @@ var setupRegionChoices = []regionChoice{
 	{id: "eu", title: "European Union", api: "api.eu1.extend.ai", dashboard: "https://dashboard.eu1.extend.ai"},
 }
 
-// setupValidator verifies a key against a region. Injected so tests can
-// drive the model without real network calls.
-type setupValidator func(ctx context.Context, region, key string) error
+// setupValidator verifies a key against a region, optionally scoped to a
+// workspace (empty for the common workspace-scoped key). Injected so tests
+// can drive the model without real network calls.
+type setupValidator func(ctx context.Context, region, key, workspaceID string) error
 
 // errEmptyKey is shown inline when the user submits an empty key.
 var errEmptyKey = errors.New("please paste an API key")
 
+// errEmptyWorkspace is shown inline when the user submits an empty
+// workspace ID at the (org-key-only) workspace step.
+var errEmptyWorkspace = errors.New("please paste a workspace id")
+
 type setupResult struct {
-	region  regionChoice
-	apiKey  string
-	path    string
-	saveErr error
+	region      regionChoice
+	apiKey      string
+	workspaceID string // set only when an org key required one
+	path        string
+	saveErr     error
 
 	// installSkill records the user's choice to write the agent SKILL.md.
 	// skillPath/skillErr are filled in by runSetup after it performs the
@@ -241,14 +248,16 @@ type setupModel struct {
 	colorOn  bool
 	validate setupValidator
 
-	step   setupStep
-	cursor int
-	region regionChoice
-	apiKey string
+	step        setupStep
+	cursor      int
+	region      regionChoice
+	apiKey      string
+	workspaceID string // collected only when an org key needs one
 
-	input  textinput.Model
-	spin   spinner.Model
-	valErr error
+	input   textinput.Model
+	wsInput textinput.Model // workspace ID entry (org keys only)
+	spin    spinner.Model
+	valErr  error
 
 	// Logo animation state.
 	styles  []lipgloss.Style
@@ -305,6 +314,12 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 	ti.CharLimit = 256
 	ti.SetWidth(46)
 
+	wsi := textinput.New()
+	wsi.Placeholder = "ws_..."
+	wsi.Prompt = "› "
+	wsi.CharLimit = 256
+	wsi.SetWidth(46)
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	if colorOn {
@@ -325,6 +340,7 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 		step:     stepRegion,
 		cursor:   cursor,
 		input:    ti,
+		wsInput:  wsi,
 		spin:     sp,
 	}
 	if colorOn {
@@ -835,15 +851,33 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case validatedMsg:
 		if msg.err != nil {
+			// An organization API key needs a workspace: collect one and
+			// retry instead of dead-ending on the key step. The guard on
+			// workspaceID prevents looping if the prompt didn't help.
+			if m.workspaceID == "" && needsWorkspacePrompt(msg.err) {
+				m.valErr = nil
+				m.step = stepWorkspace
+				return m, m.wsInput.Focus()
+			}
+			// A wrong workspace ID (404) sends them back to fix it.
+			if m.workspaceID != "" && isWorkspaceNotFound(msg.err) {
+				m.valErr = msg.err
+				m.step = stepWorkspace
+				return m, m.wsInput.Focus()
+			}
 			m.valErr = msg.err
 			m.step = stepKey
 			return m, m.input.Focus()
 		}
-		path, err := config.Save(config.File{
+		file := config.File{
 			Region: m.region.id,
 			Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
-		})
-		m.result = &setupResult{region: m.region, apiKey: m.apiKey, path: path, saveErr: err}
+		}
+		if m.workspaceID != "" {
+			file.WorkspaceID = m.workspaceID
+		}
+		path, err := config.Save(file)
+		m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID, path: path, saveErr: err}
 		if err != nil {
 			// Couldn't save — finish so runSetup reports the error.
 			m.step = stepDone
@@ -865,9 +899,9 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
-		// `!` chomps and `@` scans, from anywhere except the API-key text
-		// input (where they're legitimate characters).
-		if m.step != stepKey && !m.logoBusy() {
+		// `!` chomps and `@` scans, from anywhere except the text inputs
+		// (where they're legitimate characters).
+		if m.step != stepKey && m.step != stepWorkspace && !m.logoBusy() {
 			switch msg.String() {
 			case "!":
 				m.startChomp()
@@ -883,6 +917,11 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.step == stepKey {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	if m.step == stepWorkspace {
+		var cmd tea.Cmd
+		m.wsInput, cmd = m.wsInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -945,6 +984,31 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case stepValidating:
 		return m, nil
 
+	case stepWorkspace:
+		switch msg.String() {
+		case "esc":
+			// Back to the key step to re-enter or replace the key.
+			m.step = stepKey
+			m.valErr = nil
+			m.wsInput.Blur()
+			return m, m.input.Focus()
+		case "enter":
+			ws := strings.TrimSpace(m.wsInput.Value())
+			if ws == "" {
+				m.valErr = errEmptyWorkspace
+				return m, nil
+			}
+			m.workspaceID = ws
+			m.valErr = nil
+			m.step = stepValidating
+			m.wsInput.Blur()
+			return m, tea.Batch(m.spin.Tick, m.validateCmd())
+		default:
+			var cmd tea.Cmd
+			m.wsInput, cmd = m.wsInput.Update(msg)
+			return m, cmd
+		}
+
 	case stepSkill:
 		switch msg.String() {
 		case "up", "k", "down", "j", "left", "right", "h", "l", "tab":
@@ -979,9 +1043,10 @@ func (m setupModel) validateCmd() tea.Cmd {
 	ctx := m.ctx
 	region := m.region.id
 	key := m.apiKey
+	workspace := m.workspaceID
 	validate := m.validate
 	return func() tea.Msg {
-		return validatedMsg{err: validate(ctx, region, key)}
+		return validatedMsg{err: validate(ctx, region, key, workspace)}
 	}
 }
 
@@ -1439,6 +1504,8 @@ func (m setupModel) renderStep() string {
 		return m.renderKey()
 	case stepValidating:
 		return m.renderValidating()
+	case stepWorkspace:
+		return m.renderWorkspace()
 	case stepSkill:
 		return m.renderSkillPrompt()
 	}
@@ -1485,6 +1552,20 @@ func (m setupModel) renderValidating() string {
 	return b.String()
 }
 
+func (m setupModel) renderWorkspace() string {
+	var b strings.Builder
+	b.WriteString(stHeading.Render("This looks like an organization API key."))
+	b.WriteString("\n\n")
+	b.WriteString("Organization keys are scoped to a workspace. Paste the\n")
+	b.WriteString("workspace ID (find it in your dashboard):\n")
+	fmt.Fprintf(&b, "  %s\n\n", stLink.Render(m.region.dashboard))
+	b.WriteString(m.wsInput.View() + "\n")
+	if m.valErr != nil {
+		b.WriteString("\n" + stBad.Render("✗ "+setupValidationMessage(m.valErr)))
+	}
+	return b.String()
+}
+
 func (m setupModel) renderSkillPrompt() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s API key validated.\n\n", stGood.Render("✓"))
@@ -1514,6 +1595,8 @@ func (m setupModel) footerHint() string {
 		return "enter validate · esc back · ctrl+c quit"
 	case stepValidating:
 		return "please wait…"
+	case stepWorkspace:
+		return "enter validate · esc back · ctrl+c quit"
 	case stepSkill:
 		return "↑/↓ choose · y/n · enter confirm"
 	}
@@ -1529,12 +1612,19 @@ func setupValidationMessage(err error) string {
 	if errors.Is(err, errEmptyKey) {
 		return "Please paste an API key."
 	}
+	if errors.Is(err, errEmptyWorkspace) {
+		return "Please paste a workspace ID."
+	}
 	if apiErr, ok := apiErrorStatus(err); ok {
 		switch apiErr {
+		case 400:
+			return "Bad request (400). Check the workspace ID and try again."
 		case 401:
 			return "Key rejected (401). Double-check you copied the whole key."
 		case 403:
-			return "Forbidden (403). If this is an org key, it may need a workspace (EXTEND_WORKSPACE_ID)."
+			return "Forbidden (403). This key may not have access to that workspace or resource."
+		case 404:
+			return "Workspace not found (404). Double-check the workspace ID."
 		}
 	}
 	return err.Error()
