@@ -121,6 +121,7 @@ func runSetup(ctx context.Context, app *App) error {
 			fmt.Fprintf(app.IO.ErrOut, "%s Could not install the agent skill: %v\n", pal.Yellow("!"), err)
 		} else {
 			fmt.Fprintf(app.IO.ErrOut, "%s Installed the Extend agent skill to %s\n", pal.Green("✓"), path)
+			linkSkillAndReport(app, filepath.Dir(path))
 		}
 	}
 
