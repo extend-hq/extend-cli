@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,24 +39,29 @@ works without exporting environment variables.
 
 Prefer setting EXTEND_API_KEY directly in CI, scripts, or any
 non-interactive context — the wizard needs a terminal.`,
-		Details: `Walks through three steps:
+		Details: `Walks through these steps:
 
   1. Region    — US (api.extend.ai) or EU (api.eu1.extend.ai).
   2. API key   — opens the matching dashboard so you can create a key,
                  then accepts it via a hidden (masked) input.
   3. Validate  — calls the API with the key/region; on success writes
                  the configuration to disk.
+  4. Workspace — only if the key is organization-scoped: validation
+                 reports that a workspace is required, so the wizard
+                 prompts for a workspace ID and re-validates. Most keys
+                 are workspace-scoped and skip this step.
 
 The configuration is saved to ~/.config/extend/config.json (honoring
 XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
-source of the API key and region: command flags and environment variables
-still win (flag > env > config file > default).`,
+source of the API key, region, base URL, and workspace: command flags and
+environment variables still win (flag > env > config file > default).`,
 		Examples: []Example{
 			{Label: "Launch the setup wizard", Cmd: "extend setup"},
 		},
 		Gotchas: []string{
-			"The wizard is interactive and requires a terminal; in CI or scripts set EXTEND_API_KEY (and EXTEND_REGION) directly.",
-			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region still applies under any --env.",
+			"The wizard is interactive and requires a terminal; in CI or scripts set EXTEND_API_KEY (and EXTEND_REGION, plus EXTEND_WORKSPACE_ID for org keys) directly.",
+			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
+			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
 			"The key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
 		},
 		SeeAlso: []string{"auth"},
@@ -106,6 +112,9 @@ func runSetup(ctx context.Context, app *App) error {
 	fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
 	fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
 		pal.Green("✓"), m.result.region.title, m.result.region.api, m.result.path)
+	if m.result.workspaceID != "" {
+		fmt.Fprintf(app.IO.ErrOut, "%s Workspace %s\n", pal.Green("✓"), m.result.workspaceID)
+	}
 
 	if m.result.installSkill {
 		if path, err := installSkillFile(app); err != nil {
@@ -140,10 +149,11 @@ func installSkillFile(app *App) (string, error) {
 
 // defaultSetupValidator is the production key checker: it builds a client
 // for the chosen region and makes one cheap authenticated call.
-func defaultSetupValidator(ctx context.Context, region, key string) error {
+func defaultSetupValidator(ctx context.Context, region, key, workspaceID string) error {
 	cfg := extendx.Config{
 		APIKey:      key,
 		Region:      region,
+		WorkspaceID: workspaceID,
 		UserAgent:   userAgent(),
 		HTTPTimeout: 30 * time.Second,
 	}
@@ -178,4 +188,23 @@ func apiErrorStatus(err error) (int, bool) {
 		return apiErr.StatusCode, true
 	}
 	return 0, false
+}
+
+// needsWorkspacePrompt reports whether err is the server's signal that an
+// organization-scoped key requires a workspace (a 400 whose message names
+// the workspace header). The wizard reacts by collecting a workspace ID
+// rather than dead-ending on the key step.
+func needsWorkspacePrompt(err error) bool {
+	apiErr, ok := extendx.AsAPIError(err)
+	if !ok || apiErr.StatusCode != 400 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(apiErr.Message), "workspace")
+}
+
+// isWorkspaceNotFound reports whether err is a 404, which the API returns
+// when a supplied workspace ID doesn't belong to the key's organization.
+func isWorkspaceNotFound(err error) bool {
+	status, ok := apiErrorStatus(err)
+	return ok && status == 404
 }

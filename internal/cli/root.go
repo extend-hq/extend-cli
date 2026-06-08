@@ -153,7 +153,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
 
 	app.NewClient = func() (*sdkclient.Client, error) {
-		rc := resolveCredentials(app.Env, app.Region, os.Getenv, config.Load)
+		rc := resolveCredentials(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 		if rc.key == "" {
 			return nil, fmt.Errorf("%s environment variable is required (or run 'extend setup')", apiKeyEnvVar(app.Env))
 		}
@@ -161,11 +161,8 @@ func NewRoot() *cobra.Command {
 		cfg := extendx.Config{
 			APIKey:      rc.key,
 			Region:      rc.region,
-			WorkspaceID: app.Workspace,
+			WorkspaceID: rc.workspaceID,
 			UserAgent:   userAgent(),
-		}
-		if cfg.WorkspaceID == "" {
-			cfg.WorkspaceID = os.Getenv(envWorkspaceID)
 		}
 		// Base-URL precedence (EXTEND_BASE_URL > config file) is resolved
 		// in resolveCredentials; a non-empty value overrides the region.
@@ -256,9 +253,10 @@ func applyEnvDefaults(app *App) {
 // chain has been applied. baseURL is empty when no override is set, in
 // which case region selects the URL inside extendx.
 type resolved struct {
-	key     string
-	region  string
-	baseURL string
+	key         string
+	region      string
+	baseURL     string
+	workspaceID string
 }
 
 // resolveCredentials resolves the API key and routing settings using the
@@ -269,10 +267,11 @@ type resolved struct {
 // Routing settings (region, base URL) are not env-label-specific, so the
 // file's values still apply under any --env. Base-URL precedence is
 // EXTEND_BASE_URL > file.baseUrl > region (extendx turns region into a
-// URL, and a non-empty base URL overrides it). A malformed or unreadable
-// file is ignored best-effort so a typo can't break every command. getenv
-// and loadFile are injected for testability.
-func resolveCredentials(envLabel, regionFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
+// URL, and a non-empty base URL overrides it); workspace precedence is
+// --workspace > EXTEND_WORKSPACE_ID > file.workspaceId. A malformed or
+// unreadable file is ignored best-effort so a typo can't break every
+// command. getenv and loadFile are injected for testability.
+func resolveCredentials(envLabel, regionFlag, workspaceFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
 	var fileCfg config.File
 	if loadFile != nil {
 		fileCfg, _ = loadFile()
@@ -295,6 +294,14 @@ func resolveCredentials(envLabel, regionFlag string, getenv func(string) string,
 	r.baseURL = getenv(envBaseURL)
 	if r.baseURL == "" {
 		r.baseURL = fileCfg.BaseURL
+	}
+
+	r.workspaceID = workspaceFlag
+	if r.workspaceID == "" {
+		r.workspaceID = getenv(envWorkspaceID)
+	}
+	if r.workspaceID == "" {
+		r.workspaceID = fileCfg.WorkspaceID
 	}
 	return r
 }

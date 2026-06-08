@@ -27,20 +27,24 @@ func TestResolveCredentials(t *testing.T) {
 	loadEmpty := func() (config.File, error) { return config.File{}, nil }
 	fileWithBase := config.File{Region: "eu", BaseURL: "https://self.example", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
 	loadWithBase := func() (config.File, error) { return fileWithBase, nil }
+	fileWithWorkspace := config.File{Region: "eu", WorkspaceID: "ws_file", Auth: &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_file"}}
+	loadWithWorkspace := func() (config.File, error) { return fileWithWorkspace, nil }
 
 	env := func(m map[string]string) func(string) string {
 		return func(k string) string { return m[k] }
 	}
 
 	cases := []struct {
-		name        string
-		envLabel    string
-		regionFlag  string
-		getenv      func(string) string
-		load        func() (config.File, error)
-		wantKey     string
-		wantRegion  string
-		wantBaseURL string
+		name            string
+		envLabel        string
+		regionFlag      string
+		workspaceFlag   string
+		getenv          func(string) string
+		load            func() (config.File, error)
+		wantKey         string
+		wantRegion      string
+		wantBaseURL     string
+		wantWorkspaceID string
 	}{
 		{
 			name:       "env key wins over file",
@@ -119,10 +123,44 @@ func TestResolveCredentials(t *testing.T) {
 			wantRegion:  "eu",
 			wantBaseURL: "https://self.example",
 		},
+		{
+			name:            "workspace flag wins over env and file",
+			workspaceFlag:   "ws_flag",
+			getenv:          env(map[string]string{"EXTEND_WORKSPACE_ID": "ws_env"}),
+			load:            loadWithWorkspace,
+			wantKey:         "sk_file",
+			wantRegion:      "eu",
+			wantWorkspaceID: "ws_flag",
+		},
+		{
+			name:            "workspace env wins over file",
+			getenv:          env(map[string]string{"EXTEND_WORKSPACE_ID": "ws_env"}),
+			load:            loadWithWorkspace,
+			wantKey:         "sk_file",
+			wantRegion:      "eu",
+			wantWorkspaceID: "ws_env",
+		},
+		{
+			name:            "workspace from file when flag and env unset",
+			getenv:          env(map[string]string{}),
+			load:            loadWithWorkspace,
+			wantKey:         "sk_file",
+			wantRegion:      "eu",
+			wantWorkspaceID: "ws_file",
+		},
+		{
+			name:            "file workspace applies under an env label too",
+			envLabel:        "test",
+			getenv:          env(map[string]string{"EXTEND_TEST_API_KEY": "sk_test"}),
+			load:            loadWithWorkspace,
+			wantKey:         "sk_test",
+			wantRegion:      "eu",
+			wantWorkspaceID: "ws_file",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveCredentials(tc.envLabel, tc.regionFlag, tc.getenv, tc.load)
+			got := resolveCredentials(tc.envLabel, tc.regionFlag, tc.workspaceFlag, tc.getenv, tc.load)
 			if got.key != tc.wantKey {
 				t.Errorf("key = %q, want %q", got.key, tc.wantKey)
 			}
@@ -131,6 +169,9 @@ func TestResolveCredentials(t *testing.T) {
 			}
 			if got.baseURL != tc.wantBaseURL {
 				t.Errorf("baseURL = %q, want %q", got.baseURL, tc.wantBaseURL)
+			}
+			if got.workspaceID != tc.wantWorkspaceID {
+				t.Errorf("workspaceID = %q, want %q", got.workspaceID, tc.wantWorkspaceID)
 			}
 		})
 	}
@@ -194,7 +235,7 @@ func drive(t *testing.T, m setupModel, msg tea.Msg) setupModel {
 // TestSetupModel_RegionSelection walks the region picker: down moves the
 // cursor, enter advances to the key step with the chosen region.
 func TestSetupModel_RegionSelection(t *testing.T) {
-	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string, string) error { return nil })
 	if m.step != stepRegion {
 		t.Fatalf("initial step = %v, want stepRegion", m.step)
 	}
@@ -218,7 +259,7 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 // TestSetupModel_EmptyKeyRejected ensures submitting a blank key shows an
 // inline error and stays on the key step.
 func TestSetupModel_EmptyKeyRejected(t *testing.T) {
-	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick US
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit empty key
 	if m.step != stepKey {
@@ -236,7 +277,7 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	m := newSetupModel(context.Background(), false, "eu", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), false, "eu", func(context.Context, string, string, string) error { return nil })
 	m.region = setupRegionChoices[1] // eu
 	m.apiKey = "sk_live_123"
 	m.step = stepValidating
@@ -274,7 +315,7 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 // wizard finishes.
 func TestSetupModel_SkillPromptChoice(t *testing.T) {
 	mk := func() setupModel {
-		m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string) error { return nil })
+		m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
 		m.region = setupRegionChoices[0]
 		m.step = stepSkill
 		m.result = &setupResult{region: m.region, apiKey: "sk_x", path: "/tmp/x"}
@@ -311,7 +352,7 @@ func TestSetupModel_SkillPromptChoice(t *testing.T) {
 // TestSetupModel_ValidateFailureReturnsToKey ensures a rejected key sends
 // the user back to the key step with the error shown, not a crash.
 func TestSetupModel_ValidateFailureReturnsToKey(t *testing.T) {
-	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
 	m.region = setupRegionChoices[0]
 	m.apiKey = "sk_bad"
 	m.step = stepValidating
@@ -329,31 +370,86 @@ func TestSetupModel_ValidateFailureReturnsToKey(t *testing.T) {
 	}
 }
 
+// TestSetupModel_OrgKeyPromptsForWorkspace covers the reactive workspace
+// flow: a 400 "workspace required" routes the user to a workspace prompt
+// (not a dead-end error), and a successful re-validation persists the
+// workspace ID alongside the key.
+func TestSetupModel_OrgKeyPromptsForWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	wsRequired := &extendx.APIError{
+		StatusCode: 400,
+		Message:    "X-Extend-Workspace-Id header is required for organization-level API keys.",
+	}
+
+	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[0] // us
+	m.apiKey = "sk_org"
+	m.step = stepValidating
+
+	// Org key, no workspace yet → routed to the workspace step, no error.
+	m = drive(t, m, validatedMsg{err: wsRequired})
+	if m.step != stepWorkspace {
+		t.Fatalf("step = %v, want stepWorkspace", m.step)
+	}
+	if m.valErr != nil {
+		t.Errorf("valErr = %v, want nil (prompt, not error)", m.valErr)
+	}
+
+	// Enter a workspace ID and submit → re-validates with it.
+	m.wsInput.SetValue("ws_123")
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.step != stepValidating {
+		t.Fatalf("step after workspace submit = %v, want stepValidating", m.step)
+	}
+	if m.workspaceID != "ws_123" {
+		t.Fatalf("workspaceID = %q, want ws_123", m.workspaceID)
+	}
+
+	// Successful validation persists region + key + workspace.
+	m = drive(t, m, validatedMsg{err: nil})
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill", m.step)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if saved.WorkspaceID != "ws_123" {
+		t.Errorf("saved workspace = %q, want ws_123", saved.WorkspaceID)
+	}
+	if saved.APIKey() != "sk_org" {
+		t.Errorf("saved key = %q, want sk_org", saved.APIKey())
+	}
+}
+
 // TestSetupModel_ValidateCmdInvokesValidator confirms the command the
 // model dispatches actually calls the injected validator with the chosen
 // region and key.
 func TestSetupModel_ValidateCmdInvokesValidator(t *testing.T) {
-	var gotRegion, gotKey string
-	m := newSetupModel(context.Background(), false, "", func(_ context.Context, region, key string) error {
-		gotRegion, gotKey = region, key
+	var gotRegion, gotKey, gotWS string
+	m := newSetupModel(context.Background(), false, "", func(_ context.Context, region, key, ws string) error {
+		gotRegion, gotKey, gotWS = region, key, ws
 		return nil
 	})
 	m.region = setupRegionChoices[1]
 	m.apiKey = "sk_xyz"
+	m.workspaceID = "ws_42"
 
 	msg := m.validateCmd()()
 	if _, ok := msg.(validatedMsg); !ok {
 		t.Fatalf("validateCmd produced %T, want validatedMsg", msg)
 	}
-	if gotRegion != "eu" || gotKey != "sk_xyz" {
-		t.Errorf("validator called with (%q,%q), want (eu,sk_xyz)", gotRegion, gotKey)
+	if gotRegion != "eu" || gotKey != "sk_xyz" || gotWS != "ws_42" {
+		t.Errorf("validator called with (%q,%q,%q), want (eu,sk_xyz,ws_42)", gotRegion, gotKey, gotWS)
 	}
 }
 
 // TestSetupModel_CtrlCCancels ensures ctrl+c flags cancellation from any
 // step.
 func TestSetupModel_CtrlCCancels(t *testing.T) {
-	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string, string) error { return nil })
 	m = drive(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !m.canceled {
 		t.Error("ctrl+c should set canceled")
@@ -390,7 +486,7 @@ func TestBuildLogoGrid(t *testing.T) {
 // the body content below the first line. The rendered View must be
 // exactly the terminal size and must contain the full region-step body.
 func TestSetupView_FitsScreenAndShowsBody(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	const w, h = 100, 40
 	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = next.(setupModel)
@@ -422,7 +518,7 @@ func TestSetupView_FitsScreenAndShowsBody(t *testing.T) {
 // short, narrow terminal must still produce output no wider/taller than
 // the screen.
 func TestSetupView_NarrowAndTallStillFits(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	const w, h = 60, 20
 	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = next.(setupModel)
@@ -440,7 +536,7 @@ func TestSetupView_NarrowAndTallStillFits(t *testing.T) {
 // letter's ink center at the mark's ink center (within the half-cell
 // limit of the braille grid), with no systematic leftward bias.
 func TestChompAimsLetterInkToMarkCenter(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 110, Height: 40})
 	m = next.(setupModel)
 	if len(m.regions) < 2 {
@@ -476,7 +572,7 @@ func brailleMaxCol(line string) int {
 // NOT un-wipe as the mark passes back over it). The letters only reappear
 // later via the fly-in once the mark is home.
 func TestScanReturnKeepsTextConsumed(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = next.(setupModel)
 	for i := 0; i < 200; i++ {
@@ -504,7 +600,7 @@ func TestScanReturnKeepsTextConsumed(t *testing.T) {
 // TestScanCompletesBackToIntro drives the whole scan effect and asserts
 // it finishes by replaying the wordmark fly-in.
 func TestScanCompletesBackToIntro(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = next.(setupModel)
 	for i := 0; i < 200; i++ {
@@ -540,7 +636,7 @@ func TestScanCompletesBackToIntro(t *testing.T) {
 // the mark (region 0) settled in place while the wordmark letters fly in
 // from off-screen right.
 func TestFlyInLetters_KeepsMarkHolds(t *testing.T) {
-	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string) error { return nil })
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = next.(setupModel)
 	for i := 0; i < 200; i++ { // settle the initial fly-in
