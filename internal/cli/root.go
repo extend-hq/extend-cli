@@ -156,7 +156,7 @@ func NewRoot() *cobra.Command {
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 		if s.key.val == "" {
-			return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val)
+			return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr)
 		}
 
 		cfg := extendx.Config{
@@ -259,6 +259,11 @@ type resolved struct {
 	baseURL     sourced
 	workspaceID sourced
 	apiVersion  sourced
+	// fileErr is non-nil when the config file exists but could not be read
+	// or parsed (a missing file is not an error). It is surfaced rather than
+	// swallowed so `extend config` and the "no API key" error can explain a
+	// present-but-unreadable config instead of misreporting "key not set".
+	fileErr error
 }
 
 // firstSet returns the first candidate with a non-empty value, or the
@@ -286,12 +291,11 @@ func firstSet(cands ...sourced) sourced {
 // command. apiVersion is env-only (EXTEND_API_VERSION). getenv and
 // loadFile are injected for testability.
 func resolveSettings(envLabel, regionFlag, workspaceFlag string, getenv func(string) string, loadFile func() (config.File, error)) resolved {
+	var r resolved
 	var fileCfg config.File
 	if loadFile != nil {
-		fileCfg, _ = loadFile()
+		fileCfg, r.fileErr = loadFile()
 	}
-
-	var r resolved
 
 	// Key: env (label-specific) > config file (default env only).
 	keyEnv := apiKeyEnvVar(envLabel)
@@ -367,13 +371,20 @@ func apiKeyEnvVar(envLabel string) string {
 
 // unconfiguredKeyError is the "no API key" error commands return when none
 // resolves: it names the key env var, points at `extend setup`, and links
-// the resolved region's dashboard (US for unset/unknown).
-func unconfiguredKeyError(keyEnv, region string) error {
+// the resolved region's dashboard (US for unset/unknown). When fileErr is
+// non-nil — a config file is present but couldn't be read or parsed — it
+// appends that cause so the user isn't told a key is missing when one is
+// sitting in an unreadable file (the shadowed-binary / bad-permissions trap).
+func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
 	dash := "https://dashboard.extend.ai"
 	if d, ok := extendx.RegionDashboard(region); ok {
 		dash = d
 	}
-	return fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
+	err := fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
+	if fileErr != nil {
+		err = fmt.Errorf("%w\nnote: a config file was found but could not be read (run 'extend config'): %v", err, fileErr)
+	}
+	return err
 }
 
 // envTruthy reports whether a boolean-style env var is on. Treats "1",

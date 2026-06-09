@@ -115,6 +115,116 @@ func TestInstallScriptForwardsSkipSkill(t *testing.T) {
 	}
 }
 
+// TestInstallScriptWarnsWhenShadowed: the install dir is on PATH, but a
+// different `extend` sits ahead of it. The installer must warn loudly and
+// name both binaries — this is the exact trap where the wizard (run by
+// absolute path) configures the new binary while the user's shell keeps
+// running the old one, so saved credentials look "missing".
+func TestInstallScriptWarnsWhenShadowed(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("install.sh targets Unix-like platforms")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required to run install.sh")
+	}
+
+	tmp := t.TempDir()
+	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
+	binDir := filepath.Join(tmp, "bin")
+	fakePath := filepath.Join(tmp, "fakebin")
+	shadowDir := filepath.Join(tmp, "shadow")
+	setupLog := filepath.Join(tmp, "setup.log")
+	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
+	mustMkdirAll(t, binDir)
+	mustMkdirAll(t, fakePath)
+	mustMkdirAll(t, shadowDir)
+
+	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
+	archivePath := filepath.Join(releaseDir, archiveName)
+	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
+	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, officialDir, archiveName, archivePath, false)
+	writeFakeCurl(t, fakePath)
+	// A pre-existing `extend` ahead of the install dir on PATH.
+	shadowExtend := filepath.Join(shadowDir, "extend")
+	if err := os.WriteFile(shadowExtend, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write shadow extend: %v", err)
+	}
+
+	sep := string(os.PathListSeparator)
+	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
+	cmd.Env = append(os.Environ(),
+		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"EXTEND_FAKE_SETUP_LOG="+setupLog,
+		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
+		// shadowDir is ahead of binDir; both are on PATH.
+		"PATH="+fakePath+sep+shadowDir+sep+binDir+sep+os.Getenv("PATH"),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+
+	target := filepath.Join(binDir, "extend")
+	for _, want := range []string{"shadows", shadowExtend, target, "hash -r"} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("install.sh output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestInstallScriptNoShadowWarningWhenFirstOnPath: when the install dir is
+// first on PATH (so `extend` resolves to the freshly installed binary), the
+// installer must NOT emit a shadow warning.
+func TestInstallScriptNoShadowWarningWhenFirstOnPath(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("install.sh targets Unix-like platforms")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required to run install.sh")
+	}
+
+	tmp := t.TempDir()
+	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
+	binDir := filepath.Join(tmp, "bin")
+	fakePath := filepath.Join(tmp, "fakebin")
+	setupLog := filepath.Join(tmp, "setup.log")
+	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
+	mustMkdirAll(t, binDir)
+	mustMkdirAll(t, fakePath)
+
+	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
+	archivePath := filepath.Join(releaseDir, archiveName)
+	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
+	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, officialDir, archiveName, archivePath, false)
+	writeFakeCurl(t, fakePath)
+
+	sep := string(os.PathListSeparator)
+	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
+	cmd.Env = append(os.Environ(),
+		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
+		"EXTEND_FAKE_SETUP_LOG="+setupLog,
+		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
+		// binDir is first, so the freshly installed binary wins.
+		"PATH="+binDir+sep+fakePath+sep+os.Getenv("PATH"),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "shadows") {
+		t.Fatalf("install.sh warned about shadowing when install dir is first on PATH; got:\n%s", out)
+	}
+	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup" {
+		t.Fatalf("setup log = %q, want \"setup\"", got)
+	}
+}
+
 func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("install.sh targets Unix-like platforms")

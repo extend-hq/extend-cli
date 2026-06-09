@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -22,13 +23,39 @@ func TestUnconfiguredKeyError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg := unconfiguredKeyError(tc.keyEnv, tc.region).Error()
+			msg := unconfiguredKeyError(tc.keyEnv, tc.region, nil).Error()
 			for _, want := range []string{tc.keyEnv, tc.wantDash, "extend setup"} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("error %q missing %q", msg, want)
 				}
 			}
 		})
+	}
+}
+
+// TestUnconfiguredKeyErrorReportsUnreadableConfig pins the hint that turns a
+// silent "key not set" into a diagnosable one: when a config file was present
+// but could not be read or parsed, the error must say so (and name 'extend
+// config') so the user stops hunting for a missing key that's actually there.
+// This is the exact trap a shadowed/older binary or an unreadable file hits.
+func TestUnconfiguredKeyErrorReportsUnreadableConfig(t *testing.T) {
+	fileErr := errors.New("parse /home/u/.config/extend/config.json: unexpected end of JSON input")
+	msg := unconfiguredKeyError("EXTEND_API_KEY", "us", fileErr).Error()
+	for _, want := range []string{
+		"EXTEND_API_KEY",         // still names the key var
+		"could not be read",      // the new hint
+		"extend config",          // where to look
+		"unexpected end of JSON", // surfaces the underlying cause
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+
+	// Without a file error the hint must not appear (no false alarm when the
+	// user simply hasn't configured anything yet).
+	if msg := unconfiguredKeyError("EXTEND_API_KEY", "us", nil).Error(); strings.Contains(msg, "could not be read") {
+		t.Errorf("error %q should not mention an unreadable config when there was none", msg)
 	}
 }
 

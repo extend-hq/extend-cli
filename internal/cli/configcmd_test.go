@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,6 +50,47 @@ func TestConfigShowsResolvedSources(t *testing.T) {
 	}
 	if strings.Contains(out, "sk_env_abcdefgh") || strings.Contains(out, "sk_file_value") {
 		t.Errorf("API key leaked unmasked; got:\n%s", out)
+	}
+}
+
+// TestConfigReportsUnreadableConfigFile: when the config file exists but
+// can't be parsed, `extend config` must say so instead of the misleading
+// blanket "loaded" (which previously came from a bare os.Stat). This is the
+// view that explains "the file is right there but the key is (not set)".
+func TestConfigReportsUnreadableConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("EXTEND_API_KEY", "")
+	t.Setenv("EXTEND_REGION", "")
+	t.Setenv("EXTEND_BASE_URL", "")
+	t.Setenv("EXTEND_WORKSPACE_ID", "")
+
+	// Write a malformed config at the path the CLI will read.
+	path := filepath.Join(dir, "extend", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cmd := findCmd(t, ta.app, "config")
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	out := ta.out.String()
+
+	if !strings.Contains(out, path) {
+		t.Errorf("config output missing the config path %q; got:\n%s", path, out)
+	}
+	if !strings.Contains(out, "could not be read") {
+		t.Errorf("config output should flag the unreadable file; got:\n%s", out)
+	}
+	// It must not pretend the broken file loaded cleanly.
+	if strings.Contains(out, "(loaded)") {
+		t.Errorf("config output should not claim the malformed file loaded; got:\n%s", out)
 	}
 }
 

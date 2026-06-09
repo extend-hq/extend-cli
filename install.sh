@@ -202,6 +202,32 @@ run_setup() {
   fi
 }
 
+warn_if_shadowed() {
+  # Warn when `extend` won't resolve to the binary we just installed —
+  # either INSTALL_DIR isn't on PATH, or a different `extend` sits ahead of
+  # it. Both cause the same confusing failure: `extend setup` (run here by
+  # absolute path) configures this binary while the user's shell runs the
+  # other one, so the wizard "works" yet commands report the API key unset.
+  found=$(command -v extend 2>/dev/null || true)
+  case ":${PATH:-}:" in
+    *:"$INSTALL_DIR":*)
+      if [ -n "$found" ] && [ "$found" != "$target" ]; then
+        log "warning: a different 'extend' shadows the one just installed on PATH"
+        log "  will run:   $found"
+        log "  installed:  $target"
+        log "fix: remove the other binary or put $INSTALL_DIR earlier on PATH, then run 'hash -r'"
+      fi
+      ;;
+    *)
+      log "warning: $INSTALL_DIR is not on PATH"
+      log 'add it with: export PATH="$HOME/.local/bin:$PATH"'
+      if [ -n "$found" ] && [ "$found" != "$target" ]; then
+        log "until then, 'extend' runs: $found"
+      fi
+      ;;
+  esac
+}
+
 tag=$(resolve_version)
 goos=$(detect_os)
 goarch=$(detect_arch)
@@ -230,12 +256,6 @@ chmod 755 "$tmp/extend" || die "failed to mark downloaded binary executable"
 install_binary
 
 log "installed $tag to $target"
-case ":${PATH:-}:" in
-  *:"$INSTALL_DIR":*) ;;
-  *)
-    log "warning: $INSTALL_DIR is not on PATH"
-    log 'add it with: export PATH="$HOME/.local/bin:$PATH"'
-    ;;
-esac
+warn_if_shadowed
 
 run_setup

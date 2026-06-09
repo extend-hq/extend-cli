@@ -185,7 +185,31 @@ func TestResolveSettings(t *testing.T) {
 			if got.apiVersion.val != tc.wantAPIVersion {
 				t.Errorf("apiVersion = %q, want %q", got.apiVersion.val, tc.wantAPIVersion)
 			}
+			if got.fileErr != nil {
+				t.Errorf("fileErr = %v, want nil for a clean load", got.fileErr)
+			}
 		})
+	}
+}
+
+// TestResolveSettingsSurfacesLoadError: a config file that exists but can't
+// be read or parsed must not be swallowed. resolveSettings reports the error
+// via fileErr (so `extend config` and the "key not set" error can explain
+// it) while still falling back gracefully — the key stays empty rather than
+// the whole command crashing on a malformed file.
+func TestResolveSettingsSurfacesLoadError(t *testing.T) {
+	loadErr := errors.New("parse config.json: unexpected end of JSON input")
+	loadBroken := func() (config.File, error) { return config.File{}, loadErr }
+
+	got := resolveSettings("", "", "", func(string) string { return "" }, loadBroken)
+	if got.fileErr == nil {
+		t.Fatal("fileErr = nil, want the load error surfaced")
+	}
+	if !errors.Is(got.fileErr, loadErr) {
+		t.Errorf("fileErr = %v, want it to wrap %v", got.fileErr, loadErr)
+	}
+	if got.key.val != "" {
+		t.Errorf("key = %q, want empty when the file failed to load", got.key.val)
 	}
 }
 
