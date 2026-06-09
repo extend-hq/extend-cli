@@ -23,6 +23,10 @@ import (
 // under "Additional Commands" alongside version) and elided from the
 // agent SKILL.md catalog: a TUI wizard isn't something an agent drives.
 func newSetupDoc(app *App) *CommandDoc {
+	var (
+		nonInteractive   bool
+		skipSkillInstall bool
+	)
 	return &CommandDoc{
 		Use:     "setup",
 		Summary: "Set up the CLI (interactive wizard or non-interactive guidance)",
@@ -59,18 +63,32 @@ XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
 source of the API key, region, base URL, and workspace: command flags and
 environment variables still win (flag > env > config file > default).
 
-Without a TTY, setup does not prompt. It prints setup guidance to stdout
-(the env vars to set and the dashboard URL per region) when no API key
-resolves, says nothing about credentials when one already does, and
-installs the agent skill (idempotent) unless EXTEND_SKIP_SKILL_INSTALL is
-set. It exits 0 in both cases, so an installer can delegate to it safely.`,
+Two knobs control how setup behaves; each is a flag with an environment
+variable as a fallback (flag > env > default):
+
+  --non-interactive        / EXTEND_NONINTERACTIVE=1
+    Force the non-interactive path even with a terminal attached. CI=1
+    has the same effect.
+
+  --skip-skill-install     / EXTEND_SKIP_SKILL_INSTALL=1
+    Don't install the agent skill. Applies in both the interactive
+    wizard (suppresses the skill prompt) and the non-interactive path.
+
+Without a TTY (or with --non-interactive), setup does not prompt. It
+prints setup guidance to stdout (the env vars to set and the dashboard
+URL per region) when no API key resolves, says nothing about credentials
+when one already does, and installs the agent skill (idempotent) unless
+--skip-skill-install is set. It exits 0 in both cases, so an installer
+can delegate to it safely.`,
 		Examples: []Example{
 			{Label: "Launch the setup wizard", Cmd: "extend setup"},
-			{Label: "Non-interactive (installer/CI), skip the skill", Cmd: "EXTEND_SKIP_SKILL_INSTALL=1 extend setup"},
+			{Label: "Quiet setup (no wizard, no skill install)", Cmd: "extend setup --non-interactive --skip-skill-install"},
+			{Label: "Non-interactive but install the skill", Cmd: "extend setup --non-interactive"},
+			{Label: "Same, via environment", Cmd: "EXTEND_NONINTERACTIVE=1 EXTEND_SKIP_SKILL_INSTALL=1 extend setup"},
 		},
 		Gotchas: []string{
 			"Without a terminal the wizard does not run: setup prints setup guidance (or confirms existing credentials), installs the agent skill, and exits 0. Set EXTEND_API_KEY (and EXTEND_REGION, plus EXTEND_WORKSPACE_ID for org keys) for unattended use.",
-			"In non-interactive mode the agent skill is installed automatically; set EXTEND_SKIP_SKILL_INSTALL=1 to skip it.",
+			"--skip-skill-install only suppresses the agent skill step; it does not bypass the interactive wizard. Use --non-interactive to skip the wizard even when a TTY is attached (combine the two for a fully silent setup).",
 			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
 			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
 			"The key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
@@ -78,21 +96,38 @@ set. It exits 0 in both cases, so an installer can delegate to it safely.`,
 		SeeAlso: []string{"auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		Args:    cobra.NoArgs,
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Skip the interactive wizard even with a TTY attached (or EXTEND_NONINTERACTIVE=1)")
+			cmd.Flags().BoolVar(&skipSkillInstall, "skip-skill-install", false, "Don't install the agent skill (or EXTEND_SKIP_SKILL_INSTALL=1)")
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSetup(cmd.Context(), app)
+			opts := setupOptions{
+				nonInteractive:   nonInteractive,
+				skipSkillInstall: skipSkillInstall,
+			}
+			return runSetup(cmd.Context(), app, opts)
 		},
 	}
 }
 
-func runSetup(ctx context.Context, app *App) error {
-	if forcedNonInteractive(os.Getenv) || !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
-		return runSetupNonInteractive(app)
+// setupOptions carries the resolved values of `extend setup`'s local
+// knobs. Each field reflects the flag value; env-var fallbacks are
+// applied alongside it (flag > env > default) at the resolution sites
+// (resolveSkipSkill / forcedNonInteractive).
+type setupOptions struct {
+	nonInteractive   bool
+	skipSkillInstall bool
+}
+
+func runSetup(ctx context.Context, app *App, opts setupOptions) error {
+	if forcedNonInteractive(opts.nonInteractive, os.Getenv) || !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
+		return runSetupNonInteractive(app, opts)
 	}
 
 	pal := paletteFor(app.IO)
 
 	model := newSetupModel(ctx, app.IO.ColorEnabled(), app.Region, defaultSetupValidator)
-	model.skipSkill = envTruthy(os.Getenv(envSkipSkillInstall))
+	model.skipSkill = resolveSkipSkill(opts.skipSkillInstall, os.Getenv)
 	// v2 moved alt-screen and mouse-mode out of program options and into
 	// View() fields; they're set per-frame in setupModel.View().
 	final, err := tea.NewProgram(model, tea.WithContext(ctx)).Run()
@@ -132,7 +167,7 @@ func runSetup(ctx context.Context, app *App) error {
 		installSkillAndReport(app)
 	}
 
-	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend runs list"))
+	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend files list"))
 	return nil
 }
 
@@ -140,10 +175,11 @@ func runSetup(ctx context.Context, app *App) error {
 // terminal — an installer, CI, or an agent. It can't prompt, so it does the
 // useful subset: confirm on stderr when credentials already resolve, print
 // copy-pasteable setup guidance to stdout when they don't, and install the
-// agent skill (idempotent) unless EXTEND_SKIP_SKILL_INSTALL is set. It
-// always exits 0 — "not configured yet" is guidance, not a failure — so an
-// installer that delegates here never fails the install.
-func runSetupNonInteractive(app *App) error {
+// agent skill (idempotent) unless --skip-skill-install /
+// EXTEND_SKIP_SKILL_INSTALL is set. It always exits 0 — "not configured
+// yet" is guidance, not a failure — so an installer that delegates here
+// never fails the install.
+func runSetupNonInteractive(app *App, opts setupOptions) error {
 	pal := paletteFor(app.IO)
 	s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 	if s.key.val == "" {
@@ -161,18 +197,33 @@ func runSetupNonInteractive(app *App) error {
 			pal.Green("✓"), where, s.key.src)
 	}
 
-	if envTruthy(os.Getenv(envSkipSkillInstall)) {
-		fmt.Fprintf(app.IO.ErrOut, "%s Skipping agent skill install (%s set).\n", pal.Yellow("!"), envSkipSkillInstall)
+	if resolveSkipSkill(opts.skipSkillInstall, os.Getenv) {
+		fmt.Fprintf(app.IO.ErrOut, "%s Skipping agent skill install.\n", pal.Yellow("!"))
 		return nil
 	}
 	installSkillAndReport(app)
 	return nil
 }
 
-// forcedNonInteractive forces the non-interactive path even with a TTY, so
-// the wizard can't block on a pty with no human (docker -t | sh, some CI).
-func forcedNonInteractive(getenv func(string) string) bool {
+// forcedNonInteractive reports whether setup should bypass the TUI wizard
+// even when stdin/stdout are TTYs. Precedence: --non-interactive flag >
+// EXTEND_NONINTERACTIVE > CI > false. CI is consulted so an unattended pty
+// (docker -t | sh, some CI runners) can't accidentally land in the wizard.
+func forcedNonInteractive(flag bool, getenv func(string) string) bool {
+	if flag {
+		return true
+	}
 	return envTruthy(getenv(envNonInteractive)) || envTruthy(getenv("CI"))
+}
+
+// resolveSkipSkill reports whether the agent skill install step should be
+// suppressed. Precedence: --skip-skill-install flag >
+// EXTEND_SKIP_SKILL_INSTALL > false.
+func resolveSkipSkill(flag bool, getenv func(string) string) bool {
+	if flag {
+		return true
+	}
+	return envTruthy(getenv(envSkipSkillInstall))
 }
 
 // printSetupGuidance writes copy-pasteable configuration instructions to

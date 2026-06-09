@@ -30,11 +30,15 @@ const (
 	envDebug         = "EXTEND_DEBUG"
 	envOutput        = "EXTEND_OUTPUT"
 	envEnv           = "EXTEND_ENV"
-	// envSkipSkillInstall (truthy) skips the agent skill in both setup modes;
-	// installers forward their --skip-skill-install through it.
+	// envSkipSkillInstall (truthy) is the env-var fallback for
+	// `extend setup --skip-skill-install`: when set it suppresses the
+	// agent skill install in both the wizard and the non-interactive
+	// path. Flag wins.
 	envSkipSkillInstall = "EXTEND_SKIP_SKILL_INSTALL"
-	// envNonInteractive (truthy) forces setup's non-interactive path even
-	// with a TTY (pseudo-ttys with no human: docker -t | sh, some CI).
+	// envNonInteractive (truthy) is the env-var fallback for
+	// `extend setup --non-interactive`: forces setup's non-interactive
+	// path even with a TTY (pseudo-ttys with no human: docker -t | sh,
+	// some CI). Flag wins.
 	envNonInteractive = "EXTEND_NONINTERACTIVE"
 )
 

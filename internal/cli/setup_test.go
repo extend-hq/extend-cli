@@ -192,17 +192,16 @@ func TestResolveSettings(t *testing.T) {
 // TestRunSetupNonInteractive_Unconfigured: with no resolvable key and no
 // TTY, setup prints copy-pasteable guidance to stdout (the relayable
 // channel), names both regional dashboards, never claims to be configured,
-// and exits nil. Skill install is skipped here to keep the test off the
-// home dir.
+// and exits nil. Skill install is skipped here (via the flag) to keep the
+// test off the home dir.
 func TestRunSetupNonInteractive_Unconfigured(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv(envAPIKey, "")
 	t.Setenv(envRegion, "")
-	t.Setenv(envSkipSkillInstall, "1")
 
 	ta := newTestApp(t, newFakeServer(t, nil))
-	if err := runSetupNonInteractive(ta.app); err != nil {
+	if err := runSetupNonInteractive(ta.app, setupOptions{skipSkillInstall: true}); err != nil {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 
@@ -228,7 +227,8 @@ func TestRunSetupNonInteractive_Unconfigured(t *testing.T) {
 
 // TestRunSetupNonInteractive_Configured: when a key already resolves, setup
 // confirms it on stderr (with the region), prints nothing to stdout, and
-// never echoes the key.
+// never echoes the key. EXTEND_SKIP_SKILL_INSTALL is set here to assert
+// the env-fallback path still suppresses the skill install.
 func TestRunSetupNonInteractive_Configured(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -237,7 +237,7 @@ func TestRunSetupNonInteractive_Configured(t *testing.T) {
 	t.Setenv(envSkipSkillInstall, "1")
 
 	ta := newTestApp(t, newFakeServer(t, nil))
-	if err := runSetupNonInteractive(ta.app); err != nil {
+	if err := runSetupNonInteractive(ta.app, setupOptions{}); err != nil {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 
@@ -267,7 +267,7 @@ func TestRunSetupNonInteractive_InstallsSkill(t *testing.T) {
 	t.Setenv(envSkipSkillInstall, "")
 
 	ta := newTestApp(t, newFakeServer(t, nil))
-	if err := runSetupNonInteractive(ta.app); err != nil {
+	if err := runSetupNonInteractive(ta.app, setupOptions{}); err != nil {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 
@@ -292,10 +292,9 @@ func TestRunSetupNonInteractive_ConfiguredCustomBaseURL(t *testing.T) {
 	t.Setenv(envAPIKey, "sk_x")
 	t.Setenv(envRegion, "")
 	t.Setenv(envBaseURL, "https://self.example")
-	t.Setenv(envSkipSkillInstall, "1")
 
 	ta := newTestApp(t, newFakeServer(t, nil))
-	if err := runSetupNonInteractive(ta.app); err != nil {
+	if err := runSetupNonInteractive(ta.app, setupOptions{skipSkillInstall: true}); err != nil {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 	errs := ta.errOut.String()
@@ -308,25 +307,58 @@ func TestRunSetupNonInteractive_ConfiguredCustomBaseURL(t *testing.T) {
 }
 
 // TestForcedNonInteractive pins the TTY-override escape hatches that keep
-// the wizard from blocking on a human-less pty.
+// the wizard from blocking on a human-less pty. The --non-interactive
+// flag wins over the env vars; the env vars are still honored when the
+// flag is not set.
 func TestForcedNonInteractive(t *testing.T) {
 	env := func(m map[string]string) func(string) string {
 		return func(k string) string { return m[k] }
 	}
 	cases := []struct {
 		name string
+		flag bool
 		m    map[string]string
 		want bool
 	}{
-		{"nothing set", nil, false},
-		{"EXTEND_NONINTERACTIVE truthy", map[string]string{"EXTEND_NONINTERACTIVE": "1"}, true},
-		{"CI truthy", map[string]string{"CI": "true"}, true},
-		{"CI=0 is off", map[string]string{"CI": "0"}, false},
+		{"nothing set", false, nil, false},
+		{"flag wins", true, nil, true},
+		{"flag wins over off envs", true, map[string]string{"EXTEND_NONINTERACTIVE": "0"}, true},
+		{"EXTEND_NONINTERACTIVE truthy", false, map[string]string{"EXTEND_NONINTERACTIVE": "1"}, true},
+		{"CI truthy", false, map[string]string{"CI": "true"}, true},
+		{"CI=0 is off", false, map[string]string{"CI": "0"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := forcedNonInteractive(env(tc.m)); got != tc.want {
+			if got := forcedNonInteractive(tc.flag, env(tc.m)); got != tc.want {
 				t.Errorf("forcedNonInteractive = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveSkipSkill pins the precedence for the agent-skill-install
+// suppression knob: --skip-skill-install flag > EXTEND_SKIP_SKILL_INSTALL
+// > default false.
+func TestResolveSkipSkill(t *testing.T) {
+	env := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	cases := []struct {
+		name string
+		flag bool
+		m    map[string]string
+		want bool
+	}{
+		{"nothing set", false, nil, false},
+		{"flag wins", true, nil, true},
+		{"flag wins over off env", true, map[string]string{"EXTEND_SKIP_SKILL_INSTALL": "0"}, true},
+		{"env truthy", false, map[string]string{"EXTEND_SKIP_SKILL_INSTALL": "1"}, true},
+		{"env false", false, map[string]string{"EXTEND_SKIP_SKILL_INSTALL": "0"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveSkipSkill(tc.flag, env(tc.m)); got != tc.want {
+				t.Errorf("resolveSkipSkill = %v, want %v", got, tc.want)
 			}
 		})
 	}
