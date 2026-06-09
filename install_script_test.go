@@ -426,14 +426,22 @@ func TestInstallScriptAddsFallbackDirToZshProfile(t *testing.T) {
 		"SHELL=/bin/zsh",
 		"EXTEND_INSTALL_CANDIDATES=" + filepath.Join(f.home, ".local", "bin"),
 	}
+	// Pre-existing profile WITHOUT a trailing newline: the append must not
+	// concatenate onto the user's last line.
+	profile := filepath.Join(f.home, ".zprofile")
+	if err := os.WriteFile(profile, []byte("# theirs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	out := f.run(t, nil, nil, env...)
 
-	profile := filepath.Join(f.home, ".zprofile")
 	wantLine := `export PATH="$HOME/.local/bin:$PATH"`
 	got := readFileString(t, profile)
 	if !strings.Contains(got, wantLine) {
 		t.Fatalf(".zprofile missing %q; got:\n%s\ninstaller output:\n%s", wantLine, got, out)
+	}
+	if !strings.Contains(got, "# theirs\n") {
+		t.Fatalf("append corrupted the user's unterminated last line; got:\n%s", got)
 	}
 	if !strings.Contains(out, ".zprofile") {
 		t.Fatalf("installer should say which profile it modified; got:\n%s", out)
@@ -483,6 +491,45 @@ func TestInstallScriptWritesFishConfD(t *testing.T) {
 	snippet := filepath.Join(f.home, ".config", "fish", "conf.d", "extend.fish")
 	if got := readFileString(t, snippet); !strings.Contains(got, `fish_add_path "$HOME/.local/bin"`) {
 		t.Fatalf("fish conf.d snippet missing fish_add_path; got:\n%s", got)
+	}
+}
+
+// TestInstallScriptDefaultCandidates: without EXTEND_INSTALL_CANDIDATES the
+// shipped default list applies — ~/.local/bin is picked when on PATH. Every
+// other detection test injects candidates, so this is the only pin on the
+// real default string; a typo there would pass the rest of the suite.
+func TestInstallScriptDefaultCandidates(t *testing.T) {
+	f := newInstallFixture(t)
+	localBin := filepath.Join(f.home, ".local", "bin")
+	mustMkdirAll(t, localBin)
+
+	out := f.run(t, nil, []string{localBin}, "SHELL=/bin/zsh")
+
+	if _, err := os.Stat(filepath.Join(localBin, "extend")); err != nil {
+		t.Fatalf("binary not installed into default candidate ~/.local/bin: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(f.home, ".zprofile")); !os.IsNotExist(err) {
+		t.Fatalf("no profile edit expected when a default candidate is on PATH, stat err: %v\n%s", err, out)
+	}
+}
+
+// TestInstallScriptHonorsZdotdir: zsh users relocate their dotfiles with
+// ZDOTDIR; the PATH line must land in $ZDOTDIR/.zprofile, not $HOME.
+func TestInstallScriptHonorsZdotdir(t *testing.T) {
+	f := newInstallFixture(t)
+	zdot := filepath.Join(f.tmp, "zdot")
+	mustMkdirAll(t, zdot)
+
+	out := f.run(t, nil, nil,
+		"SHELL=/bin/zsh",
+		"ZDOTDIR="+zdot,
+		"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+	if got := readFileString(t, filepath.Join(zdot, ".zprofile")); !strings.Contains(got, `export PATH="$HOME/.local/bin:$PATH"`) {
+		t.Fatalf("$ZDOTDIR/.zprofile missing the PATH line; got:\n%s\noutput:\n%s", got, out)
+	}
+	if _, err := os.Stat(filepath.Join(f.home, ".zprofile")); !os.IsNotExist(err) {
+		t.Fatalf("must write $ZDOTDIR/.zprofile, not $HOME/.zprofile, stat err: %v", err)
 	}
 }
 

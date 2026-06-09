@@ -359,7 +359,15 @@ ensure_on_path() {
     log "$profile already references $dir_expr"
   else
     mkdir -p "${profile%/*}" 2>/dev/null || true
-    if printf '%s\n' "$line" >>"$profile" 2>/dev/null; then
+    # Lead with a newline when appending to a non-empty file: a profile
+    # whose last line is unterminated must not have our line glued onto it.
+    if [ -s "$profile" ]; then
+      fmt='\n%s\n'
+    else
+      fmt='%s\n'
+    fi
+    # shellcheck disable=SC2059 # fmt is one of two fixed format strings
+    if printf "$fmt" "$line" >>"$profile" 2>/dev/null; then
       log "added $INSTALL_DIR to PATH in $profile"
     else
       log "warning: could not write $profile"
