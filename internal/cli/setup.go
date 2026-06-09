@@ -46,22 +46,7 @@ Without a terminal — an installer, CI, or an agent — it can't prompt, so
 it instead confirms when credentials already resolve, prints setup
 guidance when they don't, and installs the agent skill. For fully
 unattended use set EXTEND_API_KEY directly.`,
-		Details: `Walks through these steps:
-
-  1. Region    - US (api.extend.ai) or EU (api.eu1.extend.ai).
-  2. API key   - opens the matching dashboard so you can create a key,
-                 then accepts it via a hidden (masked) input.
-  3. Validate  - calls the API with the key/region to confirm it works.
-                 Nothing is written to disk yet.
-  4. Workspace - only if the key is organization-scoped: validation
-                 reports that a workspace is required, so the wizard
-                 prompts for a workspace ID and re-validates. Most keys
-                 are workspace-scoped and skip this step.
-  5. Save      - asks before writing anything. Saving stores the key on
-                 disk so every command just works; declining prints the
-                 environment variables to export instead.
-
-A consented save writes ~/.config/extend/config.json (honoring
+		Details: `A save writes ~/.config/extend/config.json (honoring
 XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
 source of the API key, region, base URL, and workspace: command flags and
 environment variables still win (flag > env > config file > default).
@@ -94,7 +79,7 @@ can delegate to it safely.`,
 			"--skip-skill-install only suppresses the agent skill step; it does not bypass the interactive wizard. Use --non-interactive to skip the wizard even when a TTY is attached (combine the two for a fully silent setup).",
 			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
 			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
-			"The wizard asks before saving the key; declining prints the env vars to export instead. A saved key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
+			"A saved key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
 		},
 		SeeAlso: []string{"auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
@@ -169,7 +154,11 @@ func reportSetupResult(app *App, res *setupResult) error {
 		return fmt.Errorf("save config: %w", res.saveErr)
 	}
 
-	fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
+	// An esc-skip never entered a key, so there is nothing to report as
+	// validated.
+	if res.apiKey != "" {
+		fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
+	}
 	if res.saved {
 		fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
 			pal.Green("✓"), res.region.title, res.region.api, res.path)
