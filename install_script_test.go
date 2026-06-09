@@ -66,14 +66,14 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	if got, want := strings.TrimSpace(string(versionOut)), "extend test v9.9.9"; got != want {
 		t.Fatalf("installed binary output = %q, want %q", got, want)
 	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup skip=0" {
-		t.Fatalf("setup log = %q, want \"setup skip=0\" (delegated to setup, skip knob forwarded)", got)
+	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup" {
+		t.Fatalf("setup log = %q, want \"setup\" (delegated to setup with no skip flag)", got)
 	}
 }
 
-// TestInstallScriptForwardsSkipSkill confirms --skip-skill-install reaches
-// the CLI as EXTEND_SKIP_SKILL_INSTALL=1 (the CLI, not the script, now owns
-// suppressing the skill).
+// TestInstallScriptForwardsSkipSkill confirms --skip-skill-install is
+// forwarded to the CLI as the same --skip-skill-install flag (the CLI,
+// not the script, owns suppressing the skill).
 func TestInstallScriptForwardsSkipSkill(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("install.sh targets Unix-like platforms")
@@ -110,8 +110,8 @@ func TestInstallScriptForwardsSkipSkill(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("install.sh failed: %v\n%s", err, out)
 	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup skip=1" {
-		t.Fatalf("setup log = %q, want \"setup skip=1\"", got)
+	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup --skip-skill-install" {
+		t.Fatalf("setup log = %q, want \"setup --skip-skill-install\"", got)
 	}
 }
 
@@ -181,7 +181,7 @@ if [ "${1:-}" = "--version" ]; then
   exit 0
 fi
 if [ "${1:-}" = "setup" ]; then
-  printf '%s skip=%s\n' "$*" "${EXTEND_SKIP_SKILL_INSTALL-unset}" >> "${EXTEND_FAKE_SETUP_LOG:?}"
+  printf '%s\n' "$*" >> "${EXTEND_FAKE_SETUP_LOG:?}"
   exit 0
 fi
 printf '%s\n' 'extend test'

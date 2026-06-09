@@ -188,13 +188,17 @@ run_setup() {
   # when it has a terminal, otherwise prints setup guidance and installs the
   # agent skill. Under `curl | sh` the script's stdin is the install script
   # itself, so a human is detected via stdout being a terminal and the wizard
-  # is fed the controlling terminal (/dev/tty). EXTEND_SKIP_SKILL_INSTALL is
-  # forwarded so --skip-skill-install still suppresses the skill. Best-effort:
-  # a setup hiccup must not fail an otherwise-successful install.
+  # is fed the controlling terminal (/dev/tty). --skip-skill-install is
+  # forwarded as a CLI flag (truthy = pass the flag). Best-effort: a setup
+  # hiccup must not fail an otherwise-successful install.
+  set -- setup
+  if [ "$SKIP_SKILL_INSTALL" = 1 ]; then
+    set -- "$@" --skip-skill-install
+  fi
   if [ -t 1 ] && [ -r /dev/tty ]; then
-    EXTEND_SKIP_SKILL_INSTALL="$SKIP_SKILL_INSTALL" "$target" setup </dev/tty || true
+    "$target" "$@" </dev/tty || true
   else
-    EXTEND_SKIP_SKILL_INSTALL="$SKIP_SKILL_INSTALL" "$target" setup || true
+    "$target" "$@" || true
   fi
 }
 
