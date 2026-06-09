@@ -225,6 +225,287 @@ func TestInstallScriptNoShadowWarningWhenFirstOnPath(t *testing.T) {
 	}
 }
 
+// installFixture is the scaffolding shared by the install-dir detection
+// tests: a release archive + checksums, a fake curl, and a fake HOME. The
+// returned env deliberately uses a minimal hermetic PATH (system tool dirs
+// only, no inherited PATH) so `command -v extend` inside the script can
+// never see a real extend on the developer's machine — the upgrade-in-place
+// branch would happily overwrite it.
+type installFixture struct {
+	tmp      string
+	home     string
+	fakePath string
+	setupLog string
+	baseEnv  []string
+}
+
+func newInstallFixture(t *testing.T) *installFixture {
+	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("install.sh targets Unix-like platforms")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required to run install.sh")
+	}
+
+	tmp := t.TempDir()
+	releaseDir := filepath.Join(tmp, "release")
+	officialDir := filepath.Join(tmp, "official")
+	fakePath := filepath.Join(tmp, "fakebin")
+	home := filepath.Join(tmp, "home")
+	setupLog := filepath.Join(tmp, "setup.log")
+	mustMkdirAll(t, releaseDir)
+	mustMkdirAll(t, officialDir)
+	mustMkdirAll(t, fakePath)
+	mustMkdirAll(t, home)
+
+	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
+	archivePath := filepath.Join(releaseDir, archiveName)
+	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
+	writeChecksums(t, releaseDir, archiveName, archivePath, true)
+	writeChecksums(t, officialDir, archiveName, archivePath, false)
+	writeFakeCurl(t, fakePath)
+
+	return &installFixture{
+		tmp:      tmp,
+		home:     home,
+		fakePath: fakePath,
+		setupLog: setupLog,
+		baseEnv: []string{
+			"EXTEND_RELEASE_BASE_URL=file://" + releaseDir,
+			"EXTEND_FAKE_SETUP_LOG=" + setupLog,
+			"FAKE_OFFICIAL_RELEASE_DIR=" + officialDir,
+			"HOME=" + home,
+		},
+	}
+}
+
+// run executes install.sh with the fixture env, extra script args, the
+// given PATH dirs (fake curl first, system tool dirs last), and extra env
+// entries.
+func (f *installFixture) run(t *testing.T, args []string, pathDirs []string, extraEnv ...string) string {
+	t.Helper()
+	sep := string(os.PathListSeparator)
+	path := f.fakePath
+	for _, d := range pathDirs {
+		path += sep + d
+	}
+	path += sep + "/usr/bin" + sep + "/bin" + sep + "/usr/sbin" + sep + "/sbin"
+
+	cmd := exec.Command("sh", append([]string{"install.sh", "--version", "v9.9.9"}, args...)...)
+	cmd.Env = append(append([]string{}, f.baseEnv...), extraEnv...)
+	cmd.Env = append(cmd.Env, "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// TestInstallScriptDetectsCandidateOnPath: with no --bin-dir, the installer
+// picks the first candidate dir that is both on PATH and writable, instead
+// of blindly defaulting to ~/.local/bin (which is not on PATH on a default
+// macOS shell). Candidates are injected so the test never touches real
+// system dirs.
+func TestInstallScriptDetectsCandidateOnPath(t *testing.T) {
+	f := newInstallFixture(t)
+
+	offPath := filepath.Join(f.home, ".local", "bin") // candidate 1: not on PATH
+	onPath := filepath.Join(f.tmp, "onpath")          // candidate 2: on PATH, writable
+	mustMkdirAll(t, onPath)
+
+	out := f.run(t, nil, []string{onPath},
+		"EXTEND_INSTALL_CANDIDATES="+offPath+":"+onPath)
+
+	if _, err := os.Stat(filepath.Join(onPath, "extend")); err != nil {
+		t.Fatalf("binary not installed into the on-PATH candidate: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(offPath, "extend")); !os.IsNotExist(err) {
+		t.Fatalf("binary should not land in the off-PATH candidate, stat err: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "is not on PATH") {
+		t.Fatalf("no PATH warning expected when an on-PATH dir was chosen; got:\n%s", out)
+	}
+}
+
+// TestInstallScriptUpgradesInPlace: an existing extend (regular file, in a
+// writable dir on PATH) is replaced where it lives, even when that dir is
+// not in the candidate list. This is the rule that prevents a second copy
+// shadow-fighting an old install.
+func TestInstallScriptUpgradesInPlace(t *testing.T) {
+	f := newInstallFixture(t)
+
+	oldDir := filepath.Join(f.tmp, "oldbin")
+	mustMkdirAll(t, oldDir)
+	oldExtend := filepath.Join(oldDir, "extend")
+	if err := os.WriteFile(oldExtend, []byte("#!/bin/sh\necho extend OLD\n"), 0o755); err != nil {
+		t.Fatalf("write old extend: %v", err)
+	}
+
+	// Candidates exclude oldDir to prove in-place wins over the candidate scan.
+	out := f.run(t, nil, []string{oldDir},
+		"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+	versionOut, err := exec.Command(oldExtend, "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("upgraded binary failed: %v\n%s", err, versionOut)
+	}
+	if got, want := strings.TrimSpace(string(versionOut)), "extend test v9.9.9"; got != want {
+		t.Fatalf("binary at old location = %q, want %q (not upgraded in place)\n%s", got, want, out)
+	}
+	if strings.Contains(out, "shadows") {
+		t.Fatalf("in-place upgrade must not trigger the shadow warning; got:\n%s", out)
+	}
+}
+
+// TestInstallScriptSkipsManagedSymlinkDir: a candidate dir whose `extend`
+// is a symlink (a package manager's, e.g. Homebrew) is skipped — both by
+// upgrade-in-place and by the candidate scan — and the next usable
+// candidate wins. The shadow warning then points at the symlinked one.
+func TestInstallScriptSkipsManagedSymlinkDir(t *testing.T) {
+	f := newInstallFixture(t)
+
+	brewLike := filepath.Join(f.tmp, "brewbin")
+	mustMkdirAll(t, brewLike)
+	cellar := filepath.Join(f.tmp, "cellar-extend")
+	if err := os.WriteFile(cellar, []byte("#!/bin/sh\necho brew extend\n"), 0o755); err != nil {
+		t.Fatalf("write cellar binary: %v", err)
+	}
+	brewExtend := filepath.Join(brewLike, "extend")
+	if err := os.Symlink(cellar, brewExtend); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	nextDir := filepath.Join(f.tmp, "nextbin")
+	mustMkdirAll(t, nextDir)
+
+	// brewLike is earlier on PATH than nextDir, and first in candidates.
+	out := f.run(t, nil, []string{brewLike, nextDir},
+		"EXTEND_INSTALL_CANDIDATES="+brewLike+":"+nextDir)
+
+	if fi, err := os.Lstat(brewExtend); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("managed symlink must be left untouched (err=%v, mode=%v)\n%s", err, fi.Mode(), out)
+	}
+	if _, err := os.Stat(filepath.Join(nextDir, "extend")); err != nil {
+		t.Fatalf("binary not installed into next candidate: %v\n%s", err, out)
+	}
+	for _, want := range []string{"shadows", brewExtend} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q (shadow warning should name the symlinked extend); got:\n%s", want, out)
+		}
+	}
+}
+
+// TestInstallScriptFallsBackWhenNoCandidateOnPath: nothing usable on PATH
+// and profile modification opted out → the historical default (~/.local/bin)
+// plus the not-on-PATH warning, and no profile file is touched.
+func TestInstallScriptFallsBackWhenNoCandidateOnPath(t *testing.T) {
+	f := newInstallFixture(t)
+
+	out := f.run(t, []string{"--no-modify-path"}, nil,
+		"SHELL=/bin/zsh",
+		"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+	if _, err := os.Stat(filepath.Join(f.home, ".local", "bin", "extend")); err != nil {
+		t.Fatalf("binary not installed into fallback ~/.local/bin: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "is not on PATH") {
+		t.Fatalf("expected the not-on-PATH warning; got:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(f.home, ".zprofile")); !os.IsNotExist(err) {
+		t.Fatalf("--no-modify-path must not write a profile, stat err: %v\n%s", err, out)
+	}
+}
+
+// TestInstallScriptAddsFallbackDirToZshProfile: the stock-Mac case — zsh,
+// nothing usable on PATH → install to ~/.local/bin and append one guarded
+// PATH line to ~/.zprofile (macOS terminals are login shells). Running the
+// installer again must not duplicate the line.
+func TestInstallScriptAddsFallbackDirToZshProfile(t *testing.T) {
+	f := newInstallFixture(t)
+	env := []string{
+		"SHELL=/bin/zsh",
+		"EXTEND_INSTALL_CANDIDATES=" + filepath.Join(f.home, ".local", "bin"),
+	}
+
+	out := f.run(t, nil, nil, env...)
+
+	profile := filepath.Join(f.home, ".zprofile")
+	wantLine := `export PATH="$HOME/.local/bin:$PATH"`
+	got := readFileString(t, profile)
+	if !strings.Contains(got, wantLine) {
+		t.Fatalf(".zprofile missing %q; got:\n%s\ninstaller output:\n%s", wantLine, got, out)
+	}
+	if !strings.Contains(out, ".zprofile") {
+		t.Fatalf("installer should say which profile it modified; got:\n%s", out)
+	}
+	if strings.Contains(out, "is not on PATH") {
+		t.Fatalf("no warning expected when the profile was fixed; got:\n%s", out)
+	}
+
+	// Idempotent: a second run appends nothing.
+	f.run(t, nil, nil, env...)
+	if got := readFileString(t, profile); strings.Count(got, wantLine) != 1 {
+		t.Fatalf("PATH line duplicated after second run:\n%s", got)
+	}
+}
+
+// TestInstallScriptPicksBashProfileFile: bash login shells read the first
+// existing of .bash_profile, .bash_login, .profile — and skip .profile when
+// .bash_profile exists, so the line must land in the file bash will read.
+func TestInstallScriptPicksBashProfileFile(t *testing.T) {
+	f := newInstallFixture(t)
+	bashProfile := filepath.Join(f.home, ".bash_profile")
+	if err := os.WriteFile(bashProfile, []byte("# existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f.run(t, nil, nil,
+		"SHELL=/bin/bash",
+		"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+	if got := readFileString(t, bashProfile); !strings.Contains(got, `export PATH="$HOME/.local/bin:$PATH"`) {
+		t.Fatalf(".bash_profile missing the PATH line; got:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(f.home, ".profile")); !os.IsNotExist(err) {
+		t.Fatalf(".profile must not be written when .bash_profile exists, stat err: %v", err)
+	}
+}
+
+// TestInstallScriptWritesFishConfD: fish never reads POSIX profiles, so the
+// PATH fix is a conf.d snippet using fish_add_path.
+func TestInstallScriptWritesFishConfD(t *testing.T) {
+	f := newInstallFixture(t)
+
+	f.run(t, nil, nil,
+		"SHELL=/opt/homebrew/bin/fish",
+		"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+	snippet := filepath.Join(f.home, ".config", "fish", "conf.d", "extend.fish")
+	if got := readFileString(t, snippet); !strings.Contains(got, `fish_add_path "$HOME/.local/bin"`) {
+		t.Fatalf("fish conf.d snippet missing fish_add_path; got:\n%s", got)
+	}
+}
+
+// TestInstallScriptDoesNotModifyProfileForExplicitBinDir: a user-chosen
+// --bin-dir off PATH gets the warning, never a profile edit — they picked
+// the location; we don't second-guess their dotfiles.
+func TestInstallScriptDoesNotModifyProfileForExplicitBinDir(t *testing.T) {
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "chosen")
+
+	out := f.run(t, []string{"--bin-dir", binDir}, nil, "SHELL=/bin/zsh")
+
+	if _, err := os.Stat(filepath.Join(binDir, "extend")); err != nil {
+		t.Fatalf("binary not installed into --bin-dir: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "is not on PATH") {
+		t.Fatalf("expected the not-on-PATH warning for explicit --bin-dir; got:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(f.home, ".zprofile")); !os.IsNotExist(err) {
+		t.Fatalf("explicit --bin-dir must not write a profile, stat err: %v\n%s", err, out)
+	}
+}
+
 func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("install.sh targets Unix-like platforms")

@@ -6,6 +6,8 @@ VERSION="${EXTEND_VERSION:-latest}"
 INSTALL_DIR="${EXTEND_INSTALL_DIR:-}"
 SKIP_CHECKSUM="${EXTEND_SKIP_CHECKSUM:-0}"
 SKIP_SKILL_INSTALL="${EXTEND_SKIP_SKILL_INSTALL:-0}"
+NO_MODIFY_PATH="${EXTEND_NO_MODIFY_PATH:-0}"
+DIR_AUTO=0
 
 usage() {
   cat <<'EOF'
@@ -16,11 +18,17 @@ Usage:
   curl -fsSL https://extend.ai/install.sh | sh -s -- --version v0.1.0 --bin-dir ~/.local/bin
 
 Options:
-  -b, --bin-dir DIR     Directory to install extend into (default: ~/.local/bin)
+  -b, --bin-dir DIR     Directory to install extend into. Default: upgrade an
+                        existing extend install in place; otherwise the first
+                        of ~/.local/bin, ~/bin, /usr/local/bin that is on
+                        PATH and writable (Homebrew-owned dirs are never
+                        used); otherwise ~/.local/bin
   -v, --version VERSION Version to install, e.g. v0.1.0 (default: latest)
       --skip-checksum   Skip SHA256 verification
       --skip-skill-install
                         Skip automatic agent skill installation
+      --no-modify-path  Don't add the install dir to PATH via your shell
+                        profile when no usable dir is on PATH already
   -h, --help            Show this help
 
 Environment:
@@ -29,6 +37,7 @@ Environment:
   EXTEND_SKIP_CHECKSUM  Set to 1 to skip SHA256 verification
   EXTEND_SKIP_SKILL_INSTALL
                         Set to 1 to skip automatic skill installation
+  EXTEND_NO_MODIFY_PATH Set to 1 to never touch shell profiles
 EOF
 }
 
@@ -75,6 +84,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --skip-skill-install)
       SKIP_SKILL_INSTALL=1
+      shift
+      ;;
+    --no-modify-path)
+      NO_MODIFY_PATH=1
       shift
       ;;
     -h|--help)
@@ -163,13 +176,85 @@ hash_file() {
   fi
 }
 
+on_path() {
+  case ":${PATH:-}:" in
+    *:"$1":*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# usable_dir: we can drop a binary in $1 without sudo and without fighting a
+# package manager. A dir containing a `brew` executable is Homebrew's prefix
+# bin (/opt/homebrew/bin, or /usr/local/bin on Intel Macs) — never install
+# foreign binaries there. An `extend` symlink there is a manager's (Homebrew
+# links are symlinks) — never overwrite it. An existing dir must be
+# writable; a missing dir only counts under $HOME (we can mkdir it).
+usable_dir() {
+  if [ -e "$1/brew" ] || [ -L "$1/extend" ]; then
+    return 1
+  fi
+  if [ -d "$1" ]; then
+    [ -w "$1" ]
+  else
+    case "$1" in
+      "${HOME:-/nonexistent}"/*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
+# choose_install_dir picks INSTALL_DIR (and a human reason) when --bin-dir /
+# EXTEND_INSTALL_DIR wasn't given:
+#   1. Upgrade in place: the `extend` the shell already resolves (a regular
+#      file in a writable dir) is replaced where it lives, so an old install
+#      can never shadow the new one.
+#   2. First candidate dir that is on PATH and usable — the install works in
+#      the current shell with no profile edits (macOS does not put
+#      ~/.local/bin on PATH by default).
+#   3. Fall back to ~/.local/bin (the historical default) plus a warning.
+choose_install_dir() {
+  DIR_AUTO=1
+  existing=$(command -v extend 2>/dev/null || true)
+  if [ -n "$existing" ] && [ ! -L "$existing" ]; then
+    dir=${existing%/*}
+    if usable_dir "$dir"; then
+      INSTALL_DIR=$dir
+      INSTALL_REASON="replacing the existing extend at $existing"
+      return
+    fi
+  fi
+
+  if [ -n "${HOME:-}" ]; then
+    fallback="$HOME/.local/bin"
+    candidates="$HOME/.local/bin:$HOME/bin:/usr/local/bin"
+  else
+    fallback=/usr/local/bin
+    candidates=/usr/local/bin
+  fi
+  candidates=${EXTEND_INSTALL_CANDIDATES:-$candidates}
+
+  old_ifs=${IFS:-}
+  IFS=:
+  # shellcheck disable=SC2086 # word-splitting on : is the point
+  set -- $candidates
+  IFS=$old_ifs
+  for dir in "$@"; do
+    [ -n "$dir" ] || continue
+    if on_path "$dir" && usable_dir "$dir"; then
+      INSTALL_DIR=$dir
+      INSTALL_REASON="already on PATH"
+      return
+    fi
+  done
+
+  INSTALL_DIR=$fallback
+  INSTALL_REASON="default"
+}
+
 install_binary() {
   if [ -z "$INSTALL_DIR" ]; then
-    if [ -n "${HOME:-}" ]; then
-      INSTALL_DIR="$HOME/.local/bin"
-    else
-      INSTALL_DIR=/usr/local/bin
-    fi
+    choose_install_dir
+    log "installing to $INSTALL_DIR ($INSTALL_REASON)"
   fi
 
   mkdir -p "$INSTALL_DIR" || die "failed to create $INSTALL_DIR"
@@ -203,29 +288,86 @@ run_setup() {
 }
 
 warn_if_shadowed() {
-  # Warn when `extend` won't resolve to the binary we just installed —
-  # either INSTALL_DIR isn't on PATH, or a different `extend` sits ahead of
-  # it. Both cause the same confusing failure: `extend setup` (run here by
-  # absolute path) configures this binary while the user's shell runs the
-  # other one, so the wizard "works" yet commands report the API key unset.
+  # The chosen dir is on PATH, but a different `extend` may sit ahead of it.
+  # That causes a confusing failure: `extend setup` (run here by absolute
+  # path) configures this binary while the user's shell runs the other one,
+  # so the wizard "works" yet commands report the API key unset.
   found=$(command -v extend 2>/dev/null || true)
-  case ":${PATH:-}:" in
-    *:"$INSTALL_DIR":*)
-      if [ -n "$found" ] && [ "$found" != "$target" ]; then
-        log "warning: a different 'extend' shadows the one just installed on PATH"
-        log "  will run:   $found"
-        log "  installed:  $target"
-        log "fix: remove the other binary or put $INSTALL_DIR earlier on PATH, then run 'hash -r'"
-      fi
+  if [ -n "$found" ] && [ "$found" != "$target" ]; then
+    log "warning: a different 'extend' shadows the one just installed on PATH"
+    log "  will run:   $found"
+    log "  installed:  $target"
+    log "fix: remove the other binary or put $INSTALL_DIR earlier on PATH, then run 'hash -r'"
+  fi
+}
+
+# ensure_on_path runs when the chosen dir is NOT on PATH. A stock macOS
+# shell has no user-writable dir on PATH at all, so for an auto-chosen dir
+# the fix is one guarded PATH line appended to the file the user's login
+# shell actually reads (selected by $SHELL, since that is shell-specific,
+# not OS-specific). An explicit --bin-dir/EXTEND_INSTALL_DIR or
+# --no-modify-path/EXTEND_NO_MODIFY_PATH downgrades to a warning — we don't
+# second-guess a user who picked the location or opted out.
+ensure_on_path() {
+  found=$(command -v extend 2>/dev/null || true)
+  if [ "$DIR_AUTO" != 1 ] || [ "$NO_MODIFY_PATH" = 1 ] || [ -z "${HOME:-}" ]; then
+    log "warning: $INSTALL_DIR is not on PATH"
+    log "add it with: export PATH=\"$INSTALL_DIR:\$PATH\""
+    if [ -n "$found" ] && [ "$found" != "$target" ]; then
+      log "until then, 'extend' runs: $found"
+    fi
+    return 0
+  fi
+
+  # Write $HOME-relative dirs symbolically so the profile line survives a
+  # home rename and reads like what a user would write by hand.
+  case "$INSTALL_DIR" in
+    "$HOME"/*) dir_expr="\$HOME${INSTALL_DIR#"$HOME"}" ;;
+    *) dir_expr=$INSTALL_DIR ;;
+  esac
+
+  # Which file the user's login shell reads:
+  #   zsh   ${ZDOTDIR:-~}/.zprofile — macOS terminals open login shells
+  #   bash  first existing of .bash_profile/.bash_login/.profile — bash
+  #         skips .profile when .bash_profile exists
+  #   fish  conf.d snippet — fish never reads POSIX profiles
+  #   else  ~/.profile
+  line="export PATH=\"$dir_expr:\$PATH\""
+  case "${SHELL:-}" in
+    */zsh)
+      profile="${ZDOTDIR:-$HOME}/.zprofile"
+      ;;
+    */bash)
+      profile="$HOME/.profile"
+      for name in .bash_profile .bash_login .profile; do
+        if [ -f "$HOME/$name" ]; then
+          profile="$HOME/$name"
+          break
+        fi
+      done
+      ;;
+    */fish)
+      profile="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/extend.fish"
+      line="fish_add_path \"$dir_expr\""
       ;;
     *)
-      log "warning: $INSTALL_DIR is not on PATH"
-      log 'add it with: export PATH="$HOME/.local/bin:$PATH"'
-      if [ -n "$found" ] && [ "$found" != "$target" ]; then
-        log "until then, 'extend' runs: $found"
-      fi
+      profile="$HOME/.profile"
       ;;
   esac
+
+  if [ -f "$profile" ] && grep -qsF "$dir_expr" "$profile"; then
+    log "$profile already references $dir_expr"
+  else
+    mkdir -p "${profile%/*}" 2>/dev/null || true
+    if printf '%s\n' "$line" >>"$profile" 2>/dev/null; then
+      log "added $INSTALL_DIR to PATH in $profile"
+    else
+      log "warning: could not write $profile"
+      log "add it yourself: export PATH=\"$INSTALL_DIR:\$PATH\""
+      return 0
+    fi
+  fi
+  log "open a new shell, or run now: export PATH=\"$INSTALL_DIR:\$PATH\""
 }
 
 tag=$(resolve_version)
@@ -256,6 +398,10 @@ chmod 755 "$tmp/extend" || die "failed to mark downloaded binary executable"
 install_binary
 
 log "installed $tag to $target"
-warn_if_shadowed
+if on_path "$INSTALL_DIR"; then
+  warn_if_shadowed
+else
+  ensure_on_path
+fi
 
 run_setup
