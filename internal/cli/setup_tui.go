@@ -1091,7 +1091,7 @@ func (m setupModel) commitSaveChoice() (tea.Model, tea.Cmd) {
 		m.result.path = path
 		m.result.saveErr = err
 		if err != nil {
-			// Couldn't save — finish so runSetup reports the error.
+			// Couldn't save; finish so runSetup reports the error.
 			m.step = stepDone
 			m.quitting = true
 			return m, tea.Quit
@@ -1664,8 +1664,8 @@ func (m setupModel) renderSavePrompt() string {
 	b.WriteString(stDim.Render("  "+m.cfgPath) + "\n\n")
 
 	renderRadio(&b, []string{
-		"Save — every command just works",
-		"Don't save — I'll set EXTEND_API_KEY in my shell",
+		"Save (every command just works)",
+		"Don't save (I'll set EXTEND_API_KEY in my shell)",
 	}, nil, m.cursor)
 	return b.String()
 }
@@ -1675,7 +1675,7 @@ func (m setupModel) renderSkillPrompt() string {
 	if m.result != nil && m.result.saved {
 		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render("✓"), m.result.path)
 	} else {
-		b.WriteString(stDim.Render("– Key not saved; export instructions follow.") + "\n\n")
+		b.WriteString(stDim.Render("Key not saved; export instructions follow.") + "\n\n")
 	}
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
 	b.WriteString("\n")

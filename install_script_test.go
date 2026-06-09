@@ -57,7 +57,7 @@ func TestInstallScriptForwardsSkipSkill(t *testing.T) {
 
 // TestInstallScriptWarnsWhenShadowed: the install dir is on PATH, but a
 // different `extend` sits ahead of it. The installer must warn loudly and
-// name both binaries — this is the exact trap where the wizard (run by
+// name both binaries: this is the exact trap where the wizard (run by
 // absolute path) configures the new binary while the user's shell keeps
 // running the old one, so saved credentials look "missing".
 func TestInstallScriptWarnsWhenShadowed(t *testing.T) {
@@ -104,7 +104,7 @@ func TestInstallScriptNoShadowWarningWhenFirstOnPath(t *testing.T) {
 // tests: a release archive + checksums, a fake curl, and a fake HOME. The
 // returned env deliberately uses a minimal hermetic PATH (system tool dirs
 // only, no inherited PATH) so `command -v extend` inside the script can
-// never see a real extend on the developer's machine — the upgrade-in-place
+// never see a real extend on the developer's machine; the upgrade-in-place
 // branch would happily overwrite it.
 type installFixture struct {
 	tmp         string
@@ -249,8 +249,8 @@ func TestInstallScriptUpgradesInPlace(t *testing.T) {
 }
 
 // TestInstallScriptSkipsManagedSymlinkDir: a candidate dir whose `extend`
-// is a symlink (a package manager's, e.g. Homebrew) is skipped — both by
-// upgrade-in-place and by the candidate scan — and the next usable
+// is a symlink (a package manager's, e.g. Homebrew) is skipped, both by
+// upgrade-in-place and by the candidate scan, and the next usable
 // candidate wins. The shadow warning then points at the symlinked one.
 func TestInstallScriptSkipsManagedSymlinkDir(t *testing.T) {
 	f := newInstallFixture(t)
@@ -306,7 +306,7 @@ func TestInstallScriptFallsBackWhenNoCandidateOnPath(t *testing.T) {
 	}
 }
 
-// TestInstallScriptAddsFallbackDirToZshProfile: the stock-Mac case — zsh,
+// TestInstallScriptAddsFallbackDirToZshProfile: the stock-Mac case: zsh,
 // nothing usable on PATH → install to ~/.local/bin and append one guarded
 // PATH line to ~/.zprofile (macOS terminals are login shells). Running the
 // installer again must not duplicate the line.
@@ -348,7 +348,7 @@ func TestInstallScriptAddsFallbackDirToZshProfile(t *testing.T) {
 }
 
 // TestInstallScriptPicksBashProfileFile: bash login shells read the first
-// existing of .bash_profile, .bash_login, .profile — and skip .profile when
+// existing of .bash_profile, .bash_login, .profile, and skip .profile when
 // .bash_profile exists, so the line must land in the file bash will read.
 func TestInstallScriptPicksBashProfileFile(t *testing.T) {
 	f := newInstallFixture(t)
@@ -385,7 +385,7 @@ func TestInstallScriptWritesFishConfD(t *testing.T) {
 }
 
 // TestInstallScriptDefaultCandidates: without EXTEND_INSTALL_CANDIDATES the
-// shipped default list applies — ~/.local/bin is picked when on PATH. Every
+// shipped default list applies: ~/.local/bin is picked when on PATH. Every
 // other detection test injects candidates, so this is the only pin on the
 // real default string; a typo there would pass the rest of the suite.
 func TestInstallScriptDefaultCandidates(t *testing.T) {
@@ -425,7 +425,7 @@ func TestInstallScriptHonorsZdotdir(t *testing.T) {
 
 // TestInstallScriptProfileMakesShellResolveExtend asserts behavior, not
 // text: after the profile write, a real login shell must resolve the
-// installed extend. Each subtest skips when its shell isn't on the host —
+// installed extend. Each subtest skips when its shell isn't on the host;
 // bare ubuntu runners skip most, the macOS job guarantees zsh.
 func TestInstallScriptProfileMakesShellResolveExtend(t *testing.T) {
 	cases := []struct {
@@ -468,7 +468,7 @@ func TestInstallScriptProfileMakesShellResolveExtend(t *testing.T) {
 }
 
 // TestInstallScriptDoesNotModifyProfileForExplicitBinDir: a user-chosen
-// --bin-dir off PATH gets the warning, never a profile edit — they picked
+// --bin-dir off PATH gets the warning, never a profile edit: they picked
 // the location; we don't second-guess their dotfiles.
 func TestInstallScriptDoesNotModifyProfileForExplicitBinDir(t *testing.T) {
 	f := newInstallFixture(t)
@@ -491,7 +491,7 @@ func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
 	f := newInstallFixture(t)
 	binDir := filepath.Join(f.tmp, "bin")
 	mustMkdirAll(t, binDir)
-	// Corrupt the official SHA256SUMS — the one the script verifies against.
+	// Corrupt the official SHA256SUMS, the one the script verifies against.
 	writeChecksums(t, f.officialDir, f.archiveName, f.archivePath, true)
 
 	out, err := f.exec([]string{"--bin-dir", binDir}, nil)

@@ -47,7 +47,7 @@ jobs:
   # The full unit suite again on macOS: install.sh's primary target is the
   # stock Mac (BSD userland, /bin/sh as bash 3.2, zsh present), and the
   # ubuntu job can't exercise any of that. This is also where the
-  # login-shell behavioral test actually bites — zsh and bash are
+  # login-shell behavioral test actually bites: zsh and bash are
   # guaranteed on the runner, so it proves a real login shell resolves the
   # installed binary after the profile write.
   test-macos:
@@ -64,7 +64,7 @@ jobs:
       - name: go test
         run: go test -count=1 ./...
 
-  # install.sh under busybox ash — the third /bin/sh family after dash
+  # install.sh under busybox ash, the third /bin/sh family after dash
   # (ubuntu job) and bash-as-sh (macOS job), and exactly what `curl | sh`
   # hits inside Alpine-based images. The golang:alpine container has no
   # bash, which is the point; every step runs under plain sh.

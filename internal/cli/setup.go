@@ -48,16 +48,16 @@ guidance when they don't, and installs the agent skill. For fully
 unattended use set EXTEND_API_KEY directly.`,
 		Details: `Walks through these steps:
 
-  1. Region    — US (api.extend.ai) or EU (api.eu1.extend.ai).
-  2. API key   — opens the matching dashboard so you can create a key,
+  1. Region    - US (api.extend.ai) or EU (api.eu1.extend.ai).
+  2. API key   - opens the matching dashboard so you can create a key,
                  then accepts it via a hidden (masked) input.
-  3. Validate  — calls the API with the key/region to confirm it works.
+  3. Validate  - calls the API with the key/region to confirm it works.
                  Nothing is written to disk yet.
-  4. Workspace — only if the key is organization-scoped: validation
+  4. Workspace - only if the key is organization-scoped: validation
                  reports that a workspace is required, so the wizard
                  prompts for a workspace ID and re-validates. Most keys
                  are workspace-scoped and skip this step.
-  5. Save      — asks before writing anything. Saving stores the key on
+  5. Save      - asks before writing anything. Saving stores the key on
                  disk so every command just works; declining prints the
                  environment variables to export instead.
 
@@ -160,7 +160,7 @@ func runSetup(ctx context.Context, app *App, opts setupOptions) error {
 
 // reportSetupResult prints the post-wizard summary to stderr. A saved
 // result reports what was written where; a declined save prints the
-// env-var alternative the user chose — without echoing the key itself
+// env-var alternative the user chose, without echoing the key itself
 // (it stays wherever they copied it from). Region is included only when
 // it differs from the default (us), workspace only when one was needed.
 func reportSetupResult(app *App, res *setupResult) error {

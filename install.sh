@@ -185,9 +185,9 @@ on_path() {
 
 # usable_dir: we can drop a binary in $1 without sudo and without fighting a
 # package manager. A dir containing a `brew` executable is Homebrew's prefix
-# bin (/opt/homebrew/bin, or /usr/local/bin on Intel Macs) — never install
+# bin (/opt/homebrew/bin, or /usr/local/bin on Intel Macs): never install
 # foreign binaries there. An `extend` symlink there is a manager's (Homebrew
-# links are symlinks) — never overwrite it. An existing dir must be
+# links are symlinks): never overwrite it. An existing dir must be
 # writable; a missing dir only counts under $HOME (we can mkdir it).
 usable_dir() {
   if [ -e "$1/brew" ] || [ -L "$1/extend" ]; then
@@ -208,7 +208,7 @@ usable_dir() {
 #   1. Upgrade in place: the `extend` the shell already resolves (a regular
 #      file in a writable dir) is replaced where it lives, so an old install
 #      can never shadow the new one.
-#   2. First candidate dir that is on PATH and usable — the install works in
+#   2. First candidate dir that is on PATH and usable: the install works in
 #      the current shell with no profile edits (macOS does not put
 #      ~/.local/bin on PATH by default).
 #   3. Fall back to ~/.local/bin (the historical default) plus a warning.
@@ -306,7 +306,7 @@ warn_if_shadowed() {
 # the fix is one guarded PATH line appended to the file the user's login
 # shell actually reads (selected by $SHELL, since that is shell-specific,
 # not OS-specific). An explicit --bin-dir/EXTEND_INSTALL_DIR or
-# --no-modify-path/EXTEND_NO_MODIFY_PATH downgrades to a warning — we don't
+# --no-modify-path/EXTEND_NO_MODIFY_PATH downgrades to a warning; we don't
 # second-guess a user who picked the location or opted out.
 ensure_on_path() {
   found=$(command -v extend 2>/dev/null || true)
@@ -327,10 +327,10 @@ ensure_on_path() {
   esac
 
   # Which file the user's login shell reads:
-  #   zsh   ${ZDOTDIR:-~}/.zprofile — macOS terminals open login shells
-  #   bash  first existing of .bash_profile/.bash_login/.profile — bash
-  #         skips .profile when .bash_profile exists
-  #   fish  conf.d snippet — fish never reads POSIX profiles
+  #   zsh   ${ZDOTDIR:-~}/.zprofile (macOS terminals open login shells)
+  #   bash  first existing of .bash_profile/.bash_login/.profile (bash
+  #         skips .profile when .bash_profile exists)
+  #   fish  conf.d snippet (fish never reads POSIX profiles)
   #   else  ~/.profile
   line="export PATH=\"$dir_expr:\$PATH\""
   case "${SHELL:-}" in

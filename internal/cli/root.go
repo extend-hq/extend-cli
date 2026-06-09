@@ -372,7 +372,7 @@ func apiKeyEnvVar(envLabel string) string {
 // unconfiguredKeyError is the "no API key" error commands return when none
 // resolves: it names the key env var, points at `extend setup`, and links
 // the resolved region's dashboard (US for unset/unknown). When fileErr is
-// non-nil — a config file is present but couldn't be read or parsed — it
+// non-nil (a config file is present but couldn't be read or parsed), it
 // appends that cause so the user isn't told a key is missing when one is
 // sitting in an unreadable file (the shadowed-binary / bad-permissions trap).
 func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
@@ -380,7 +380,7 @@ func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
 	if d, ok := extendx.RegionDashboard(region); ok {
 		dash = d
 	}
-	err := fmt.Errorf("%s is not set — run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
+	err := fmt.Errorf("%s is not set. Run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
 	if fileErr != nil {
 		err = fmt.Errorf("%w\nnote: a config file was found but could not be read (run 'extend config'): %v", err, fileErr)
 	}

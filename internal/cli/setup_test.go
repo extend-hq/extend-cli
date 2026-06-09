@@ -195,7 +195,7 @@ func TestResolveSettings(t *testing.T) {
 // TestResolveSettingsSurfacesLoadError: a config file that exists but can't
 // be read or parsed must not be swallowed. resolveSettings reports the error
 // via fileErr (so `extend config` and the "key not set" error can explain
-// it) while still falling back gracefully — the key stays empty rather than
+// it) while still falling back gracefully: the key stays empty rather than
 // the whole command crashing on a malformed file.
 func TestResolveSettingsSurfacesLoadError(t *testing.T) {
 	loadErr := errors.New("parse config.json: unexpected end of JSON input")
@@ -416,7 +416,7 @@ func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
 
 // TestSetupModel_SaveDeclineWritesNothing: declining the save-consent
 // prompt must leave the disk untouched, record saved=false, and still
-// continue to the skill prompt — the user gets env-var guidance instead.
+// continue to the skill prompt; the user gets env-var guidance instead.
 func TestSetupModel_SaveDeclineWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -443,7 +443,7 @@ func TestSetupModel_SaveDeclineWritesNothing(t *testing.T) {
 }
 
 // TestSetupModel_SavePromptShowsPathAndAlternative: the consent prompt is
-// the transparency moment — it must name the exact file the key would be
+// the transparency moment: it must name the exact file the key would be
 // written to and offer the env-var alternative before anything happens.
 func TestSetupModel_SavePromptShowsPathAndAlternative(t *testing.T) {
 	dir := t.TempDir()
