@@ -28,6 +28,7 @@ const (
 	stepKey
 	stepValidating
 	stepWorkspace
+	stepSave
 	stepSkill
 	stepDone
 )
@@ -222,8 +223,12 @@ type setupResult struct {
 	region      regionChoice
 	apiKey      string
 	workspaceID string // set only when an org key required one
-	path        string
-	saveErr     error
+	// saved records the user's save-consent choice: true means the key was
+	// written to path; false means they declined and want env-var guidance
+	// instead. saveErr is only meaningful when they consented.
+	saved   bool
+	path    string
+	saveErr error
 
 	// installSkill records the user's choice to write the agent SKILL.md.
 	// skillPath/skillErr are filled in by runSetup after it performs the
@@ -317,6 +322,10 @@ type setupModel struct {
 	// skipSkill suppresses the skill step (set from EXTEND_SKIP_SKILL_INSTALL).
 	skipSkill bool
 
+	// cfgPath is where a consented save will write, shown verbatim on the
+	// save-consent step so the user knows exactly what touches their disk.
+	cfgPath string
+
 	result   *setupResult
 	canceled bool
 	quitting bool
@@ -350,6 +359,11 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 		}
 	}
 
+	cfgPath, err := config.Path()
+	if err != nil {
+		cfgPath = "~/.config/extend/config.json"
+	}
+
 	m := setupModel{
 		ctx:      ctx,
 		colorOn:  colorOn,
@@ -359,6 +373,7 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 		input:    ti,
 		wsInput:  wsi,
 		spin:     sp,
+		cfgPath:  cfgPath,
 	}
 	if colorOn {
 		m.styles = buildLogoStyles()
@@ -886,31 +901,10 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = stepKey
 			return m, m.input.Focus()
 		}
-		file := config.File{
-			Region: m.region.id,
-			Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
-		}
-		if m.workspaceID != "" {
-			file.WorkspaceID = m.workspaceID
-		}
-		path, err := config.Save(file)
-		m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID, path: path, saveErr: err}
-		if err != nil {
-			// Couldn't save — finish so runSetup reports the error.
-			m.step = stepDone
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// EXTEND_SKIP_SKILL_INSTALL suppresses the skill without prompting.
-		if m.skipSkill {
-			m.result.installSkill = false
-			m.step = stepDone
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// Offer to install the agent skill before finishing.
-		m.step = stepSkill
-		m.cursor = 0 // default to "Yes"
+		// Nothing is written yet: ask for consent first. The save-consent
+		// step names the destination file and the env-var alternative.
+		m.step = stepSave
+		m.cursor = 0 // default to "Save"
 		return m, nil
 
 	case tea.MouseClickMsg:
@@ -1033,20 +1027,16 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case stepSkill:
-		switch msg.String() {
-		case "up", "k", "down", "j", "left", "right", "h", "l", "tab":
-			m.cursor = 1 - m.cursor // toggle Yes/No
+	case stepSave:
+		committed := false
+		if m.cursor, committed = binaryChoiceKey(msg.String(), m.cursor); !committed {
 			return m, nil
-		case "y", "Y":
-			m.cursor = 0
-		case "n", "N":
-			m.cursor = 1
-		case "enter", " ":
-			// fall through to commit below
-		case "esc", "q":
-			m.cursor = 1 // treat as "No"
-		default:
+		}
+		return m.commitSaveChoice()
+
+	case stepSkill:
+		committed := false
+		if m.cursor, committed = binaryChoiceKey(msg.String(), m.cursor); !committed {
 			return m, nil
 		}
 		if m.result != nil {
@@ -1060,6 +1050,63 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	}
+	return m, nil
+}
+
+// binaryChoiceKey interprets a key press on a two-option chooser: arrows
+// and tab toggle without committing, y/n jump to an option and commit,
+// enter/space commit the current option, esc/q commit "No" (option 1).
+func binaryChoiceKey(key string, cursor int) (newCursor int, committed bool) {
+	switch key {
+	case "up", "k", "down", "j", "left", "right", "h", "l", "tab":
+		return 1 - cursor, false
+	case "y", "Y":
+		return 0, true
+	case "n", "N":
+		return 1, true
+	case "enter", " ":
+		return cursor, true
+	case "esc", "q":
+		return 1, true
+	}
+	return cursor, false
+}
+
+// commitSaveChoice acts on the save-consent answer: "save" writes the
+// config file, "don't save" records the decline so runSetup prints the
+// env-var alternative instead. Either way the wizard continues to the
+// skill prompt unless EXTEND_SKIP_SKILL_INSTALL suppressed it.
+func (m setupModel) commitSaveChoice() (tea.Model, tea.Cmd) {
+	m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID}
+	if m.cursor == 0 {
+		file := config.File{
+			Region: m.region.id,
+			Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
+		}
+		if m.workspaceID != "" {
+			file.WorkspaceID = m.workspaceID
+		}
+		path, err := config.Save(file)
+		m.result.saved = true
+		m.result.path = path
+		m.result.saveErr = err
+		if err != nil {
+			// Couldn't save — finish so runSetup reports the error.
+			m.step = stepDone
+			m.quitting = true
+			return m, tea.Quit
+		}
+	}
+	// EXTEND_SKIP_SKILL_INSTALL suppresses the skill without prompting.
+	if m.skipSkill {
+		m.result.installSkill = false
+		m.step = stepDone
+		m.quitting = true
+		return m, tea.Quit
+	}
+	// Offer to install the agent skill before finishing.
+	m.step = stepSkill
+	m.cursor = 0 // default to "Yes"
 	return m, nil
 }
 
@@ -1530,28 +1577,43 @@ func (m setupModel) renderStep() string {
 		return m.renderValidating()
 	case stepWorkspace:
 		return m.renderWorkspace()
+	case stepSave:
+		return m.renderSavePrompt()
 	case stepSkill:
 		return m.renderSkillPrompt()
 	}
 	return ""
 }
 
+// renderRadio writes a radio-button list with the cursor row highlighted.
+// suffixes, when non-nil, are appended dim outside the highlight (one per
+// choice).
+func renderRadio(b *strings.Builder, choices, suffixes []string, cursor int) {
+	for i, c := range choices {
+		marker, radio, label := "  ", "( )", c
+		if i == cursor {
+			marker = stSelected.Render("❯ ")
+			radio = stSelected.Render("(•)")
+			label = stSelected.Render(c)
+		}
+		suffix := ""
+		if suffixes != nil {
+			suffix = stDim.Render("  " + suffixes[i])
+		}
+		fmt.Fprintf(b, "%s%s %s%s\n", marker, radio, label, suffix)
+	}
+}
+
 func (m setupModel) renderRegion() string {
 	var b strings.Builder
 	b.WriteString(stHeading.Render("Where is your Extend workspace?"))
 	b.WriteString("\n\n")
+	titles := make([]string, len(setupRegionChoices))
+	hosts := make([]string, len(setupRegionChoices))
 	for i, r := range setupRegionChoices {
-		marker := "  "
-		radio := "( )"
-		label := r.title
-		host := stDim.Render("  " + r.api)
-		if i == m.cursor {
-			marker = stSelected.Render("❯ ")
-			radio = stSelected.Render("(•)")
-			label = stSelected.Render(r.title)
-		}
-		fmt.Fprintf(&b, "%s%s %s%s\n", marker, radio, label, host)
+		titles[i], hosts[i] = r.title, r.api
 	}
+	renderRadio(&b, titles, hosts, m.cursor)
 	return b.String()
 }
 
@@ -1590,24 +1652,37 @@ func (m setupModel) renderWorkspace() string {
 	return b.String()
 }
 
-func (m setupModel) renderSkillPrompt() string {
+// renderSavePrompt is the transparency moment: it says exactly what a
+// "save" writes and where, and offers the env-var alternative, before
+// anything touches the user's disk.
+func (m setupModel) renderSavePrompt() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s API key validated.\n\n", stGood.Render("✓"))
+	b.WriteString(stHeading.Render("Save the API key on this machine?"))
+	b.WriteString("\n")
+	b.WriteString(stDim.Render("  Writes it in plaintext, readable only by you, to") + "\n")
+	b.WriteString(stDim.Render("  "+m.cfgPath) + "\n\n")
+
+	renderRadio(&b, []string{
+		"Save — every command just works",
+		"Don't save — I'll set EXTEND_API_KEY in my shell",
+	}, nil, m.cursor)
+	return b.String()
+}
+
+func (m setupModel) renderSkillPrompt() string {
+	var b strings.Builder
+	if m.result != nil && m.result.saved {
+		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render("✓"), m.result.path)
+	} else {
+		b.WriteString(stDim.Render("– Key not saved; export instructions follow.") + "\n\n")
+	}
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
 	b.WriteString("\n")
 	b.WriteString(stDim.Render("  Teaches coding agents (Claude Code, Codex, OpenCode, …) how to") + "\n")
 	b.WriteString(stDim.Render("  drive the Extend CLI.") + "\n\n")
 
-	choices := []string{"Yes, install it", "No thanks"}
-	for i, c := range choices {
-		marker, radio, label := "  ", "( )", c
-		if i == m.cursor {
-			marker = stSelected.Render("❯ ")
-			radio = stSelected.Render("(•)")
-			label = stSelected.Render(c)
-		}
-		fmt.Fprintf(&b, "%s%s %s\n", marker, radio, label)
-	}
+	renderRadio(&b, []string{"Yes, install it", "No thanks"}, nil, m.cursor)
 	return b.String()
 }
 
@@ -1621,6 +1696,8 @@ func (m setupModel) footerHint() string {
 		return "please wait…"
 	case stepWorkspace:
 		return "enter validate · esc back · ctrl+c quit"
+	case stepSave:
+		return "↑/↓ choose · y/n · enter confirm"
 	case stepSkill:
 		return "↑/↓ choose · y/n · enter confirm"
 	}

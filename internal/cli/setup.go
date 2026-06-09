@@ -51,14 +51,17 @@ unattended use set EXTEND_API_KEY directly.`,
   1. Region    — US (api.extend.ai) or EU (api.eu1.extend.ai).
   2. API key   — opens the matching dashboard so you can create a key,
                  then accepts it via a hidden (masked) input.
-  3. Validate  — calls the API with the key/region; on success writes
-                 the configuration to disk.
+  3. Validate  — calls the API with the key/region to confirm it works.
+                 Nothing is written to disk yet.
   4. Workspace — only if the key is organization-scoped: validation
                  reports that a workspace is required, so the wizard
                  prompts for a workspace ID and re-validates. Most keys
                  are workspace-scoped and skip this step.
+  5. Save      — asks before writing anything. Saving stores the key on
+                 disk so every command just works; declining prints the
+                 environment variables to export instead.
 
-The configuration is saved to ~/.config/extend/config.json (honoring
+A consented save writes ~/.config/extend/config.json (honoring
 XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
 source of the API key, region, base URL, and workspace: command flags and
 environment variables still win (flag > env > config file > default).
@@ -91,7 +94,7 @@ can delegate to it safely.`,
 			"--skip-skill-install only suppresses the agent skill step; it does not bypass the interactive wizard. Use --non-interactive to skip the wizard even when a TTY is attached (combine the two for a fully silent setup).",
 			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
 			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
-			"The key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
+			"The wizard asks before saving the key; declining prints the env vars to export instead. A saved key is stored in plaintext at ~/.config/extend/config.json (0600); delete that file to sign out.",
 		},
 		SeeAlso: []string{"auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
@@ -152,22 +155,48 @@ func runSetup(ctx context.Context, app *App, opts setupOptions) error {
 	if m.result == nil {
 		return nil
 	}
-	if m.result.saveErr != nil {
-		return fmt.Errorf("save config: %w", m.result.saveErr)
+	return reportSetupResult(app, m.result)
+}
+
+// reportSetupResult prints the post-wizard summary to stderr. A saved
+// result reports what was written where; a declined save prints the
+// env-var alternative the user chose — without echoing the key itself
+// (it stays wherever they copied it from). Region is included only when
+// it differs from the default (us), workspace only when one was needed.
+func reportSetupResult(app *App, res *setupResult) error {
+	pal := paletteFor(app.IO)
+	if res.saveErr != nil {
+		return fmt.Errorf("save config: %w", res.saveErr)
 	}
 
 	fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
-	fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
-		pal.Green("✓"), m.result.region.title, m.result.region.api, m.result.path)
-	if m.result.workspaceID != "" {
-		fmt.Fprintf(app.IO.ErrOut, "%s Workspace %s\n", pal.Green("✓"), m.result.workspaceID)
+	if res.saved {
+		fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
+			pal.Green("✓"), res.region.title, res.region.api, res.path)
+		if res.workspaceID != "" {
+			fmt.Fprintf(app.IO.ErrOut, "%s Workspace %s\n", pal.Green("✓"), res.workspaceID)
+		}
+	} else {
+		fmt.Fprintf(app.IO.ErrOut, "%s Nothing was saved. Set the key in your shell to use the CLI:\n\n", pal.Yellow("!"))
+		fmt.Fprintf(app.IO.ErrOut, "    export %s=<your key>\n", envAPIKey)
+		if res.region.id != "" && res.region.id != "us" {
+			fmt.Fprintf(app.IO.ErrOut, "    export %s=%s\n", envRegion, res.region.id)
+		}
+		if res.workspaceID != "" {
+			fmt.Fprintf(app.IO.ErrOut, "    export %s=%s\n", envWorkspaceID, res.workspaceID)
+		}
+		fmt.Fprintf(app.IO.ErrOut, "\nRun 'extend setup' again anytime to save it instead.\n")
 	}
 
-	if m.result.installSkill {
+	if res.installSkill {
 		installSkillAndReport(app)
 	}
 
-	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend files list"))
+	if res.saved {
+		fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend files list"))
+	} else {
+		fmt.Fprintf(app.IO.ErrOut, "\nAfter exporting, try: %s\n", pal.Cyan("extend files list"))
+	}
 	return nil
 }
 

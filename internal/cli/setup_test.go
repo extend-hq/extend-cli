@@ -389,7 +389,7 @@ func TestResolveSkipSkill(t *testing.T) {
 }
 
 // TestSetupModel_SkipSkillSkipsPrompt: with skipSkill set (from
-// EXTEND_SKIP_SKILL_INSTALL), a successful validation finishes without the
+// EXTEND_SKIP_SKILL_INSTALL), accepting the save finishes without the
 // skill prompt and records installSkill=false.
 func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
 	dir := t.TempDir()
@@ -402,12 +402,121 @@ func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
 	m.step = stepValidating
 
 	m = drive(t, m, validatedMsg{err: nil})
+	if m.step != stepSave {
+		t.Fatalf("step = %v, want stepSave", m.step)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepDone {
 		t.Fatalf("step = %v, want stepDone (skill prompt skipped)", m.step)
 	}
 	if m.result == nil || m.result.installSkill {
 		t.Errorf("installSkill should be false when skipSkill is set; result = %+v", m.result)
 	}
+}
+
+// TestSetupModel_SaveDeclineWritesNothing: declining the save-consent
+// prompt must leave the disk untouched, record saved=false, and still
+// continue to the skill prompt — the user gets env-var guidance instead.
+func TestSetupModel_SaveDeclineWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "eu", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[1] // eu
+	m.apiKey = "sk_live_123"
+	m.step = stepValidating
+
+	m = drive(t, m, validatedMsg{err: nil})
+	if m.step != stepSave {
+		t.Fatalf("step = %v, want stepSave", m.step)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill (decline still continues)", m.step)
+	}
+	if m.result == nil || m.result.saved || m.result.path != "" {
+		t.Fatalf("result = %+v, want saved=false with no path", m.result)
+	}
+	if post, err := config.Load(); err != nil || post.APIKey() != "" {
+		t.Fatalf("config written despite decline: %+v (err=%v)", post, err)
+	}
+}
+
+// TestSetupModel_SavePromptShowsPathAndAlternative: the consent prompt is
+// the transparency moment — it must name the exact file the key would be
+// written to and offer the env-var alternative before anything happens.
+func TestSetupModel_SavePromptShowsPathAndAlternative(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[0]
+	m.apiKey = "sk_live_123"
+	m.step = stepSave
+
+	body := m.renderStep()
+	for _, want := range []string{
+		filepath.Join(dir, "extend", "config.json"), // the exact destination
+		"plaintext",      // what will be written
+		"EXTEND_API_KEY", // the alternative
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("save prompt missing %q; got:\n%s", want, body)
+		}
+	}
+}
+
+// TestReportSetupResult pins the post-wizard summary both ways: a saved
+// result reports the path; a declined save prints copy-pasteable env-var
+// guidance (region and workspace included only when relevant) and never
+// echoes the key itself.
+func TestReportSetupResult(t *testing.T) {
+	t.Run("saved", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		res := &setupResult{region: setupRegionChoices[1], apiKey: "sk_z", saved: true, path: "/tmp/cfg.json"}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		out := ta.errOut.String()
+		if !strings.Contains(out, "/tmp/cfg.json") {
+			t.Errorf("saved summary missing path; got:\n%s", out)
+		}
+		if strings.Contains(out, "sk_z") {
+			t.Errorf("summary must never echo the key; got:\n%s", out)
+		}
+	})
+
+	t.Run("declined", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		res := &setupResult{region: setupRegionChoices[1], apiKey: "sk_z", workspaceID: "ws_1", saved: false}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		out := ta.errOut.String()
+		for _, want := range []string{
+			"export EXTEND_API_KEY=",
+			"export EXTEND_REGION=eu",
+			"export EXTEND_WORKSPACE_ID=ws_1",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("declined summary missing %q; got:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "sk_z") {
+			t.Errorf("declined summary must not echo the key; got:\n%s", out)
+		}
+	})
+
+	t.Run("declined us region omits region line", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		res := &setupResult{region: setupRegionChoices[0], apiKey: "sk_z", saved: false}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		if out := ta.errOut.String(); strings.Contains(out, "EXTEND_REGION") {
+			t.Errorf("us (default) region should not need an EXTEND_REGION line; got:\n%s", out)
+		}
+	})
 }
 
 // TestValidateAPIKey_OK confirms a 2xx from the workflows list endpoint
@@ -503,9 +612,10 @@ func TestSetupModel_EmptyKeyRejected(t *testing.T) {
 	}
 }
 
-// TestSetupModel_ValidateSuccessSaves drives the model to a successful
-// validation and asserts the config file is written with the chosen
-// region and key.
+// TestSetupModel_ValidateSuccessSaves drives the model through a
+// successful validation and the save-consent step: validation must land on
+// the consent prompt with NOTHING written yet, and accepting writes the
+// config file with the chosen region and key.
 func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -516,12 +626,21 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	m.step = stepValidating
 
 	m = drive(t, m, validatedMsg{err: nil})
-	// On success the config is saved immediately and the wizard advances
-	// to the skill-install prompt (not straight to done).
+	// Success lands on the save-consent prompt; the key must not have
+	// been written before the user agrees.
+	if m.step != stepSave {
+		t.Fatalf("step = %v, want stepSave (consent before writing)", m.step)
+	}
+	if pre, err := config.Load(); err != nil || pre.APIKey() != "" {
+		t.Fatalf("config written before consent: %+v (err=%v)", pre, err)
+	}
+
+	// Accept (default cursor = save) → file written, on to the skill prompt.
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepSkill {
 		t.Fatalf("step = %v, want stepSkill", m.step)
 	}
-	if m.result == nil || m.result.saveErr != nil {
+	if m.result == nil || m.result.saveErr != nil || !m.result.saved {
 		t.Fatalf("result = %+v, want a saved result with no error", m.result)
 	}
 	wantPath := filepath.Join(dir, "extend", "config.json")
@@ -640,8 +759,13 @@ func TestSetupModel_OrgKeyPromptsForWorkspace(t *testing.T) {
 		t.Fatalf("workspaceID = %q, want ws_123", m.workspaceID)
 	}
 
-	// Successful validation persists region + key + workspace.
+	// Successful validation asks for save consent; accepting persists
+	// region + key + workspace.
 	m = drive(t, m, validatedMsg{err: nil})
+	if m.step != stepSave {
+		t.Fatalf("step = %v, want stepSave", m.step)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.step != stepSkill {
 		t.Fatalf("step = %v, want stepSkill", m.step)
 	}
