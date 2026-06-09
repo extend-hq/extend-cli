@@ -15,42 +15,11 @@ import (
 )
 
 func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("install.sh targets Unix-like platforms")
-	}
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is required to run install.sh")
-	}
-
-	tmp := t.TempDir()
-	releaseDir := filepath.Join(tmp, "release")
-	officialDir := filepath.Join(tmp, "official")
-	binDir := filepath.Join(tmp, "bin")
-	fakePath := filepath.Join(tmp, "fakebin")
-	setupLog := filepath.Join(tmp, "setup.log")
-	mustMkdirAll(t, releaseDir)
-	mustMkdirAll(t, officialDir)
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "bin")
 	mustMkdirAll(t, binDir)
-	mustMkdirAll(t, fakePath)
 
-	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
-	archivePath := filepath.Join(releaseDir, archiveName)
-	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, true)
-	writeChecksums(t, officialDir, archiveName, archivePath, false)
-	writeFakeCurl(t, fakePath)
-
-	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
-	cmd.Env = append(os.Environ(),
-		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
-		"EXTEND_FAKE_SETUP_LOG="+setupLog,
-		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
-		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
-	}
+	f.run(t, []string{"--bin-dir", binDir}, nil)
 
 	installed := filepath.Join(binDir, "extend")
 	if info, err := os.Stat(installed); err != nil {
@@ -66,7 +35,7 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 	if got, want := strings.TrimSpace(string(versionOut)), "extend test v9.9.9"; got != want {
 		t.Fatalf("installed binary output = %q, want %q", got, want)
 	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup" {
+	if got := readFileString(t, f.setupLog); strings.TrimSpace(got) != "setup" {
 		t.Fatalf("setup log = %q, want \"setup\" (delegated to setup with no skip flag)", got)
 	}
 }
@@ -75,42 +44,13 @@ func TestInstallScriptInstallsFromReleaseArchive(t *testing.T) {
 // forwarded to the CLI as the same --skip-skill-install flag (the CLI,
 // not the script, owns suppressing the skill).
 func TestInstallScriptForwardsSkipSkill(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("install.sh targets Unix-like platforms")
-	}
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is required to run install.sh")
-	}
-
-	tmp := t.TempDir()
-	releaseDir := filepath.Join(tmp, "release")
-	officialDir := filepath.Join(tmp, "official")
-	binDir := filepath.Join(tmp, "bin")
-	fakePath := filepath.Join(tmp, "fakebin")
-	setupLog := filepath.Join(tmp, "setup.log")
-	mustMkdirAll(t, releaseDir)
-	mustMkdirAll(t, officialDir)
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "bin")
 	mustMkdirAll(t, binDir)
-	mustMkdirAll(t, fakePath)
 
-	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
-	archivePath := filepath.Join(releaseDir, archiveName)
-	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, true)
-	writeChecksums(t, officialDir, archiveName, archivePath, false)
-	writeFakeCurl(t, fakePath)
+	f.run(t, []string{"--bin-dir", binDir, "--skip-skill-install"}, nil)
 
-	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir, "--skip-skill-install")
-	cmd.Env = append(os.Environ(),
-		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
-		"EXTEND_FAKE_SETUP_LOG="+setupLog,
-		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
-		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
-	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup --skip-skill-install" {
+	if got := readFileString(t, f.setupLog); strings.TrimSpace(got) != "setup --skip-skill-install" {
 		t.Fatalf("setup log = %q, want \"setup --skip-skill-install\"", got)
 	}
 }
@@ -167,11 +107,14 @@ func TestInstallScriptNoShadowWarningWhenFirstOnPath(t *testing.T) {
 // never see a real extend on the developer's machine — the upgrade-in-place
 // branch would happily overwrite it.
 type installFixture struct {
-	tmp      string
-	home     string
-	fakePath string
-	setupLog string
-	baseEnv  []string
+	tmp         string
+	home        string
+	fakePath    string
+	setupLog    string
+	officialDir string
+	archiveName string
+	archivePath string
+	baseEnv     []string
 }
 
 func newInstallFixture(t *testing.T) *installFixture {
@@ -197,15 +140,21 @@ func newInstallFixture(t *testing.T) *installFixture {
 	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
 	archivePath := filepath.Join(releaseDir, archiveName)
 	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
+	// The release-mirror checksums are deliberately corrupt and the
+	// official ones good: an install only succeeds if the script verifies
+	// against the official URL, never the (overridable) mirror.
 	writeChecksums(t, releaseDir, archiveName, archivePath, true)
 	writeChecksums(t, officialDir, archiveName, archivePath, false)
 	writeFakeCurl(t, fakePath)
 
 	return &installFixture{
-		tmp:      tmp,
-		home:     home,
-		fakePath: fakePath,
-		setupLog: setupLog,
+		tmp:         tmp,
+		home:        home,
+		fakePath:    fakePath,
+		setupLog:    setupLog,
+		officialDir: officialDir,
+		archiveName: archiveName,
+		archivePath: archivePath,
 		baseEnv: []string{
 			"EXTEND_RELEASE_BASE_URL=file://" + releaseDir,
 			"EXTEND_FAKE_SETUP_LOG=" + setupLog,
@@ -215,11 +164,10 @@ func newInstallFixture(t *testing.T) *installFixture {
 	}
 }
 
-// run executes install.sh with the fixture env, extra script args, the
-// given PATH dirs (fake curl first, system tool dirs last), and extra env
-// entries.
-func (f *installFixture) run(t *testing.T, args []string, pathDirs []string, extraEnv ...string) string {
-	t.Helper()
+// exec runs install.sh with the fixture env, extra script args, the given
+// PATH dirs (fake curl first, system tool dirs last), and extra env
+// entries, returning the combined output and error.
+func (f *installFixture) exec(args []string, pathDirs []string, extraEnv ...string) (string, error) {
 	sep := string(os.PathListSeparator)
 	path := f.fakePath
 	for _, d := range pathDirs {
@@ -231,10 +179,17 @@ func (f *installFixture) run(t *testing.T, args []string, pathDirs []string, ext
 	cmd.Env = append(append([]string{}, f.baseEnv...), extraEnv...)
 	cmd.Env = append(cmd.Env, "PATH="+path)
 	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// run is exec for the common case where the install must succeed.
+func (f *installFixture) run(t *testing.T, args []string, pathDirs []string, extraEnv ...string) string {
+	t.Helper()
+	out, err := f.exec(args, pathDirs, extraEnv...)
 	if err != nil {
 		t.Fatalf("install.sh failed: %v\n%s", err, out)
 	}
-	return string(out)
+	return out
 }
 
 // TestInstallScriptDetectsCandidateOnPath: with no --bin-dir, the installer
@@ -533,49 +488,23 @@ func TestInstallScriptDoesNotModifyProfileForExplicitBinDir(t *testing.T) {
 }
 
 func TestInstallScriptRejectsChecksumMismatch(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("install.sh targets Unix-like platforms")
-	}
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is required to run install.sh")
-	}
-
-	tmp := t.TempDir()
-	releaseDir := filepath.Join(tmp, "release")
-	officialDir := filepath.Join(tmp, "official")
-	binDir := filepath.Join(tmp, "bin")
-	fakePath := filepath.Join(tmp, "fakebin")
-	setupLog := filepath.Join(tmp, "setup.log")
-	mustMkdirAll(t, releaseDir)
-	mustMkdirAll(t, officialDir)
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "bin")
 	mustMkdirAll(t, binDir)
-	mustMkdirAll(t, fakePath)
+	// Corrupt the official SHA256SUMS — the one the script verifies against.
+	writeChecksums(t, f.officialDir, f.archiveName, f.archivePath, true)
 
-	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
-	archivePath := filepath.Join(releaseDir, archiveName)
-	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, false)
-	writeChecksums(t, officialDir, archiveName, archivePath, true)
-	writeFakeCurl(t, fakePath)
-
-	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
-	cmd.Env = append(os.Environ(),
-		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
-		"EXTEND_FAKE_SETUP_LOG="+setupLog,
-		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
-		"PATH="+fakePath+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
+	out, err := f.exec([]string{"--bin-dir", binDir}, nil)
 	if err == nil {
 		t.Fatalf("install.sh succeeded with a bad checksum\n%s", out)
 	}
-	if !strings.Contains(string(out), "checksum mismatch") {
+	if !strings.Contains(out, "checksum mismatch") {
 		t.Fatalf("install.sh output = %q, want checksum mismatch", out)
 	}
 	if _, err := os.Stat(filepath.Join(binDir, "extend")); !os.IsNotExist(err) {
 		t.Fatalf("binary should not be installed after checksum mismatch, stat err: %v", err)
 	}
-	if _, err := os.Stat(setupLog); !os.IsNotExist(err) {
+	if _, err := os.Stat(f.setupLog); !os.IsNotExist(err) {
 		t.Fatalf("setup should not run after checksum mismatch, stat err: %v", err)
 	}
 }
