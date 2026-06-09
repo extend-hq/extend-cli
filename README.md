@@ -55,6 +55,13 @@ flag changes.
 
 ## Authenticate
 
+Run the interactive wizard — it picks your region, validates the API key,
+and saves it to `~/.config/extend/config.json`:
+
+    extend setup
+
+Or set environment variables (these take precedence over the saved config):
+
     export EXTEND_API_KEY=sk_xxx
 
 Optional:

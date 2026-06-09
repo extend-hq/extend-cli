@@ -35,11 +35,54 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: shellcheck
+        run: shellcheck install.sh
+
       - name: go test
         run: go test -count=1 ./...
 
       - name: go test -race
         run: go test -count=1 -race ./...
+
+  # The full unit suite again on macOS: install.sh's primary target is the
+  # stock Mac (BSD userland, /bin/sh as bash 3.2, zsh present), and the
+  # ubuntu job can't exercise any of that. This is also where the
+  # login-shell behavioral test actually bites — zsh and bash are
+  # guaranteed on the runner, so it proves a real login shell resolves the
+  # installed binary after the profile write.
+  test-macos:
+    name: unit tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test
+        run: go test -count=1 ./...
+
+  # install.sh under busybox ash — the third /bin/sh family after dash
+  # (ubuntu job) and bash-as-sh (macOS job), and exactly what `curl | sh`
+  # hits inside Alpine-based images. The golang:alpine container has no
+  # bash, which is the point; every step runs under plain sh.
+  install-script-alpine:
+    name: install script (busybox sh)
+    runs-on: ubuntu-latest
+    container: golang:alpine
+    defaults:
+      run:
+        shell: sh
+    steps:
+      - name: install git
+        run: apk add --no-cache git
+
+      - uses: actions/checkout@v6
+
+      - name: go test
+        run: go test -count=1 -v -run TestInstallScript .
 
   # The integration module has its own go.mod and isn't reachable from `go
   # vet ./...` at the repo root. Vet it here so a syntax error or harness

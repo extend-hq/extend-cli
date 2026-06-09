@@ -121,55 +121,22 @@ func TestInstallScriptForwardsSkipSkill(t *testing.T) {
 // absolute path) configures the new binary while the user's shell keeps
 // running the old one, so saved credentials look "missing".
 func TestInstallScriptWarnsWhenShadowed(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("install.sh targets Unix-like platforms")
-	}
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is required to run install.sh")
-	}
-
-	tmp := t.TempDir()
-	releaseDir := filepath.Join(tmp, "release")
-	officialDir := filepath.Join(tmp, "official")
-	binDir := filepath.Join(tmp, "bin")
-	fakePath := filepath.Join(tmp, "fakebin")
-	shadowDir := filepath.Join(tmp, "shadow")
-	setupLog := filepath.Join(tmp, "setup.log")
-	mustMkdirAll(t, releaseDir)
-	mustMkdirAll(t, officialDir)
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "bin")
+	shadowDir := filepath.Join(f.tmp, "shadow")
 	mustMkdirAll(t, binDir)
-	mustMkdirAll(t, fakePath)
 	mustMkdirAll(t, shadowDir)
-
-	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
-	archivePath := filepath.Join(releaseDir, archiveName)
-	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, true)
-	writeChecksums(t, officialDir, archiveName, archivePath, false)
-	writeFakeCurl(t, fakePath)
 	// A pre-existing `extend` ahead of the install dir on PATH.
 	shadowExtend := filepath.Join(shadowDir, "extend")
 	if err := os.WriteFile(shadowExtend, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write shadow extend: %v", err)
 	}
 
-	sep := string(os.PathListSeparator)
-	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
-	cmd.Env = append(os.Environ(),
-		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
-		"EXTEND_FAKE_SETUP_LOG="+setupLog,
-		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
-		// shadowDir is ahead of binDir; both are on PATH.
-		"PATH="+fakePath+sep+shadowDir+sep+binDir+sep+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
-	}
+	out := f.run(t, []string{"--bin-dir", binDir}, []string{shadowDir, binDir})
 
 	target := filepath.Join(binDir, "extend")
 	for _, want := range []string{"shadows", shadowExtend, target, "hash -r"} {
-		if !strings.Contains(string(out), want) {
+		if !strings.Contains(out, want) {
 			t.Fatalf("install.sh output missing %q; got:\n%s", want, out)
 		}
 	}
@@ -179,48 +146,16 @@ func TestInstallScriptWarnsWhenShadowed(t *testing.T) {
 // first on PATH (so `extend` resolves to the freshly installed binary), the
 // installer must NOT emit a shadow warning.
 func TestInstallScriptNoShadowWarningWhenFirstOnPath(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("install.sh targets Unix-like platforms")
-	}
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is required to run install.sh")
-	}
-
-	tmp := t.TempDir()
-	releaseDir := filepath.Join(tmp, "release")
-	officialDir := filepath.Join(tmp, "official")
-	binDir := filepath.Join(tmp, "bin")
-	fakePath := filepath.Join(tmp, "fakebin")
-	setupLog := filepath.Join(tmp, "setup.log")
-	mustMkdirAll(t, releaseDir)
-	mustMkdirAll(t, officialDir)
+	f := newInstallFixture(t)
+	binDir := filepath.Join(f.tmp, "bin")
 	mustMkdirAll(t, binDir)
-	mustMkdirAll(t, fakePath)
 
-	archiveName := fmt.Sprintf("extend_v9.9.9_%s_%s.tar.gz", runtime.GOOS, goArchForInstallTest(t))
-	archivePath := filepath.Join(releaseDir, archiveName)
-	writeReleaseArchive(t, archivePath, []byte(fakeExtendBinary()))
-	writeChecksums(t, releaseDir, archiveName, archivePath, true)
-	writeChecksums(t, officialDir, archiveName, archivePath, false)
-	writeFakeCurl(t, fakePath)
+	out := f.run(t, []string{"--bin-dir", binDir}, []string{binDir})
 
-	sep := string(os.PathListSeparator)
-	cmd := exec.Command("sh", "install.sh", "--version", "v9.9.9", "--bin-dir", binDir)
-	cmd.Env = append(os.Environ(),
-		"EXTEND_RELEASE_BASE_URL=file://"+releaseDir,
-		"EXTEND_FAKE_SETUP_LOG="+setupLog,
-		"FAKE_OFFICIAL_RELEASE_DIR="+officialDir,
-		// binDir is first, so the freshly installed binary wins.
-		"PATH="+binDir+sep+fakePath+sep+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
-	}
-	if strings.Contains(string(out), "shadows") {
+	if strings.Contains(out, "shadows") {
 		t.Fatalf("install.sh warned about shadowing when install dir is first on PATH; got:\n%s", out)
 	}
-	if got := readFileString(t, setupLog); strings.TrimSpace(got) != "setup" {
+	if got := readFileString(t, f.setupLog); strings.TrimSpace(got) != "setup" {
 		t.Fatalf("setup log = %q, want \"setup\"", got)
 	}
 }
@@ -530,6 +465,50 @@ func TestInstallScriptHonorsZdotdir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.home, ".zprofile")); !os.IsNotExist(err) {
 		t.Fatalf("must write $ZDOTDIR/.zprofile, not $HOME/.zprofile, stat err: %v", err)
+	}
+}
+
+// TestInstallScriptProfileMakesShellResolveExtend asserts behavior, not
+// text: after the profile write, a real login shell must resolve the
+// installed extend. Each subtest skips when its shell isn't on the host —
+// bare ubuntu runners skip most, the macOS job guarantees zsh.
+func TestInstallScriptProfileMakesShellResolveExtend(t *testing.T) {
+	cases := []struct {
+		shell string
+		args  []string
+	}{
+		{"zsh", []string{"-l", "-c", "command -v extend"}},
+		{"bash", []string{"-l", "-c", "command -v extend"}},
+		{"fish", []string{"-c", "command -v extend"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.shell, func(t *testing.T) {
+			shellPath, err := exec.LookPath(tc.shell)
+			if err != nil {
+				t.Skipf("%s not installed", tc.shell)
+			}
+			f := newInstallFixture(t)
+			out := f.run(t, nil, nil,
+				"SHELL="+shellPath,
+				"EXTEND_INSTALL_CANDIDATES="+filepath.Join(f.home, ".local", "bin"))
+
+			// A fresh shell with the fixture HOME and a PATH that does NOT
+			// include the install dir: only the written profile can make
+			// extend resolve.
+			cmd := exec.Command(shellPath, tc.args...)
+			cmd.Env = []string{
+				"HOME=" + f.home,
+				"PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+			}
+			resolved, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s failed: %v\n%s\ninstaller output:\n%s", tc.shell, err, resolved, out)
+			}
+			want := filepath.Join(f.home, ".local", "bin", "extend")
+			if got := strings.TrimSpace(string(resolved)); got != want {
+				t.Fatalf("%s resolves extend to %q, want %q\ninstaller output:\n%s", tc.shell, got, want, out)
+			}
+		})
 	}
 }
 
