@@ -185,7 +185,31 @@ func TestResolveSettings(t *testing.T) {
 			if got.apiVersion.val != tc.wantAPIVersion {
 				t.Errorf("apiVersion = %q, want %q", got.apiVersion.val, tc.wantAPIVersion)
 			}
+			if got.fileErr != nil {
+				t.Errorf("fileErr = %v, want nil for a clean load", got.fileErr)
+			}
 		})
+	}
+}
+
+// TestResolveSettingsSurfacesLoadError: a config file that exists but can't
+// be read or parsed must not be swallowed. resolveSettings reports the error
+// via fileErr (so `extend config` and the "key not set" error can explain
+// it) while still falling back gracefully: the key stays empty rather than
+// the whole command crashing on a malformed file.
+func TestResolveSettingsSurfacesLoadError(t *testing.T) {
+	loadErr := errors.New("parse config.json: unexpected end of JSON input")
+	loadBroken := func() (config.File, error) { return config.File{}, loadErr }
+
+	got := resolveSettings("", "", "", func(string) string { return "" }, loadBroken)
+	if got.fileErr == nil {
+		t.Fatal("fileErr = nil, want the load error surfaced")
+	}
+	if !errors.Is(got.fileErr, loadErr) {
+		t.Errorf("fileErr = %v, want it to wrap %v", got.fileErr, loadErr)
+	}
+	if got.key.val != "" {
+		t.Errorf("key = %q, want empty when the file failed to load", got.key.val)
 	}
 }
 
@@ -386,6 +410,108 @@ func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
 	}
 }
 
+// TestSetupModel_EscOnKeyStepSkipsSaving: esc at the key step is the
+// opt-out the note advertises. It must leave the disk untouched, record
+// saved=false, and continue to the skill prompt; the summary then prints
+// env-var guidance.
+func TestSetupModel_EscOnKeyStepSkipsSaving(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "eu", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[1] // eu
+	m.step = stepKey
+
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill (skip still continues)", m.step)
+	}
+	if m.result == nil || m.result.saved || m.result.path != "" {
+		t.Fatalf("result = %+v, want saved=false with no path", m.result)
+	}
+	if post, err := config.Load(); err != nil || post.APIKey() != "" {
+		t.Fatalf("config written despite skip: %+v (err=%v)", post, err)
+	}
+}
+
+// TestSetupModel_KeyStepShowsSaveNote: the key-entry screen is the
+// transparency moment: it must say where a validated key will be saved
+// and that esc skips the save (env var as the alternative).
+func TestSetupModel_KeyStepShowsSaveNote(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
+	m.region = setupRegionChoices[0]
+	m.step = stepKey
+
+	body := m.renderStep()
+	for _, want := range []string{
+		filepath.Join(dir, "extend", "config.json"), // the exact destination
+		"(optional)",     // the key can be skipped
+		"esc",            // the skip
+		"EXTEND_API_KEY", // the alternative
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("key step missing %q; got:\n%s", want, body)
+		}
+	}
+}
+
+// TestReportSetupResult pins the post-wizard summary both ways: a saved
+// result reports the path; a declined save prints copy-pasteable env-var
+// guidance (region and workspace included only when relevant) and never
+// echoes the key itself.
+func TestReportSetupResult(t *testing.T) {
+	t.Run("saved", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		res := &setupResult{region: setupRegionChoices[1], apiKey: "sk_z", saved: true, path: "/tmp/cfg.json"}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		out := ta.errOut.String()
+		if !strings.Contains(out, "/tmp/cfg.json") {
+			t.Errorf("saved summary missing path; got:\n%s", out)
+		}
+		if strings.Contains(out, "sk_z") {
+			t.Errorf("summary must never echo the key; got:\n%s", out)
+		}
+	})
+
+	t.Run("skipped", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		// esc-skip: no key was entered or validated, only region chosen.
+		res := &setupResult{region: setupRegionChoices[1], workspaceID: "ws_1", saved: false}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		out := ta.errOut.String()
+		for _, want := range []string{
+			"export EXTEND_API_KEY=",
+			"export EXTEND_REGION=eu",
+			"export EXTEND_WORKSPACE_ID=ws_1",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("skipped summary missing %q; got:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "validated") {
+			t.Errorf("skipped summary must not claim a key was validated; got:\n%s", out)
+		}
+	})
+
+	t.Run("skipped us region omits region line", func(t *testing.T) {
+		ta := newTestApp(t, newFakeServer(t, nil))
+		res := &setupResult{region: setupRegionChoices[0], saved: false}
+		if err := reportSetupResult(ta.app, res); err != nil {
+			t.Fatalf("reportSetupResult = %v", err)
+		}
+		if out := ta.errOut.String(); strings.Contains(out, "EXTEND_REGION") {
+			t.Errorf("us (default) region should not need an EXTEND_REGION line; got:\n%s", out)
+		}
+	})
+}
+
 // TestValidateAPIKey_OK confirms a 2xx from the workflows list endpoint
 // is treated as a valid key.
 func TestValidateAPIKey_OK(t *testing.T) {
@@ -422,8 +548,8 @@ func TestValidateAPIKey_Unauthorized(t *testing.T) {
 }
 
 func TestSetupValidationMessage(t *testing.T) {
-	if got := setupValidationMessage(errEmptyKey); got != "Please paste an API key." {
-		t.Errorf("empty-key message = %q", got)
+	if got := setupValidationMessage(errEmptyWorkspace); got != "Please paste a workspace ID." {
+		t.Errorf("empty-workspace message = %q", got)
 	}
 	if got := setupValidationMessage(nil); got != "" {
 		t.Errorf("nil message = %q, want empty", got)
@@ -465,23 +591,31 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 	}
 }
 
-// TestSetupModel_EmptyKeyRejected ensures submitting a blank key shows an
-// inline error and stays on the key step.
-func TestSetupModel_EmptyKeyRejected(t *testing.T) {
+// TestSetupModel_EmptyKeySubmitSkips: the key is optional. Enter on an
+// empty input skips saving exactly like esc: continue to the skill
+// prompt, nothing written, env-var guidance in the summary.
+func TestSetupModel_EmptyKeySubmitSkips(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
 	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick US
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit empty key
-	if m.step != stepKey {
-		t.Fatalf("step = %v, want stepKey (empty key should not advance)", m.step)
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill (empty key submits as skip)", m.step)
 	}
-	if !errors.Is(m.valErr, errEmptyKey) {
-		t.Errorf("valErr = %v, want errEmptyKey", m.valErr)
+	if m.result == nil || m.result.saved || m.result.apiKey != "" {
+		t.Fatalf("result = %+v, want saved=false with no key", m.result)
+	}
+	if post, err := config.Load(); err != nil || post.APIKey() != "" {
+		t.Fatalf("config written despite skip: %+v (err=%v)", post, err)
 	}
 }
 
 // TestSetupModel_ValidateSuccessSaves drives the model to a successful
 // validation and asserts the config file is written with the chosen
-// region and key.
+// region and key (the key step's note announces the save; esc there is
+// the opt-out).
 func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -492,12 +626,12 @@ func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	m.step = stepValidating
 
 	m = drive(t, m, validatedMsg{err: nil})
-	// On success the config is saved immediately and the wizard advances
-	// to the skill-install prompt (not straight to done).
+	// On success the config is saved and the wizard advances to the
+	// skill-install prompt (not straight to done).
 	if m.step != stepSkill {
 		t.Fatalf("step = %v, want stepSkill", m.step)
 	}
-	if m.result == nil || m.result.saveErr != nil {
+	if m.result == nil || m.result.saveErr != nil || !m.result.saved {
 		t.Fatalf("result = %+v, want a saved result with no error", m.result)
 	}
 	wantPath := filepath.Join(dir, "extend", "config.json")

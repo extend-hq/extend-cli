@@ -211,9 +211,6 @@ func advertisedChoices() []regionChoice {
 // can drive the model without real network calls.
 type setupValidator func(ctx context.Context, region, key, workspaceID string) error
 
-// errEmptyKey is shown inline when the user submits an empty key.
-var errEmptyKey = errors.New("please paste an API key")
-
 // errEmptyWorkspace is shown inline when the user submits an empty
 // workspace ID at the (org-key-only) workspace step.
 var errEmptyWorkspace = errors.New("please paste a workspace id")
@@ -222,8 +219,12 @@ type setupResult struct {
 	region      regionChoice
 	apiKey      string
 	workspaceID string // set only when an org key required one
-	path        string
-	saveErr     error
+	// saved records the user's save-consent choice: true means the key was
+	// written to path; false means they declined and want env-var guidance
+	// instead. saveErr is only meaningful when they consented.
+	saved   bool
+	path    string
+	saveErr error
 
 	// installSkill records the user's choice to write the agent SKILL.md.
 	// skillPath/skillErr are filled in by runSetup after it performs the
@@ -317,6 +318,10 @@ type setupModel struct {
 	// skipSkill suppresses the skill step (set from EXTEND_SKIP_SKILL_INSTALL).
 	skipSkill bool
 
+	// cfgPath is where a consented save will write, shown verbatim on the
+	// save-consent step so the user knows exactly what touches their disk.
+	cfgPath string
+
 	result   *setupResult
 	canceled bool
 	quitting bool
@@ -350,6 +355,11 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 		}
 	}
 
+	cfgPath, err := config.Path()
+	if err != nil {
+		cfgPath = "~/.config/extend/config.json"
+	}
+
 	m := setupModel{
 		ctx:      ctx,
 		colorOn:  colorOn,
@@ -359,6 +369,7 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 		input:    ti,
 		wsInput:  wsi,
 		spin:     sp,
+		cfgPath:  cfgPath,
 	}
 	if colorOn {
 		m.styles = buildLogoStyles()
@@ -886,32 +897,9 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = stepKey
 			return m, m.input.Focus()
 		}
-		file := config.File{
-			Region: m.region.id,
-			Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
-		}
-		if m.workspaceID != "" {
-			file.WorkspaceID = m.workspaceID
-		}
-		path, err := config.Save(file)
-		m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID, path: path, saveErr: err}
-		if err != nil {
-			// Couldn't save — finish so runSetup reports the error.
-			m.step = stepDone
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// EXTEND_SKIP_SKILL_INSTALL suppresses the skill without prompting.
-		if m.skipSkill {
-			m.result.installSkill = false
-			m.step = stepDone
-			m.quitting = true
-			return m, tea.Quit
-		}
-		// Offer to install the agent skill before finishing.
-		m.step = stepSkill
-		m.cursor = 0 // default to "Yes"
-		return m, nil
+		// The key step announced the save destination (esc there was the
+		// opt-out), so a validated key is saved without further prompting.
+		return m.saveAndContinue()
 
 	case tea.MouseClickMsg:
 		// Click anywhere on the top rows (the logo area) triggers the
@@ -984,15 +972,20 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case stepKey:
 		switch msg.String() {
 		case "esc":
-			m.step = stepRegion
+			// The opt-out the key screen's note advertises: continue
+			// without entering or saving a key; the summary prints the
+			// env vars to export instead.
 			m.valErr = nil
 			m.input.Blur()
-			return m, nil
+			return m.skipSaveAndContinue()
 		case "enter":
 			key := strings.TrimSpace(m.input.Value())
 			if key == "" {
-				m.valErr = errEmptyKey
-				return m, nil
+				// The key is optional: an empty submit skips saving,
+				// exactly like esc.
+				m.valErr = nil
+				m.input.Blur()
+				return m.skipSaveAndContinue()
 			}
 			m.apiKey = key
 			m.valErr = nil
@@ -1034,19 +1027,8 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case stepSkill:
-		switch msg.String() {
-		case "up", "k", "down", "j", "left", "right", "h", "l", "tab":
-			m.cursor = 1 - m.cursor // toggle Yes/No
-			return m, nil
-		case "y", "Y":
-			m.cursor = 0
-		case "n", "N":
-			m.cursor = 1
-		case "enter", " ":
-			// fall through to commit below
-		case "esc", "q":
-			m.cursor = 1 // treat as "No"
-		default:
+		committed := false
+		if m.cursor, committed = binaryChoiceKey(msg.String(), m.cursor); !committed {
 			return m, nil
 		}
 		if m.result != nil {
@@ -1060,6 +1042,71 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	}
+	return m, nil
+}
+
+// binaryChoiceKey interprets a key press on a two-option chooser: arrows
+// and tab toggle without committing, y/n jump to an option and commit,
+// enter/space commit the current option, esc/q commit "No" (option 1).
+func binaryChoiceKey(key string, cursor int) (newCursor int, committed bool) {
+	switch key {
+	case "up", "k", "down", "j", "left", "right", "h", "l", "tab":
+		return 1 - cursor, false
+	case "y", "Y":
+		return 0, true
+	case "n", "N":
+		return 1, true
+	case "enter", " ":
+		return cursor, true
+	case "esc", "q":
+		return 1, true
+	}
+	return cursor, false
+}
+
+// saveAndContinue persists the validated key + region (+ workspace) and
+// routes onward. Called after successful validation; the key screen's
+// note already announced the destination, and esc there was the opt-out.
+func (m setupModel) saveAndContinue() (tea.Model, tea.Cmd) {
+	m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID}
+	file := config.File{
+		Region: m.region.id,
+		Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: m.apiKey},
+	}
+	if m.workspaceID != "" {
+		file.WorkspaceID = m.workspaceID
+	}
+	path, err := config.Save(file)
+	m.result.saved = true
+	m.result.path = path
+	m.result.saveErr = err
+	if err != nil {
+		// Couldn't save; finish so runSetup reports the error.
+		m.step = stepDone
+		m.quitting = true
+		return m, tea.Quit
+	}
+	return m.continueToSkill()
+}
+
+// skipSaveAndContinue records the esc opt-out: nothing is written, and
+// the summary prints the env vars to export instead.
+func (m setupModel) skipSaveAndContinue() (tea.Model, tea.Cmd) {
+	m.result = &setupResult{region: m.region}
+	return m.continueToSkill()
+}
+
+// continueToSkill offers the agent-skill install, or finishes directly
+// when EXTEND_SKIP_SKILL_INSTALL suppressed the prompt.
+func (m setupModel) continueToSkill() (tea.Model, tea.Cmd) {
+	if m.skipSkill {
+		m.result.installSkill = false
+		m.step = stepDone
+		m.quitting = true
+		return m, tea.Quit
+	}
+	m.step = stepSkill
+	m.cursor = 0 // default to "Yes"
 	return m, nil
 }
 
@@ -1536,22 +1583,35 @@ func (m setupModel) renderStep() string {
 	return ""
 }
 
+// renderRadio writes a radio-button list with the cursor row highlighted.
+// suffixes, when non-nil, are appended dim outside the highlight (one per
+// choice).
+func renderRadio(b *strings.Builder, choices, suffixes []string, cursor int) {
+	for i, c := range choices {
+		marker, radio, label := "  ", "( )", c
+		if i == cursor {
+			marker = stSelected.Render("❯ ")
+			radio = stSelected.Render("(•)")
+			label = stSelected.Render(c)
+		}
+		suffix := ""
+		if suffixes != nil {
+			suffix = stDim.Render("  " + suffixes[i])
+		}
+		fmt.Fprintf(b, "%s%s %s%s\n", marker, radio, label, suffix)
+	}
+}
+
 func (m setupModel) renderRegion() string {
 	var b strings.Builder
 	b.WriteString(stHeading.Render("Where is your Extend workspace?"))
 	b.WriteString("\n\n")
+	titles := make([]string, len(setupRegionChoices))
+	hosts := make([]string, len(setupRegionChoices))
 	for i, r := range setupRegionChoices {
-		marker := "  "
-		radio := "( )"
-		label := r.title
-		host := stDim.Render("  " + r.api)
-		if i == m.cursor {
-			marker = stSelected.Render("❯ ")
-			radio = stSelected.Render("(•)")
-			label = stSelected.Render(r.title)
-		}
-		fmt.Fprintf(&b, "%s%s %s%s\n", marker, radio, label, host)
+		titles[i], hosts[i] = r.title, r.api
 	}
+	renderRadio(&b, titles, hosts, m.cursor)
 	return b.String()
 }
 
@@ -1561,8 +1621,10 @@ func (m setupModel) renderKey() string {
 	b.WriteString("Create an API key in the dashboard:\n")
 	fmt.Fprintf(&b, "  %s\n", stLink.Render(m.region.dashboard))
 	b.WriteString(stDim.Render("  → Developers → Create new key") + "\n\n")
-	b.WriteString("Paste it here (input hidden):\n")
+	b.WriteString("Paste it here (optional):\n")
 	b.WriteString(m.input.View() + "\n")
+	b.WriteString(stDim.Render("  Your key will be saved to "+m.cfgPath) + "\n")
+	b.WriteString(stDim.Render("  (esc skips saving; set EXTEND_API_KEY yourself instead)") + "\n")
 	if m.valErr != nil {
 		b.WriteString("\n" + stBad.Render("✗ "+setupValidationMessage(m.valErr)))
 	}
@@ -1592,22 +1654,17 @@ func (m setupModel) renderWorkspace() string {
 
 func (m setupModel) renderSkillPrompt() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s API key validated.\n\n", stGood.Render("✓"))
+	if m.result != nil && m.result.saved {
+		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render("✓"), m.result.path)
+	} else {
+		b.WriteString(stDim.Render("Key not saved; export instructions follow.") + "\n\n")
+	}
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
 	b.WriteString("\n")
 	b.WriteString(stDim.Render("  Teaches coding agents (Claude Code, Codex, OpenCode, …) how to") + "\n")
 	b.WriteString(stDim.Render("  drive the Extend CLI.") + "\n\n")
 
-	choices := []string{"Yes, install it", "No thanks"}
-	for i, c := range choices {
-		marker, radio, label := "  ", "( )", c
-		if i == m.cursor {
-			marker = stSelected.Render("❯ ")
-			radio = stSelected.Render("(•)")
-			label = stSelected.Render(c)
-		}
-		fmt.Fprintf(&b, "%s%s %s\n", marker, radio, label)
-	}
+	renderRadio(&b, []string{"Yes, install it", "No thanks"}, nil, m.cursor)
 	return b.String()
 }
 
@@ -1616,7 +1673,7 @@ func (m setupModel) footerHint() string {
 	case stepRegion:
 		return "↑/↓ move · enter select · q quit"
 	case stepKey:
-		return "enter validate · esc back · ctrl+c quit"
+		return "enter validate · esc skip saving · ctrl+c quit"
 	case stepValidating:
 		return "please wait…"
 	case stepWorkspace:
@@ -1632,9 +1689,6 @@ func (m setupModel) footerHint() string {
 func setupValidationMessage(err error) string {
 	if err == nil {
 		return ""
-	}
-	if errors.Is(err, errEmptyKey) {
-		return "Please paste an API key."
 	}
 	if errors.Is(err, errEmptyWorkspace) {
 		return "Please paste a workspace ID."

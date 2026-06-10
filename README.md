@@ -28,11 +28,10 @@ From source (requires Go toolchain):
     go install github.com/extend-hq/extend-cli/cmd/extend@latest
 
 Or grab a signed binary from the [releases page](https://github.com/extend-hq/extend-cli/releases).
-The install script downloads the latest release binary, verifies it with
-`SHA256SUMS`, and installs it to `~/.local/bin` by default. To choose a
-different location, pass `--bin-dir`:
+The install script verifies the release checksum and installs to a directory
+already on your `PATH`. See its options with:
 
-    curl -fsSL https://extend.ai/install.sh | sh -s -- --bin-dir /usr/local/bin
+    curl -fsSL https://extend.ai/install.sh | sh -s -- --help
 
 ## Use with coding agents
 
@@ -55,6 +54,13 @@ Make sure to re-run
 flag changes.
 
 ## Authenticate
+
+Run the interactive wizard; it picks your region, validates the API key,
+and saves it to `~/.config/extend/config.json`:
+
+    extend setup
+
+Or set environment variables (these take precedence over the saved config):
 
     export EXTEND_API_KEY=sk_xxx
 

@@ -116,8 +116,13 @@ func runConfig(app *App) error {
 	}
 
 	if path, err := config.Path(); err == nil {
+		// Report what actually happened to the file, not just whether the
+		// path exists: a present-but-unreadable/malformed file is the case
+		// that makes "key (not set)" baffling, so name it explicitly.
 		note := "not created yet"
-		if _, statErr := os.Stat(path); statErr == nil {
+		if s.fileErr != nil {
+			note = "found, but could not be read: " + s.fileErr.Error()
+		} else if _, statErr := os.Stat(path); statErr == nil {
 			note = "loaded"
 		}
 		rows = append(rows, row{"Config file", path, note})
