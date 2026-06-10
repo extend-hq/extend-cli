@@ -1060,3 +1060,67 @@ func TestAsciiOnlyTerm(t *testing.T) {
 		}
 	}
 }
+
+// TestSetupClick_CyclesLogoEffects: clicking the logo band plays an
+// effect and alternates between chomp and scan on successive clicks;
+// clicks elsewhere do nothing.
+func TestSetupClick_CyclesLogoEffects(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(setupModel)
+
+	settle := func() {
+		for i := 0; i < 5000 && m.phase != phaseIdle; i++ {
+			next, _ := m.Update(logoTickMsg{})
+			m = next.(setupModel)
+		}
+		if m.phase != phaseIdle {
+			t.Fatalf("logo never settled; phase = %v", m.phase)
+		}
+	}
+	settle()
+
+	top, bottom, ok := m.logoClickBand()
+	if !ok {
+		t.Fatalf("logoClickBand not available after sizing")
+	}
+	if top < 0 || bottom <= top || bottom > 40 {
+		t.Fatalf("implausible logo band [%d, %d)", top, bottom)
+	}
+	click := func(y int) {
+		next, _ := m.Update(tea.MouseClickMsg{X: 50, Y: y, Button: tea.MouseLeft})
+		m = next.(setupModel)
+	}
+
+	// A click outside the band does nothing.
+	click(39)
+	if m.phase != phaseIdle {
+		t.Fatalf("click outside logo started an effect; phase = %v", m.phase)
+	}
+
+	// First click chomps, second scans, third chomps again.
+	want := []logoPhase{phaseChomping, phaseScanning, phaseChomping}
+	for i, w := range want {
+		click(top)
+		if m.phase != w {
+			t.Fatalf("click %d: phase = %v, want %v", i+1, m.phase, w)
+		}
+		settle()
+	}
+
+	// While an effect is running, another click doesn't restart or
+	// advance the cycle.
+	click(top) // starts scan (cycle continues from chomp)
+	if m.phase != phaseScanning {
+		t.Fatalf("phase = %v, want phaseScanning", m.phase)
+	}
+	click(top)
+	if m.phase != phaseScanning {
+		t.Fatalf("mid-effect click changed phase to %v", m.phase)
+	}
+	fxBefore := m.clickFx
+	settle()
+	if m.clickFx != fxBefore {
+		t.Fatalf("mid-effect click advanced the cycle")
+	}
+}

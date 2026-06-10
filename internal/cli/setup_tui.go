@@ -303,6 +303,9 @@ type setupModel struct {
 	// being chomped. The mark is always at index 0, so letters are
 	// indices 1..len(regions)-1 and we chomp them in order.
 	chompEatenIdx int
+	// clickFx alternates the effect a logo click plays: 0 chomps,
+	// 1 scans. Advanced only when a click actually starts an effect.
+	clickFx int
 
 	// Active during phaseChomping. The mark is re-rendered parametrically
 	// each frame using chompMarkDims + chompGap so the jaws can animate;
@@ -975,11 +978,20 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.saveAndContinue()
 
 	case tea.MouseClickMsg:
-		// Click anywhere on the top rows (the logo area) triggers the
-		// chomp easter egg, as long as no logo effect is already running.
-		// MouseClickMsg is press-only — release fires MouseReleaseMsg.
-		if !m.logoBusy() && msg.Y < len(m.grid)+2 {
-			m.startChomp()
+		// A click on the logo (mark or the wordmark next to it) plays
+		// an effect, alternating chomp and scan on successive clicks,
+		// as long as no effect is already running. MouseClickMsg is
+		// press-only — release fires MouseReleaseMsg.
+		if top, bottom, ok := m.logoClickBand(); ok && !m.logoBusy() &&
+			msg.Y >= top-1 && msg.Y <= bottom {
+			if m.clickFx == 0 {
+				m.startChomp()
+			} else {
+				m.startScan()
+			}
+			if m.logoBusy() { // the effect actually started
+				m.clickFx = 1 - m.clickFx
+			}
 			return m, nil
 		}
 
@@ -1246,18 +1258,10 @@ func composeScreen(width, height int, layers ...screenLayer) string {
 	return buf.Render()
 }
 
-func (m setupModel) View() tea.View {
-	v := tea.NewView("")
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
-	if m.quitting {
-		return v
-	}
-
-	// Build the box (tagline + body + footer). The logo is NOT stacked
-	// into it — it's composited on top as a transparent overlay so the
-	// chomp diamonds can grow in front of the box without moving it.
-	logo := m.renderLogo()
+// renderBoxed builds the bordered box: tagline, divider, step body, and
+// footer. Shared by View and the logo click hit-test (which needs the
+// box height to locate the logo band).
+func (m setupModel) renderBoxed() string {
 	tagline := stTagline.Render("Document Processing APIs")
 	divider := stDivider.Render(strings.Repeat("─", m.cols))
 	content := m.renderStep()
@@ -1278,7 +1282,57 @@ func (m setupModel) View() tea.View {
 		// square box-drawing set is.
 		box = box.Border(lipgloss.NormalBorder())
 	}
-	boxed := box.Render(inner)
+	return box.Render(inner)
+}
+
+// stackLayout places the resting logo + box stack vertically: when it
+// fits, the stack is centered; otherwise the box is anchored fully
+// visible and the logo overflows the top (clipped) rather than
+// overlapping the box. Returns the box's top row and the resting logo
+// band's top row. Single source of truth for View and logoClickBand.
+func stackLayout(height, gridH, boxH int) (boxY, restLogoTop int) {
+	const gap = 1
+	restingH := gridH + gap + boxH
+	if restingH <= height {
+		boxY = (height-restingH)/2 + gridH + gap
+	} else {
+		boxY = height - boxH
+	}
+	if boxY+boxH > height {
+		boxY = height - boxH
+	}
+	if boxY < 0 {
+		boxY = 0
+	}
+	return boxY, boxY - gap - gridH
+}
+
+// logoClickBand returns the screen-row range [top, bottom) occupied by
+// the resting logo lockup (mark + wordmark), or ok=false when there is
+// no clickable logo (ASCII mode, or no size yet).
+func (m setupModel) logoClickBand() (top, bottom int, ok bool) {
+	gridH := len(m.grid)
+	if m.ascii || gridH == 0 || m.width <= 0 || m.height <= 0 {
+		return 0, 0, false
+	}
+	_, boxH := lipgloss.Size(m.renderBoxed())
+	_, top = stackLayout(m.height, gridH, boxH)
+	return top, top + gridH, true
+}
+
+func (m setupModel) View() tea.View {
+	v := tea.NewView("")
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	if m.quitting {
+		return v
+	}
+
+	// Build the box (tagline + body + footer). The logo is NOT stacked
+	// into it — it's composited on top as a transparent overlay so the
+	// chomp diamonds can grow in front of the box without moving it.
+	logo := m.renderLogo()
+	boxed := m.renderBoxed()
 
 	// Without a terminal size yet, return a simple stacked fallback.
 	if m.width <= 0 || m.height <= 0 {
@@ -1298,36 +1352,18 @@ func (m setupModel) View() tea.View {
 		gridH = lipgloss.Height(logo)
 	}
 	boxW, boxH := lipgloss.Size(boxed)
-	const gap = 1
-	restingH := gridH + gap + boxH
 
 	boxX := (m.width - boxW) / 2
 	if boxX < 0 {
 		boxX = 0
 	}
-
-	// When the resting stack fits, center it; otherwise anchor the box so
-	// it stays fully visible and let the logo overflow the top of the
-	// screen (clipped) rather than overlapping the box.
-	var boxY int
-	if restingH <= m.height {
-		boxY = (m.height-restingH)/2 + gridH + gap
-	} else {
-		boxY = m.height - boxH
-	}
-	if boxY+boxH > m.height {
-		boxY = m.height - boxH
-	}
-	if boxY < 0 {
-		boxY = 0
-	}
+	boxY, restLogoTop := stackLayout(m.height, gridH, boxH)
 
 	// The resting logo content sits in the gridH rows just above the box.
 	// The logo string renders full-width (so fly-in/jaws aren't clipped)
 	// with its content vertically centered, so offset by half the extra
 	// height keeps the resting content fixed while the chomp jaws expand
 	// symmetrically around it (and overflow the top if needed).
-	restLogoTop := boxY - gap - gridH
 	logoH := lipgloss.Height(logo)
 	logoY := restLogoTop - (logoH-gridH)/2
 
