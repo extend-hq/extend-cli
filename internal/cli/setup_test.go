@@ -410,11 +410,11 @@ func TestSetupModel_SkipSkillSkipsPrompt(t *testing.T) {
 	}
 }
 
-// TestSetupModel_EscOnKeyStepSkipsSaving: esc at the key step is the
-// opt-out the note advertises. It must leave the disk untouched, record
-// saved=false, and continue to the skill prompt; the summary then prints
-// env-var guidance.
-func TestSetupModel_EscOnKeyStepSkipsSaving(t *testing.T) {
+// TestSetupModel_EscOnKeyStepGoesBack: esc at the key step navigates
+// back to the region picker (skipping is done by submitting a blank
+// key, which the note advertises). Nothing is written and no result is
+// recorded.
+func TestSetupModel_EscOnKeyStepGoesBack(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -423,20 +423,20 @@ func TestSetupModel_EscOnKeyStepSkipsSaving(t *testing.T) {
 	m.step = stepKey
 
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.step != stepSkill {
-		t.Fatalf("step = %v, want stepSkill (skip still continues)", m.step)
+	if m.step != stepRegion {
+		t.Fatalf("step = %v, want stepRegion (esc goes back)", m.step)
 	}
-	if m.result == nil || m.result.saved || m.result.path != "" {
-		t.Fatalf("result = %+v, want saved=false with no path", m.result)
+	if m.result != nil {
+		t.Fatalf("result = %+v, want nil (no skip recorded on back)", m.result)
 	}
 	if post, err := config.Load(); err != nil || post.APIKey() != "" {
-		t.Fatalf("config written despite skip: %+v (err=%v)", post, err)
+		t.Fatalf("config written despite back: %+v (err=%v)", post, err)
 	}
 }
 
 // TestSetupModel_KeyStepShowsSaveNote: the key-entry screen is the
 // transparency moment: it must say where a validated key will be saved
-// and that esc skips the save (env var as the alternative).
+// and that leaving it blank skips the save (env var as the alternative).
 func TestSetupModel_KeyStepShowsSaveNote(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -449,7 +449,7 @@ func TestSetupModel_KeyStepShowsSaveNote(t *testing.T) {
 	for _, want := range []string{
 		filepath.Join(dir, "extend", "config.json"), // the exact destination
 		"(optional)",     // the key can be skipped
-		"esc",            // the skip
+		"leave blank",    // the skip
 		"EXTEND_API_KEY", // the alternative
 	} {
 		if !strings.Contains(body, want) {
@@ -480,7 +480,7 @@ func TestReportSetupResult(t *testing.T) {
 
 	t.Run("skipped", func(t *testing.T) {
 		ta := newTestApp(t, newFakeServer(t, nil))
-		// esc-skip: no key was entered or validated, only region chosen.
+		// blank-key skip: no key was entered or validated, only region chosen.
 		res := &setupResult{region: setupRegionChoices[1], workspaceID: "ws_1", saved: false}
 		if err := reportSetupResult(ta.app, res); err != nil {
 			t.Fatalf("reportSetupResult = %v", err)
@@ -592,8 +592,8 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 }
 
 // TestSetupModel_EmptyKeySubmitSkips: the key is optional. Enter on an
-// empty input skips saving exactly like esc: continue to the skill
-// prompt, nothing written, env-var guidance in the summary.
+// empty input skips saving: continue to the skill prompt, nothing
+// written, env-var guidance in the summary.
 func TestSetupModel_EmptyKeySubmitSkips(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -614,8 +614,8 @@ func TestSetupModel_EmptyKeySubmitSkips(t *testing.T) {
 
 // TestSetupModel_ValidateSuccessSaves drives the model to a successful
 // validation and asserts the config file is written with the chosen
-// region and key (the key step's note announces the save; esc there is
-// the opt-out).
+// region and key (the key step's note announces the save; a blank
+// submit there is the opt-out).
 func TestSetupModel_ValidateSuccessSaves(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -1005,6 +1005,58 @@ func TestFlyInLetters_KeepsMarkHolds(t *testing.T) {
 		r := m.regions[i]
 		if r.Pos <= r.Target {
 			t.Errorf("letter %d Pos=%.1f should start right of Target=%.1f (off-screen)", i, r.Pos, r.Target)
+		}
+	}
+}
+
+// TestSetupASCIIMode_NoExoticGlyphs: on console-class terminals
+// (TERM=linux), fonts lack braille and most decorative glyphs, so the
+// wizard's ASCII mode must render every step without them and must not
+// schedule the logo animation tick.
+func TestSetupASCIIMode_NoExoticGlyphs(t *testing.T) {
+	m := newSetupModel(context.Background(), true, "", func(context.Context, string, string, string) error { return nil })
+	m.enableASCII()
+
+	if cmd := m.Init(); cmd != nil {
+		if _, ok := cmd().(logoTickMsg); ok {
+			t.Errorf("Init scheduled a logo tick in ascii mode")
+		}
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(setupModel)
+	if m.grid != nil {
+		t.Fatalf("ascii mode built a braille logo grid")
+	}
+
+	for _, step := range []setupStep{stepRegion, stepKey, stepValidating, stepWorkspace, stepSkill} {
+		m.step = step
+		content := m.View().Content
+		for _, r := range content {
+			// The console font set covers ASCII, Latin-1, and the
+			// square box-drawing/arrow glyphs; braille (U+2800+) and
+			// the decorative marks must be gone.
+			if r >= 0x2800 && r <= 0x28FF {
+				t.Fatalf("step %v: braille rune %q in ascii view", step, r)
+			}
+			switch r {
+			case '❯', '•', '✓', '✗', '›', '…', '╭', '╮', '╰', '╯':
+				t.Fatalf("step %v: decorative rune %q in ascii view", step, r)
+			}
+		}
+	}
+}
+
+// TestAsciiOnlyTerm covers the TERM values that select ascii mode.
+func TestAsciiOnlyTerm(t *testing.T) {
+	for _, term := range []string{"linux", "dumb", "cons25", "vt100", "vt220"} {
+		if !asciiOnlyTerm(term) {
+			t.Errorf("asciiOnlyTerm(%q) = false, want true", term)
+		}
+	}
+	for _, term := range []string{"xterm-256color", "screen-256color", "tmux-256color", "xterm-kitty", ""} {
+		if asciiOnlyTerm(term) {
+			t.Errorf("asciiOnlyTerm(%q) = true, want false", term)
 		}
 	}
 }
