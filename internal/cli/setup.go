@@ -116,6 +116,11 @@ func runSetup(ctx context.Context, app *App, opts setupOptions) error {
 
 	model := newSetupModel(ctx, app.IO.ColorEnabled(), app.Region, defaultSetupValidator)
 	model.skipSkill = resolveSkipSkill(opts.skipSkillInstall, os.Getenv)
+	if asciiOnlyTerm(os.Getenv("TERM")) {
+		// Console-class terminals can't render the braille logo (or
+		// the other decorative glyphs); fall back to plain ASCII.
+		model.enableASCII()
+	}
 	// v2 moved alt-screen and mouse-mode out of program options and into
 	// View() fields; they're set per-frame in setupModel.View().
 	final, err := tea.NewProgram(model, tea.WithContext(ctx)).Run()
@@ -154,8 +159,8 @@ func reportSetupResult(app *App, res *setupResult) error {
 		return fmt.Errorf("save config: %w", res.saveErr)
 	}
 
-	// An esc-skip never entered a key, so there is nothing to report as
-	// validated.
+	// A blank-key skip never entered a key, so there is nothing to
+	// report as validated.
 	if res.apiKey != "" {
 		fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
 	}

@@ -237,8 +237,18 @@ type setupResult struct {
 type logoTickMsg struct{}
 type validatedMsg struct{ err error }
 
-func logoTickCmd() tea.Cmd {
-	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg { return logoTickMsg{} })
+// The logo ticks at 60 Hz while an animation is in flight, but drops to
+// ~15 Hz once settled (phaseIdle), where only the shimmer moves. Idle
+// ticks advance the frame counter by 4 so the shimmer sweeps at the
+// same visual speed; the lower rate cuts idle CPU ~4x.
+const (
+	logoTickFast      = 16 * time.Millisecond
+	logoTickIdle      = 66 * time.Millisecond
+	logoIdleFrameStep = 4
+)
+
+func logoTickCmd(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return logoTickMsg{} })
 }
 
 // UI styles. lipgloss degrades these to the terminal's color profile
@@ -262,6 +272,11 @@ type setupModel struct {
 	ctx      context.Context
 	colorOn  bool
 	validate setupValidator
+
+	// ascii disables the braille logo, its animations, and decorative
+	// Unicode glyphs for terminals whose fonts can't render them (the
+	// Linux kernel console chief among them). See enableASCII.
+	ascii bool
 
 	step        setupStep
 	cursor      int
@@ -382,6 +397,38 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 	return m
 }
 
+// asciiOnlyTerm reports whether TERM names a terminal whose font almost
+// certainly lacks the braille block and decorative glyphs the wizard
+// uses. The Linux kernel console (TERM=linux) has at most 512 font
+// glyphs and renders each missing one as a replacement box, turning the
+// braille logo into a wall of garbage.
+func asciiOnlyTerm(term string) bool {
+	switch term {
+	case "linux", "dumb", "cons25", "vt52", "vt100", "vt102", "vt220":
+		return true
+	}
+	return false
+}
+
+// enableASCII switches the wizard to its plain-glyph mode: a static
+// text wordmark instead of the animated braille logo (no logo tick at
+// all), an ASCII spinner, and ASCII input/marker glyphs.
+func (m *setupModel) enableASCII() {
+	m.ascii = true
+	m.spin.Spinner = spinner.Line
+	m.input.EchoCharacter = '*'
+	m.input.Prompt = "> "
+	m.wsInput.Prompt = "> "
+}
+
+// g picks the fancy glyph normally and the plain one in ascii mode.
+func (m setupModel) g(fancy, plain string) string {
+	if m.ascii {
+		return plain
+	}
+	return fancy
+}
+
 // flyInSpring is shared by all logo regions during the intro fly-in.
 // Snappy angular freq with a touch of underdamping so each region lands
 // with a small overshoot/settle rather than a flat ease. Tuned for the
@@ -497,6 +544,18 @@ func (m *setupModel) setWidth(w int) {
 	}
 	if cols < 44 {
 		cols = 44
+	}
+	if m.ascii {
+		// Plain wordmark: no grid, no regions, nothing to animate.
+		m.cols = cols
+		m.phase = phaseIdle
+		if iw := cols - 6; iw > 12 {
+			if iw > 60 {
+				iw = 60
+			}
+			m.input.SetWidth(iw)
+		}
+		return
 	}
 	if cols == m.cols && m.grid != nil {
 		return
@@ -851,7 +910,12 @@ func updateScanGlyphs(gs []scanGlyph) []scanGlyph {
 }
 
 func (m setupModel) Init() tea.Cmd {
-	return tea.Batch(logoTickCmd(), textinput.Blink)
+	if m.ascii {
+		// No logo, no animation: the only thing that ever changes
+		// without input is the cursor blink.
+		return textinput.Blink
+	}
+	return tea.Batch(logoTickCmd(logoTickFast), textinput.Blink)
 }
 
 func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -862,12 +926,20 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logoTickMsg:
-		m.frame++
+		step := 1
+		if m.phase == phaseIdle {
+			step = logoIdleFrameStep
+		}
+		m.frame += step
 		if m.frame > 1<<20 {
 			m.frame = 0
 		}
 		m.advanceLogo()
-		return m, logoTickCmd()
+		next := logoTickFast
+		if m.phase == phaseIdle {
+			next = logoTickIdle
+		}
+		return m, logoTickCmd(next)
 
 	case spinner.TickMsg:
 		if m.step != stepValidating {
@@ -897,8 +969,9 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = stepKey
 			return m, m.input.Focus()
 		}
-		// The key step announced the save destination (esc there was the
-		// opt-out), so a validated key is saved without further prompting.
+		// The key step announced the save destination (a blank submit
+		// there was the opt-out), so a validated key is saved without
+		// further prompting.
 		return m.saveAndContinue()
 
 	case tea.MouseClickMsg:
@@ -972,17 +1045,16 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case stepKey:
 		switch msg.String() {
 		case "esc":
-			// The opt-out the key screen's note advertises: continue
-			// without entering or saving a key; the summary prints the
-			// env vars to export instead.
+			// Back to the region picker. Skipping the key is done by
+			// submitting it blank, as the note advertises.
 			m.valErr = nil
 			m.input.Blur()
-			return m.skipSaveAndContinue()
+			m.step = stepRegion
+			return m, nil
 		case "enter":
 			key := strings.TrimSpace(m.input.Value())
 			if key == "" {
-				// The key is optional: an empty submit skips saving,
-				// exactly like esc.
+				// The key is optional: an empty submit skips saving.
 				m.valErr = nil
 				m.input.Blur()
 				return m.skipSaveAndContinue()
@@ -1066,7 +1138,8 @@ func binaryChoiceKey(key string, cursor int) (newCursor int, committed bool) {
 
 // saveAndContinue persists the validated key + region (+ workspace) and
 // routes onward. Called after successful validation; the key screen's
-// note already announced the destination, and esc there was the opt-out.
+// note already announced the destination, and a blank submit there was
+// the opt-out.
 func (m setupModel) saveAndContinue() (tea.Model, tea.Cmd) {
 	m.result = &setupResult{region: m.region, apiKey: m.apiKey, workspaceID: m.workspaceID}
 	file := config.File{
@@ -1089,7 +1162,7 @@ func (m setupModel) saveAndContinue() (tea.Model, tea.Cmd) {
 	return m.continueToSkill()
 }
 
-// skipSaveAndContinue records the esc opt-out: nothing is written, and
+// skipSaveAndContinue records the blank-key opt-out: nothing is written, and
 // the summary prints the env vars to export instead.
 func (m setupModel) skipSaveAndContinue() (tea.Model, tea.Cmd) {
 	m.result = &setupResult{region: m.region}
@@ -1199,7 +1272,13 @@ func (m setupModel) View() tea.View {
 		"",
 		footer,
 	)
-	boxed := stBox.Render(inner)
+	box := stBox
+	if m.ascii {
+		// Rounded corners (U+256D..) aren't in console fonts; the
+		// square box-drawing set is.
+		box = box.Border(lipgloss.NormalBorder())
+	}
+	boxed := box.Render(inner)
 
 	// Without a terminal size yet, return a simple stacked fallback.
 	if m.width <= 0 || m.height <= 0 {
@@ -1214,6 +1293,10 @@ func (m setupModel) View() tea.View {
 	// on the resting logo height (len(m.grid)), so the animated logo
 	// height never moves it.
 	gridH := len(m.grid)
+	if gridH == 0 {
+		// ASCII mode: the "logo" is the static wordmark line.
+		gridH = lipgloss.Height(logo)
+	}
 	boxW, boxH := lipgloss.Size(boxed)
 	const gap = 1
 	restingH := gridH + gap + boxH
@@ -1248,9 +1331,16 @@ func (m setupModel) View() tea.View {
 	logoH := lipgloss.Height(logo)
 	logoY := restLogoTop - (logoH-gridH)/2
 
+	// The braille logo renders full-width with its content centered;
+	// the ASCII wordmark is a bare line, so center it explicitly.
+	logoX := 0
+	if lw := lipgloss.Width(logo); lw < m.width {
+		logoX = (m.width - lw) / 2
+	}
+
 	layers := []screenLayer{
 		{s: boxed, x: boxX, y: boxY, transparent: false},
-		{s: logo, x: 0, y: logoY, transparent: true},
+		{s: logo, x: logoX, y: logoY, transparent: true},
 	}
 
 	// Chomp particles on top of everything, in screen coords. They're
@@ -1586,12 +1676,12 @@ func (m setupModel) renderStep() string {
 // renderRadio writes a radio-button list with the cursor row highlighted.
 // suffixes, when non-nil, are appended dim outside the highlight (one per
 // choice).
-func renderRadio(b *strings.Builder, choices, suffixes []string, cursor int) {
+func (m setupModel) renderRadio(b *strings.Builder, choices, suffixes []string, cursor int) {
 	for i, c := range choices {
 		marker, radio, label := "  ", "( )", c
 		if i == cursor {
-			marker = stSelected.Render("❯ ")
-			radio = stSelected.Render("(•)")
+			marker = stSelected.Render(m.g("❯ ", "> "))
+			radio = stSelected.Render(m.g("(•)", "(*)"))
 			label = stSelected.Render(c)
 		}
 		suffix := ""
@@ -1611,7 +1701,7 @@ func (m setupModel) renderRegion() string {
 	for i, r := range setupRegionChoices {
 		titles[i], hosts[i] = r.title, r.api
 	}
-	renderRadio(&b, titles, hosts, m.cursor)
+	m.renderRadio(&b, titles, hosts, m.cursor)
 	return b.String()
 }
 
@@ -1620,20 +1710,20 @@ func (m setupModel) renderKey() string {
 	fmt.Fprintf(&b, "%s %s\n\n", stHeading.Render("Region:"), m.region.title+stDim.Render("  ("+m.region.api+")"))
 	b.WriteString("Create an API key in the dashboard:\n")
 	fmt.Fprintf(&b, "  %s\n", stLink.Render(m.region.dashboard))
-	b.WriteString(stDim.Render("  → Developers → Create new key") + "\n\n")
+	b.WriteString(stDim.Render(m.g("  → Developers → Create new key", "  -> Developers -> Create new key")) + "\n\n")
 	b.WriteString("Paste it here (optional):\n")
 	b.WriteString(m.input.View() + "\n")
 	b.WriteString(stDim.Render("  Your key will be saved to "+m.cfgPath) + "\n")
-	b.WriteString(stDim.Render("  (esc skips saving; set EXTEND_API_KEY yourself instead)") + "\n")
+	b.WriteString(stDim.Render("  (leave blank to skip; set EXTEND_API_KEY yourself instead)") + "\n")
 	if m.valErr != nil {
-		b.WriteString("\n" + stBad.Render("✗ "+setupValidationMessage(m.valErr)))
+		b.WriteString("\n" + stBad.Render(m.g("✗ ", "x ")+setupValidationMessage(m.valErr)))
 	}
 	return b.String()
 }
 
 func (m setupModel) renderValidating() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s Validating your API key…\n\n", m.spin.View())
+	fmt.Fprintf(&b, "%s Validating your API key%s\n\n", m.spin.View(), m.g("…", "..."))
 	b.WriteString(stDim.Render("  contacting " + m.region.api))
 	return b.String()
 }
@@ -1647,7 +1737,7 @@ func (m setupModel) renderWorkspace() string {
 	fmt.Fprintf(&b, "  %s\n\n", stLink.Render(m.region.dashboard))
 	b.WriteString(m.wsInput.View() + "\n")
 	if m.valErr != nil {
-		b.WriteString("\n" + stBad.Render("✗ "+setupValidationMessage(m.valErr)))
+		b.WriteString("\n" + stBad.Render(m.g("✗ ", "x ")+setupValidationMessage(m.valErr)))
 	}
 	return b.String()
 }
@@ -1655,31 +1745,33 @@ func (m setupModel) renderWorkspace() string {
 func (m setupModel) renderSkillPrompt() string {
 	var b strings.Builder
 	if m.result != nil && m.result.saved {
-		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render("✓"), m.result.path)
+		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render(m.g("✓", "*")), m.result.path)
 	} else {
 		b.WriteString(stDim.Render("Key not saved; export instructions follow.") + "\n\n")
 	}
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
 	b.WriteString("\n")
-	b.WriteString(stDim.Render("  Teaches coding agents (Claude Code, Codex, OpenCode, …) how to") + "\n")
+	b.WriteString(stDim.Render(m.g("  Teaches coding agents (Claude Code, Codex, OpenCode, …) how to",
+		"  Teaches coding agents (Claude Code, Codex, OpenCode, ...) how to")) + "\n")
 	b.WriteString(stDim.Render("  drive the Extend CLI.") + "\n\n")
 
-	renderRadio(&b, []string{"Yes, install it", "No thanks"}, nil, m.cursor)
+	m.renderRadio(&b, []string{"Yes, install it", "No thanks"}, nil, m.cursor)
 	return b.String()
 }
 
 func (m setupModel) footerHint() string {
+	arrows, dot := m.g("↑/↓", "up/down"), m.g("·", "-")
 	switch m.step {
 	case stepRegion:
-		return "↑/↓ move · enter select · q quit"
+		return arrows + " move " + dot + " enter select " + dot + " q quit"
 	case stepKey:
-		return "enter validate · esc skip saving · ctrl+c quit"
+		return "enter validate " + dot + " esc back " + dot + " ctrl+c quit"
 	case stepValidating:
-		return "please wait…"
+		return m.g("please wait…", "please wait...")
 	case stepWorkspace:
-		return "enter validate · esc back · ctrl+c quit"
+		return "enter validate " + dot + " esc back " + dot + " ctrl+c quit"
 	case stepSkill:
-		return "↑/↓ choose · y/n · enter confirm"
+		return arrows + " choose " + dot + " y/n " + dot + " enter confirm"
 	}
 	return ""
 }
