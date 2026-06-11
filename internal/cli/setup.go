@@ -26,6 +26,7 @@ func newSetupDoc(app *App) *CommandDoc {
 	var (
 		nonInteractive   bool
 		skipSkillInstall bool
+		apiKey           string
 	)
 	return &CommandDoc{
 		Use:     "setup",
@@ -44,12 +45,23 @@ works without exporting environment variables.
 
 Without a terminal — an installer, CI, or an agent — it can't prompt, so
 it instead confirms when credentials already resolve, prints setup
-guidance when they don't, and installs the agent skill. For fully
-unattended use set EXTEND_API_KEY directly.`,
+guidance when they don't, and installs the agent skill. To configure
+unattended, pass --api-key: it validates the key and persists it to the
+config file exactly like the wizard, no terminal required.`,
 		Details: `A save writes ~/.config/extend/config.json (honoring
 XDG_CONFIG_HOME) with 0600 permissions. It is read as the lowest-priority
 source of the API key, region, base URL, and workspace: command flags and
 environment variables still win (flag > env > config file > default).
+
+With --api-key, setup performs the same validate-and-save without any
+prompts (works with or without a terminal):
+
+    extend setup --api-key sk_xxx [--region us|eu] [--workspace ws_xxx]
+
+The region comes from --region / EXTEND_REGION (default us) and the
+workspace from --workspace / EXTEND_WORKSPACE_ID. A validation failure
+exits non-zero and saves nothing; if the error says a workspace is
+required, the key is organization-scoped — re-run with --workspace.
 
 Two knobs control how setup behaves; each is a flag with an environment
 variable as a fallback (flag > env > default):
@@ -70,12 +82,15 @@ when one already does, and installs the agent skill (idempotent) unless
 can delegate to it safely.`,
 		Examples: []Example{
 			{Label: "Launch the setup wizard", Cmd: "extend setup"},
+			{Label: "Validate and save a key without prompts", Cmd: "extend setup --api-key sk_xxx"},
+			{Label: "Org-scoped key in the EU region", Cmd: "extend setup --api-key sk_xxx --region eu --workspace ws_xxx"},
 			{Label: "Quiet setup (no wizard, no skill install)", Cmd: "extend setup --non-interactive --skip-skill-install"},
 			{Label: "Non-interactive but install the skill", Cmd: "extend setup --non-interactive"},
 			{Label: "Same, via environment", Cmd: "EXTEND_NONINTERACTIVE=1 EXTEND_SKIP_SKILL_INSTALL=1 extend setup"},
 		},
 		Gotchas: []string{
-			"Without a terminal the wizard does not run: setup prints setup guidance (or confirms existing credentials), installs the agent skill, and exits 0. Set EXTEND_API_KEY (and EXTEND_REGION, plus EXTEND_WORKSPACE_ID for org keys) for unattended use.",
+			"Without a terminal the wizard does not run: setup prints setup guidance (or confirms existing credentials), installs the agent skill, and exits 0. Pass --api-key to actually configure unattended.",
+			"--api-key validates before saving and exits non-zero on a bad key, unlike the guidance-only non-interactive path which always exits 0.",
 			"--skip-skill-install only suppresses the agent skill step; it does not bypass the interactive wizard. Use --non-interactive to skip the wizard even when a TTY is attached (combine the two for a fully silent setup).",
 			"Only the saved key is default-environment-only; with --env <label> set EXTEND_<LABEL>_API_KEY yourself. The saved region, base URL, and workspace still apply under any --env.",
 			"Organization-scoped keys require a workspace; the wizard prompts for one and saves it, or set EXTEND_WORKSPACE_ID / --workspace yourself.",
@@ -87,11 +102,13 @@ can delegate to it safely.`,
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Skip the interactive wizard even with a TTY attached (or EXTEND_NONINTERACTIVE=1)")
 			cmd.Flags().BoolVar(&skipSkillInstall, "skip-skill-install", false, "Don't install the agent skill (or EXTEND_SKIP_SKILL_INSTALL=1)")
+			cmd.Flags().StringVar(&apiKey, "api-key", "", "Validate this API key and save it to the config file without prompting (with --region/--workspace as needed)")
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := setupOptions{
 				nonInteractive:   nonInteractive,
 				skipSkillInstall: skipSkillInstall,
+				apiKey:           apiKey,
 			}
 			return runSetup(cmd.Context(), app, opts)
 		},
@@ -105,9 +122,13 @@ can delegate to it safely.`,
 type setupOptions struct {
 	nonInteractive   bool
 	skipSkillInstall bool
+	apiKey           string
 }
 
 func runSetup(ctx context.Context, app *App, opts setupOptions) error {
+	if opts.apiKey != "" {
+		return runSetupAPIKey(ctx, app, opts, defaultSetupValidator)
+	}
 	if forcedNonInteractive(opts.nonInteractive, os.Getenv) || !app.IO.IsStdinTTY() || !app.IO.IsStdoutTTY() {
 		return runSetupNonInteractive(app, opts)
 	}
@@ -191,6 +212,62 @@ func reportSetupResult(app *App, res *setupResult) error {
 	} else {
 		fmt.Fprintf(app.IO.ErrOut, "\nAfter exporting, try: %s\n", pal.Cyan("extend files list"))
 	}
+	return nil
+}
+
+// runSetupAPIKey is the prompt-free configuration path (`extend setup
+// --api-key`): validate the key against the resolved region/workspace and
+// persist it to the config file, exactly like the wizard's save. Built for
+// agents and scripts — unlike the guidance-only non-interactive path, a
+// bad key here is a real failure and exits non-zero.
+func runSetupAPIKey(ctx context.Context, app *App, opts setupOptions, validate setupValidator) error {
+	pal := paletteFor(app.IO)
+
+	region := app.Region
+	if region == "" {
+		region = os.Getenv(envRegion)
+	}
+	if region == "" {
+		region = "us"
+	}
+	if _, ok := extendx.RegionBaseURL(region); !ok {
+		return fmt.Errorf("unknown region %q (known: %s)", region, strings.Join(extendx.KnownRegions(), ", "))
+	}
+	workspace := app.Workspace
+	if workspace == "" {
+		workspace = os.Getenv(envWorkspaceID)
+	}
+
+	if err := validate(ctx, region, opts.apiKey, workspace); err != nil {
+		if needsWorkspacePrompt(err) {
+			return fmt.Errorf("this API key is organization-scoped; re-run with --workspace ws_xxx (or set %s): %w", envWorkspaceID, err)
+		}
+		return fmt.Errorf("API key validation failed for region %s: %w", region, err)
+	}
+
+	file := config.File{
+		Region: region,
+		Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: opts.apiKey},
+	}
+	if workspace != "" {
+		file.WorkspaceID = workspace
+	}
+	path, err := config.Save(file)
+	if err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	fmt.Fprintf(app.IO.ErrOut, "%s API key validated.\n", pal.Green("✓"))
+	fmt.Fprintf(app.IO.ErrOut, "%s Saved region %s to %s\n", pal.Green("✓"), region, path)
+	if workspace != "" {
+		fmt.Fprintf(app.IO.ErrOut, "%s Workspace %s\n", pal.Green("✓"), workspace)
+	}
+
+	if resolveSkipSkill(opts.skipSkillInstall, os.Getenv) {
+		fmt.Fprintf(app.IO.ErrOut, "%s Skipping agent skill install.\n", pal.Yellow("!"))
+		return nil
+	}
+	installSkillAndReport(app)
 	return nil
 }
 

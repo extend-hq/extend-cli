@@ -330,6 +330,179 @@ func TestRunSetupNonInteractive_ConfiguredCustomBaseURL(t *testing.T) {
 	}
 }
 
+// TestRunSetupAPIKey_ValidatesAndSaves: `extend setup --api-key` is the
+// prompt-free configuration path — it validates the key with the resolved
+// region/workspace and persists the config file exactly like the wizard.
+func TestRunSetupAPIKey_ValidatesAndSaves(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv(envRegion, "")
+	t.Setenv(envWorkspaceID, "")
+
+	var gotRegion, gotKey, gotWS string
+	validate := func(_ context.Context, region, key, ws string) error {
+		gotRegion, gotKey, gotWS = region, key, ws
+		return nil
+	}
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	ta.app.Region = "eu"
+	ta.app.Workspace = "ws_42"
+	opts := setupOptions{apiKey: "sk_live_123", skipSkillInstall: true}
+	if err := runSetupAPIKey(context.Background(), ta.app, opts, validate); err != nil {
+		t.Fatalf("runSetupAPIKey = %v, want nil", err)
+	}
+
+	if gotRegion != "eu" || gotKey != "sk_live_123" || gotWS != "ws_42" {
+		t.Errorf("validator called with (%q,%q,%q), want (eu,sk_live_123,ws_42)", gotRegion, gotKey, gotWS)
+	}
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if saved.Region != "eu" || saved.APIKey() != "sk_live_123" || saved.WorkspaceID != "ws_42" {
+		t.Errorf("saved config = %+v, want region=eu key=sk_live_123 workspace=ws_42", saved)
+	}
+	errs := ta.errOut.String()
+	if !strings.Contains(errs, "API key validated") || !strings.Contains(errs, "Saved region eu") {
+		t.Errorf("stderr missing confirmation; got:\n%s", errs)
+	}
+	if strings.Contains(errs, "sk_live_123") || strings.Contains(ta.out.String(), "sk_live_123") {
+		t.Error("API key value leaked into output")
+	}
+}
+
+// TestRunSetupAPIKey_DefaultsAndEnvFallbacks: region falls back to
+// EXTEND_REGION then "us"; workspace falls back to EXTEND_WORKSPACE_ID.
+func TestRunSetupAPIKey_DefaultsAndEnvFallbacks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cases := []struct {
+		name            string
+		regionFlag, env string
+		wantRegion      string
+	}{
+		{"flag wins over env", "eu", "us", "eu"},
+		{"env when no flag", "", "eu", "eu"},
+		{"default us", "", "", "us"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv(envRegion, tc.env)
+			t.Setenv(envWorkspaceID, "ws_env")
+
+			ta := newTestApp(t, newFakeServer(t, nil))
+			ta.app.Region = tc.regionFlag
+			opts := setupOptions{apiKey: "sk_x", skipSkillInstall: true}
+			validate := func(context.Context, string, string, string) error { return nil }
+			if err := runSetupAPIKey(context.Background(), ta.app, opts, validate); err != nil {
+				t.Fatalf("runSetupAPIKey = %v, want nil", err)
+			}
+			saved, err := config.Load()
+			if err != nil {
+				t.Fatalf("reload config: %v", err)
+			}
+			if saved.Region != tc.wantRegion {
+				t.Errorf("saved region = %q, want %q", saved.Region, tc.wantRegion)
+			}
+			if saved.WorkspaceID != "ws_env" {
+				t.Errorf("saved workspace = %q, want ws_env (from env)", saved.WorkspaceID)
+			}
+		})
+	}
+}
+
+// TestRunSetupAPIKey_ValidationFailureSavesNothing: a rejected key exits
+// non-zero and must not write a config file.
+func TestRunSetupAPIKey_ValidationFailureSavesNothing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv(envRegion, "")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	opts := setupOptions{apiKey: "sk_bad", skipSkillInstall: true}
+	validate := func(context.Context, string, string, string) error {
+		return errors.New("boom")
+	}
+	err := runSetupAPIKey(context.Background(), ta.app, opts, validate)
+	if err == nil || !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("runSetupAPIKey = %v, want validation-failed error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "extend", "config.json")); !os.IsNotExist(statErr) {
+		t.Errorf("config file must not exist after failed validation; stat = %v", statErr)
+	}
+}
+
+// TestRunSetupAPIKey_OrgKeyExplainsWorkspace: the server's
+// "workspace required" 400 is translated into actionable guidance to
+// re-run with --workspace.
+func TestRunSetupAPIKey_OrgKeyExplainsWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envRegion, "")
+	t.Setenv(envWorkspaceID, "")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	opts := setupOptions{apiKey: "sk_org", skipSkillInstall: true}
+	validate := func(context.Context, string, string, string) error {
+		return &extendx.APIError{StatusCode: 400, Message: "X-Extend-Workspace-Id header is required for organization-level API keys."}
+	}
+	err := runSetupAPIKey(context.Background(), ta.app, opts, validate)
+	if err == nil || !strings.Contains(err.Error(), "--workspace") {
+		t.Fatalf("runSetupAPIKey = %v, want error mentioning --workspace", err)
+	}
+}
+
+// TestRunSetupAPIKey_UnknownRegionRejected: a bogus region fails fast
+// with the list of known regions, before any network call.
+func TestRunSetupAPIKey_UnknownRegionRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envRegion, "")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	ta.app.Region = "mars"
+	opts := setupOptions{apiKey: "sk_x", skipSkillInstall: true}
+	called := false
+	validate := func(context.Context, string, string, string) error {
+		called = true
+		return nil
+	}
+	err := runSetupAPIKey(context.Background(), ta.app, opts, validate)
+	if err == nil || !strings.Contains(err.Error(), "unknown region") {
+		t.Fatalf("runSetupAPIKey = %v, want unknown-region error", err)
+	}
+	if called {
+		t.Error("validator must not be called for an unknown region")
+	}
+}
+
+// TestRunSetupAPIKey_InstallsSkill: without the skip knob, a successful
+// --api-key setup also installs the agent skill.
+func TestRunSetupAPIKey_InstallsSkill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink assertions are unix-specific")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(envRegion, "")
+	t.Setenv(envSkipSkillInstall, "")
+
+	ta := newTestApp(t, newFakeServer(t, nil))
+	opts := setupOptions{apiKey: "sk_x"}
+	validate := func(context.Context, string, string, string) error { return nil }
+	if err := runSetupAPIKey(context.Background(), ta.app, opts, validate); err != nil {
+		t.Fatalf("runSetupAPIKey = %v, want nil", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+		t.Fatalf("skill not installed to default location: %v", err)
+	}
+}
+
 // TestForcedNonInteractive pins the TTY-override escape hatches that keep
 // the wizard from blocking on a human-less pty. The --non-interactive
 // flag wins over the env vars; the env vars are still honored when the
