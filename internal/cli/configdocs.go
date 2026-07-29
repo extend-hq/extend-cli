@@ -317,6 +317,8 @@ const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-dete
   - excelSkipHiddenContent (bool) — drop hidden rows, columns, and sheets.
   - excelUseRawCellValues (bool) — emit raw calculated values instead of locale-formatted ones.
   - excelSkipCalculation (bool) — skip formula recalculation (faster; disable for volatile NOW()/TODAY()).
+  - excelIncludeCellMetadata (bool) — include cell provenance (source refs/formulas, data-cell/data-formula in HTML); advanced mode only.
+  - excelIncludeCellFormatting (bool) — include cell formatting (bold, italic, font/background color, inline HTML styles); advanced mode only.
   - verticalGroupingThreshold (number 0.1–5.0, default 1.0) — line-grouping sensitivity; --target spatial only.
   - returnOcr (object) — words (bool): include word-level raw OCR data in the response.
   - alwaysConvertToPdf (bool) — convert images/Office/HTML to PDF first (enables spatial bboxes).

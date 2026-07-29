@@ -426,22 +426,10 @@ func extractSummaryRow(r *extend.ExtractRunSummary) []string {
 	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
 }
 
-func parseRow(r *extend.ParseRun) []string {
-	// The SDK's *extend.ParseRun does not declare a CreatedAt
-	// field — the server still emits one, but it lives in
-	// extraProperties because Fern's spec doesn't model it. Pull
-	// it out so the "created" column matches the other run kinds.
-	// If/when the SDK adds CreatedAt as a typed field, swap this
-	// back to a direct field read.
-	created := ""
-	if r != nil {
-		if t, ok := r.GetExtraProperties()["createdAt"].(string); ok {
-			created = relTimeFromISO(t)
-		}
-	}
+func parseRow(r *extend.ParseRunSummary) []string {
 	// Parse runs have no processor reference, so the "processor"
 	// column is always empty (matches the old client).
-	return []string{r.ID, string(r.Status), "", created}
+	return []string{r.ID, string(r.Status), "", relTime(r.CreatedAt)}
 }
 
 func classifySummaryRow(r *extend.ClassifyRunSummary) []string {
