@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -92,15 +93,11 @@ func TestWorkflowGet_ExposesDraftVersionWithSteps(t *testing.T) {
 	if len(steps) == 0 {
 		t.Errorf("draftVersion.steps is empty; expected at least one step on a deployable workflow")
 	}
-	// Each step has a `type` discriminator from the closed enum (PARSE,
-	// EXTRACT, CLASSIFY, SPLIT, MERGE_EXTRACT, CONDITIONAL_EXTRACT,
-	// RULE_VALIDATION, EXTERNAL_DATA_VALIDATION, TRIGGER).
-	validStepTypes := map[string]bool{
-		"PARSE": true, "EXTRACT": true, "CLASSIFY": true, "SPLIT": true,
-		"MERGE_EXTRACT": true, "CONDITIONAL_EXTRACT": true,
-		"RULE_VALIDATION": true, "EXTERNAL_DATA_VALIDATION": true,
-		"TRIGGER": true,
-	}
+	// The step-type union is open: the API adds new types (VALIDATION, ROUTER)
+	// without a version bump, so asserting membership of a frozen list only
+	// breaks this test whenever the product ships a node. Assert the shape the
+	// CLI must preserve instead.
+	stepType := regexp.MustCompile(`^[A-Z][A-Z_]*$`)
 	for i, s := range steps {
 		stepMap, ok := s.(map[string]any)
 		if !ok {
@@ -108,8 +105,11 @@ func TestWorkflowGet_ExposesDraftVersionWithSteps(t *testing.T) {
 			continue
 		}
 		typ, _ := stepMap["type"].(string)
-		if !validStepTypes[typ] {
-			t.Errorf("step %d type = %q, not in known step-type enum", i, typ)
+		if !stepType.MatchString(typ) {
+			t.Errorf("step %d type = %q, want a non-empty SCREAMING_SNAKE_CASE discriminator", i, typ)
+		}
+		if name, _ := stepMap["name"].(string); name == "" {
+			t.Errorf("step %d has no name", i)
 		}
 	}
 }
