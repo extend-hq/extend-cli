@@ -1,9 +1,9 @@
 package integration
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestExtractors exercises the full create -> get -> list flow against a
@@ -103,35 +103,36 @@ func TestExtractors(t *testing.T) {
 	})
 
 	t.Run("ListIncludesCreatedExtractor", func(t *testing.T) {
-		// Sort explicitly by createdAt: the server's default sort is updatedAt,
-		// so in a workspace with existing extractors any of them being touched
-		// pushes the just-created fixture off the first page.
-		listRes := runExtend(t, env, "extractors", "list", "--limit", "20", "--sort-by", "createdAt", "--sort", "desc", "-o", "json")
-		listRes.requireOK(t, "extractors", "list")
-
-		var page struct {
-			Data []struct {
-				ID     string `json:"id"`
-				Object string `json:"object"`
-				Name   string `json:"name"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(listRes.Stdout, &page); err != nil {
-			t.Fatalf("decode list: %v\nstdout: %s", err, listRes.Stdout)
-		}
-		var found *struct {
+		// List is eventually consistent (~700ms against prod) where GET is
+		// read-your-writes, so poll. Sort by createdAt as well: the server
+		// defaults to updatedAt, which any touched extractor would rank above
+		// the fixture.
+		type item struct {
 			ID     string `json:"id"`
 			Object string `json:"object"`
 			Name   string `json:"name"`
 		}
-		for i := range page.Data {
-			if page.Data[i].ID == created.ID {
-				found = &page.Data[i]
-				break
+		var found *item
+		for attempt := 0; found == nil && attempt < 20; attempt++ {
+			if attempt > 0 {
+				time.Sleep(500 * time.Millisecond)
+			}
+			listRes := runExtend(t, env, "extractors", "list", "--limit", "20", "--sort-by", "createdAt", "--sort", "desc", "-o", "json")
+			listRes.requireOK(t, "extractors", "list")
+
+			var page struct {
+				Data []item `json:"data"`
+			}
+			listRes.decodeJSON(t, &page)
+			for i := range page.Data {
+				if page.Data[i].ID == created.ID {
+					found = &page.Data[i]
+					break
+				}
 			}
 		}
 		if found == nil {
-			t.Fatalf("created extractor %s not in first 20 of desc-sorted list", created.ID)
+			t.Fatalf("created extractor %s never appeared in first 20 of createdAt-desc list after 10s", created.ID)
 		}
 		if found.Object != "extractor" {
 			t.Errorf("list item object = %q, want extractor", found.Object)
