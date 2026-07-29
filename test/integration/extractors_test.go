@@ -103,12 +103,10 @@ func TestExtractors(t *testing.T) {
 	})
 
 	t.Run("ListIncludesCreatedExtractor", func(t *testing.T) {
-		// Workspace sort defaults to createdAt desc, so the just-created
-		// fixture should always appear in the first page. Use a generous
-		// limit so the test isn't sensitive to the exact ordering when many
-		// resources are created in quick succession (parallel test runs,
-		// etc.).
-		listRes := runExtend(t, env, "extractors", "list", "--limit", "20", "-o", "json")
+		// Sort explicitly by createdAt: the server's default sort is updatedAt,
+		// so in a workspace with existing extractors any of them being touched
+		// pushes the just-created fixture off the first page.
+		listRes := runExtend(t, env, "extractors", "list", "--limit", "20", "--sort-by", "createdAt", "--sort", "desc", "-o", "json")
 		listRes.requireOK(t, "extractors", "list")
 
 		var page struct {
