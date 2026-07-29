@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/harmonica v0.2.0
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/extend-hq/extend-go-sdk v0.1.0
+	github.com/extend-hq/extend-go-sdk v0.4.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/mattn/go-isatty v0.0.21
 	github.com/spf13/cobra v1.10.2
