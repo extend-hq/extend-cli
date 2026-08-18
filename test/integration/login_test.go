@@ -141,8 +141,8 @@ func runLoginDrivingBrowser(t *testing.T, env map[string]string) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("extend login exited with error: %v\nstderr: %s", err, collected.String())
 	}
-	if !strings.Contains(collected.String(), "Logged in to") {
-		t.Errorf("login stderr missing success line: %s", collected.String())
+	if !strings.Contains(collected.String(), "Signed in to Itest Workspace (Production) as itest@example.com.") {
+		t.Errorf("login stderr missing personalized success line: %s", collected.String())
 	}
 }
 
@@ -222,6 +222,22 @@ func newFakeOAuthAPI(t *testing.T) *fakeOAuthAPI {
 		f.revoked = append(f.revoked, r.PostForm.Get("token"))
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer eoat_") {
+			http.Error(w, `{"code":"UNAUTHORIZED","message":"missing bearer token"}`, http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{
+			"object": "me",
+			"organization": {"id": "org_itest", "name": "Itest Org"},
+			"workspace": {"id": "ws_itest", "name": "Itest Workspace"},
+			"user": {"id": "user_itest", "email": "itest@example.com"},
+			"grantedTargets": [
+				{"workspace": {"id": "ws_itest", "name": "Itest Workspace"}, "environments": ["PRODUCTION"]}
+			]
+		}`)
 	})
 
 	mux.HandleFunc("/workflows", func(w http.ResponseWriter, r *http.Request) {

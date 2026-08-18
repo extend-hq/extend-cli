@@ -42,6 +42,11 @@ type fakeAuthServer struct {
 	exchanged string
 	// revoked records tokens sent to the revoke endpoint.
 	revoked []string
+	// meHandler, when set, serves GET /me; unset answers 404 so tests
+	// exercise the generic-success fallback by default.
+	meHandler http.HandlerFunc
+	// meAuth records the Authorization header of the last /me call.
+	meAuth string
 }
 
 func newFakeAuthServer(t *testing.T) *fakeAuthServer {
@@ -70,6 +75,14 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 		r.ParseForm()
 		f.revoked = append(f.revoked, r.PostForm.Get("token"))
 		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+		f.meAuth = r.Header.Get("Authorization")
+		if f.meHandler != nil {
+			f.meHandler(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
@@ -147,12 +160,88 @@ func TestRunLoginHappyPath(t *testing.T) {
 		t.Errorf("stored expiry %v not in the future", rec.ExpiresAt)
 	}
 
+	// The fake serves no /me, so the success line is the generic one.
 	out := stderr()
 	if !strings.Contains(out, "Logged in to "+f.srv.URL) {
 		t.Errorf("stderr missing success line: %q", out)
 	}
 	if strings.Contains(out, "eoat_") || strings.Contains(out, "eort_") {
 		t.Errorf("stderr leaked a token: %q", out)
+	}
+}
+
+func TestRunLoginPersonalizedSuccessLine(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+			"object": "me",
+			"organization": {"id": "org_1", "name": "Acme Inc"},
+			"workspace": {"id": "ws_1", "name": "Acme Corp"},
+			"user": {"id": "user_1", "email": "jam@example.com"},
+			"grantedTargets": [
+				{"workspace": {"id": "ws_1", "name": "Acme Corp"}, "environments": ["PRODUCTION"]}
+			]
+		}`)
+	}
+	loginTestEnv(t, f.srv.URL)
+	app, stderr := testAppForLogin()
+
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: f.browserFor(t, "code-xyz", ""),
+		store:       oauth.DefaultStore(),
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if f.meAuth != "Bearer eoat_test" {
+		t.Errorf("/me Authorization = %q, want the fresh access token", f.meAuth)
+	}
+	out := stderr()
+	if !strings.Contains(out, "Signed in to Acme Corp (Production) as jam@example.com.") {
+		t.Errorf("stderr missing personalized success line: %q", out)
+	}
+}
+
+func TestRunLoginMeFailureFallsBackToGenericLine(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"code":"INTERNAL","message":"boom"}`, http.StatusInternalServerError)
+	}
+	loginTestEnv(t, f.srv.URL)
+	app, stderr := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: f.browserFor(t, "code-xyz", ""),
+		store:       store,
+	})
+	if err != nil {
+		t.Fatalf("a /me failure must not fail the login, got %v", err)
+	}
+	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.AccessToken != "eoat_test" {
+		t.Errorf("tokens should be stored despite the /me failure, got %+v", rec)
+	}
+	if out := stderr(); !strings.Contains(out, "Logged in to "+f.srv.URL) {
+		t.Errorf("stderr missing generic fallback line: %q", out)
+	}
+}
+
+func TestLoginSuccessLine(t *testing.T) {
+	cases := []struct {
+		name string
+		id   *loginIdentity
+		want string
+	}{
+		{"nil identity", nil, "Logged in to https://api.example."},
+		{"no workspace", &loginIdentity{email: "a@b.c"}, "Logged in to https://api.example."},
+		{"full", &loginIdentity{workspace: "Acme", environment: "TEST", email: "a@b.c"}, "Signed in to Acme (Test) as a@b.c."},
+		{"unknown env", &loginIdentity{workspace: "Acme", environment: "WEIRD", email: "a@b.c"}, "Signed in to Acme as a@b.c."},
+		{"no email", &loginIdentity{workspace: "Acme", environment: "PRODUCTION"}, "Signed in to Acme (Production)."},
+	}
+	for _, tc := range cases {
+		if got := loginSuccessLine("https://api.example", tc.id); got != tc.want {
+			t.Errorf("%s: loginSuccessLine = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

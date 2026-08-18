@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -189,8 +191,8 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		Resource:   base,
 	}
 	tr, err := tokenClient.Exchange(ctx, code, verifier, lb.RedirectURI())
-	sp.Stop("")
 	if err != nil {
+		sp.Stop("")
 		return fmt.Errorf("exchange authorization code: %w", err)
 	}
 
@@ -204,10 +206,16 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		Resource:           base,
 	}
 	if err := opts.store.Set(base, rec); err != nil {
+		sp.Stop("")
 		return fmt.Errorf("store login: %w", err)
 	}
 
-	fmt.Fprintf(app.IO.ErrOut, "%s Logged in to %s.\n", pal.Green("✓"), base)
+	// Personalize the success line from GET /me. Best-effort: the
+	// tokens are already stored, so a /me hiccup must never fail the
+	// login; the generic line is the fallback.
+	id := fetchLoginIdentity(ctx, httpc, base, tr.AccessToken)
+	sp.Stop("")
+	fmt.Fprintf(app.IO.ErrOut, "%s %s\n", pal.Green("✓"), loginSuccessLine(base, id))
 	if s.key.val != "" {
 		fmt.Fprintf(app.IO.ErrOut, "%s An API key is also configured (%s) and takes precedence over this login.\n",
 			pal.Yellow("!"), s.key.src)
@@ -281,6 +289,86 @@ func effectiveBaseURL(s resolved) (string, error) {
 		return "", fmt.Errorf("unknown region %q (known: %v)", region, extendx.KnownRegions())
 	}
 	return oauth.NormalizeBase(u), nil
+}
+
+// loginIdentity is the slice of GET /me the success line needs: the
+// workspace and environment this login was granted, and who signed in.
+type loginIdentity struct {
+	workspace   string
+	environment string
+	email       string
+}
+
+// fetchLoginIdentity calls GET /me with the fresh access token. The
+// SDK has no /me binding yet, so this is a minimal direct call. Any
+// failure returns nil; the caller falls back to the generic line.
+func fetchLoginIdentity(ctx context.Context, httpc *http.Client, base, accessToken string) *loginIdentity {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/me", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("x-extend-api-version", defaultAPIVersion)
+	req.Header.Set("User-Agent", userAgent())
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var body struct {
+		Workspace struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"workspace"`
+		User struct {
+			Email string `json:"email"`
+		} `json:"user"`
+		GrantedTargets []struct {
+			Workspace struct {
+				ID string `json:"id"`
+			} `json:"workspace"`
+			Environments []string `json:"environments"`
+		} `json:"grantedTargets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return nil
+	}
+	id := &loginIdentity{workspace: body.Workspace.Name, email: body.User.Email}
+	// The top-level workspace is the one this login resolved to; its
+	// granted target carries the environment. A login is scoped to one
+	// environment, so anything but a single entry stays unlabeled.
+	for _, t := range body.GrantedTargets {
+		if t.Workspace.ID == body.Workspace.ID && len(t.Environments) == 1 {
+			id.environment = t.Environments[0]
+			break
+		}
+	}
+	return id
+}
+
+// loginSuccessLine renders the post-login summary: personalized when
+// /me answered ("Signed in to Acme (Production) as a@b.c."), generic
+// otherwise.
+func loginSuccessLine(base string, id *loginIdentity) string {
+	if id == nil || id.workspace == "" {
+		return fmt.Sprintf("Logged in to %s.", base)
+	}
+	line := "Signed in to " + id.workspace
+	switch id.environment {
+	case "PRODUCTION":
+		line += " (Production)"
+	case "TEST":
+		line += " (Test)"
+	}
+	if id.email != "" {
+		line += " as " + id.email
+	}
+	return line + "."
 }
 
 // openBrowser launches the platform's URL opener. Errors are surfaced
