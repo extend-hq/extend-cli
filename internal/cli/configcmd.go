@@ -62,10 +62,13 @@ func runConfig(app *App) error {
 	s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
 	pal := paletteFor(app.IO)
 
-	// Only API keys exist today; this line is where OAuth status surfaces.
 	authMethod := "(none)"
+	authNote := ""
 	if s.key.val != "" {
 		authMethod = "API key"
+	} else if src := resolveOAuthSource(app.Env, s); src != nil {
+		authMethod = "OAuth login"
+		authNote = "from 'extend login'; 'extend logout' to clear"
 	}
 
 	// An unset region/baseURL means extendx falls back to its default (US
@@ -105,7 +108,7 @@ func runConfig(app *App) error {
 
 	type row struct{ label, val, note string }
 	rows := []row{
-		{"Auth method", authMethod, ""},
+		{"Auth method", authMethod, authNote},
 		{"API key", maskKey(s.key.val), s.key.src},
 		{"Region", region, regionSrc},
 		{"Base URL", baseURL, baseSrc},

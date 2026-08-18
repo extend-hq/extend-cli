@@ -40,6 +40,10 @@ const (
 	// path even with a TTY (pseudo-ttys with no human: docker -t | sh,
 	// some CI). Flag wins.
 	envNonInteractive = "EXTEND_NONINTERACTIVE"
+	// envOAuthClientID overrides the OAuth client id `extend login`
+	// presents (default "extend-cli"). Only useful against test rigs
+	// whose authorization server registers a different client.
+	envOAuthClientID = "EXTEND_OAUTH_CLIENT_ID"
 )
 
 // defaultAPIVersion is the API version sent on every request unless the
@@ -51,7 +55,7 @@ const defaultAPIVersion = "2026-02-09"
 // stable and matches the priority a user is most likely to care about
 // (auth first, then routing, then transport, then per-feature secrets).
 var envVars = []envVarSpec{
-	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for any command that calls the API."},
+	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for API commands unless signed in via 'extend login'."},
 	{Name: envBaseURL, Description: "Override base URL. Wins over EXTEND_REGION."},
 	{Name: envRegion, Description: "Region: us|eu. Selects the regional API endpoint."},
 	{Name: envWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
@@ -61,4 +65,5 @@ var envVars = []envVarSpec{
 	{Name: envDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 	{Name: envOutput, Description: "Default output format when --output is not set: json|yaml|raw|id|table|markdown."},
 	{Name: envEnv, Description: "Environment label (e.g. 'test') that selects EXTEND_<UPPER>_API_KEY in place of EXTEND_API_KEY."},
+	{Name: envOAuthClientID, Description: "Override the OAuth client id used by 'extend login' (default extend-cli). For test rigs only."},
 }

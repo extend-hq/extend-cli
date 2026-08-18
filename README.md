@@ -55,12 +55,22 @@ flag changes.
 
 ## Authenticate
 
-Run the interactive wizard; it picks your region, validates the API key,
+Sign in through your browser (no API key needed):
+
+    extend login
+
+This runs an OAuth flow: your browser opens Extend's consent screen, you
+pick one workspace and one environment, and the CLI stores the resulting
+tokens in the OS keychain (or a 0600 file under `~/.config/extend/` on
+headless hosts). Tokens refresh silently; `extend logout` revokes the
+session and clears them.
+
+Or run the interactive wizard; it picks your region, validates the API key,
 and saves it to `~/.config/extend/config.json`:
 
     extend setup
 
-Or set environment variables (these take precedence over the saved config):
+Or set environment variables:
 
     export EXTEND_API_KEY=sk_xxx
 
@@ -68,6 +78,11 @@ Optional:
 
     export EXTEND_REGION=us                        # us | us2 | eu (default: us)
     export EXTEND_WORKSPACE_ID=ws_xxx              # for org-scoped keys
+
+Precedence when several sources are configured: `EXTEND_API_KEY` (or
+`EXTEND_<LABEL>_API_KEY` under `--env <label>`), then the API key saved
+by `extend setup`, then the stored `extend login` session. Check what is
+in effect with `extend config`.
 
 ## Examples
 

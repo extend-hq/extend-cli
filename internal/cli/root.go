@@ -19,6 +19,7 @@ import (
 	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
+	"github.com/extend-hq/extend-cli/internal/oauth"
 	"github.com/extend-hq/extend-cli/internal/version"
 )
 
@@ -74,6 +75,9 @@ Or run 'extend setup' for an interactive wizard that selects your region,
 points you to the dashboard to create a key, validates it, and saves it to
 ~/.config/extend/config.json (read as a fallback when EXTEND_API_KEY is unset).
 
+Or run 'extend login' to sign in through your browser without an API key;
+the stored login is used when no API key resolves (see 'extend help auth').
+
 Environment variables:
   EXTEND_API_KEY         API key (required)
   EXTEND_BASE_URL        Override base URL (e.g. https://api.extend.ai)
@@ -85,6 +89,8 @@ Environment variables:
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
   EXTEND_ENV             Environment label that selects an alternate API key
                          (e.g. --env test reads EXTEND_TEST_API_KEY)
+  EXTEND_OAUTH_CLIENT_ID Override the OAuth client id used by 'extend login'
+                         (default extend-cli; for test rigs only)
 
 The --workspace, --region, and --http-timeout flags override their
 respective env vars.`,
@@ -112,6 +118,8 @@ respective env vars.`,
 			newSkillDoc(app),
 			// Onboarding (ungrouped: shows under "Additional Commands")
 			newSetupDoc(app),
+			newLoginDoc(app),
+			newLogoutDoc(app),
 			newConfigDoc(app),
 			// Help topics
 			newAuthTopicDoc(),
@@ -155,12 +163,17 @@ func NewRoot() *cobra.Command {
 
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+		var oauthSource extendx.BearerSource
 		if s.key.val == "" {
-			return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr)
+			oauthSource = resolveOAuthSource(app.Env, s)
+			if oauthSource == nil {
+				return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr)
+			}
 		}
 
 		cfg := extendx.Config{
 			APIKey:      s.key.val,
+			OAuth:       oauthSource,
 			Region:      s.region.val,
 			WorkspaceID: s.workspaceID.val,
 			APIVersion:  s.apiVersion.val,
@@ -369,18 +382,41 @@ func apiKeyEnvVar(envLabel string) string {
 	return "EXTEND_" + upper + "_API_KEY"
 }
 
-// unconfiguredKeyError is the "no API key" error commands return when none
-// resolves: it names the key env var, points at `extend setup`, and links
-// the resolved region's dashboard (US for unset/unknown). When fileErr is
-// non-nil (a config file is present but couldn't be read or parsed), it
-// appends that cause so the user isn't told a key is missing when one is
-// sitting in an unreadable file (the shadowed-binary / bad-permissions trap).
+// resolveOAuthSource returns a token source for the stored `extend
+// login` matching the resolved API base URL, or nil when none applies.
+// Stored logins are consulted only for the default environment label:
+// --env <label> means "use EXTEND_<LABEL>_API_KEY", and silently
+// substituting a login bound to some other environment would defeat the
+// point of the label.
+func resolveOAuthSource(envLabel string, s resolved) extendx.BearerSource {
+	if envLabel != "" {
+		return nil
+	}
+	base, err := effectiveBaseURL(s)
+	if err != nil {
+		return nil
+	}
+	store := oauth.DefaultStore()
+	rec, err := store.Get(base)
+	if err != nil || rec == nil {
+		return nil
+	}
+	return oauth.NewTokenSource(store, base, *rec)
+}
+
+// unconfiguredKeyError is the "no credentials" error commands return when
+// neither an API key nor a stored login resolves: it names the key env
+// var, points at `extend login` / `extend setup`, and links the resolved
+// region's dashboard (US for unset/unknown). When fileErr is non-nil (a
+// config file is present but couldn't be read or parsed), it appends that
+// cause so the user isn't told a key is missing when one is sitting in an
+// unreadable file (the shadowed-binary / bad-permissions trap).
 func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
 	dash := "https://dashboard.extend.ai"
 	if d, ok := extendx.RegionDashboard(region); ok {
 		dash = d
 	}
-	err := fmt.Errorf("%s is not set. Run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
+	err := fmt.Errorf("%s is not set and you are not logged in. Run 'extend login' to sign in with your browser, run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
 	if fileErr != nil {
 		err = fmt.Errorf("%w\nnote: a config file was found but could not be read (run 'extend config'): %v", err, fileErr)
 	}
@@ -446,6 +482,16 @@ func formatError(w io.Writer, pal palette, err error) {
 		if apiErr.RequestID != "" {
 			fmt.Fprintf(w, "       %s\n", pal.Dimf("request: %s", apiErr.RequestID))
 		}
+		return
+	}
+
+	// An expired or revoked `extend login` session needs a clear
+	// "sign in again" message. Checked before *url.Error because the
+	// HTTP client wraps transport-level errors (including ours from
+	// the bearer transport) in *url.Error.
+	var reauthErr *oauth.ReauthError
+	if errors.As(err, &reauthErr) {
+		fmt.Fprintf(w, "%s %s\n", pal.Red("Error:"), reauthErr.Error())
 		return
 	}
 

@@ -1,6 +1,7 @@
 package extendx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,9 +36,15 @@ const DefaultUserAgent = "extend-cli/dev"
 // is the caller's responsibility — populate these from the App
 // struct's already-merged values before calling NewClient.
 type Config struct {
-	// APIKey is the bearer token. Required for any command that
-	// actually hits the API.
+	// APIKey is the bearer token. Either it or OAuth is required for
+	// any command that actually hits the API; APIKey wins when both
+	// are set.
 	APIKey string
+	// OAuth supplies access tokens from a stored `extend login` when
+	// no API key resolves. Attached as a transport that injects the
+	// bearer header, silently refreshes on expiry, and retries once
+	// on a 401.
+	OAuth BearerSource
 	// BaseURL overrides the SDK's default. Wins over Region.
 	BaseURL string
 	// Region is a short selector (us|us2|eu). Resolved to a URL via
@@ -67,7 +74,7 @@ type Config struct {
 // region/base URL, workspace ID, API version, user agent, debug
 // logging, and HTTP timeout.
 func NewClient(cfg Config) (*sdkclient.Client, error) {
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.OAuth == nil {
 		return nil, errors.New("API key is required")
 	}
 
@@ -116,9 +123,23 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	}
 
 	opts := []option.RequestOption{
-		option.WithToken(cfg.APIKey),
 		option.WithHTTPHeader(headers),
 		option.WithHTTPClient(httpClient),
+	}
+	if cfg.APIKey != "" {
+		opts = append(opts, option.WithToken(cfg.APIKey))
+	} else {
+		// OAuth auth is attached twice, and both paths matter:
+		// WithTokenFunc makes the SDK stamp a fresh token on every
+		// request, which covers uploads (UploadOption swaps in a bare
+		// http.Client, bypassing our transport). The bearer transport
+		// (outermost, so the debug transport logs both attempts) adds
+		// the 401 refresh-and-retry for everything else.
+		src := cfg.OAuth
+		opts = append(opts, option.WithTokenFunc(func() (string, error) {
+			return src.AccessToken(context.Background())
+		}))
+		httpClient.Transport = newBearerTransport(httpClient.Transport, cfg.OAuth)
 	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
