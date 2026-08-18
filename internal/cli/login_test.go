@@ -244,20 +244,48 @@ func TestLoginSuccessLine(t *testing.T) {
 	}
 }
 
-func TestRunLoginStateMismatch(t *testing.T) {
+func TestRunLoginIgnoresForgedCallback(t *testing.T) {
 	f := newFakeAuthServer(t)
 	loginTestEnv(t, f.srv.URL)
 	app, _ := testAppForLogin()
 
-	err := runLogin(context.Background(), app, loginOptions{
-		openBrowser: f.browserFor(t, "code-xyz", "attacker-state"),
-		store:       oauth.DefaultStore(),
-	})
-	if err == nil || !strings.Contains(err.Error(), "state mismatch") {
-		t.Fatalf("err = %v, want state mismatch", err)
+	// A forged callback (wrong state, from some other local process)
+	// fires before the real redirect. It must be ignored: the pending
+	// login completes with the real code, not aborted or hijacked.
+	openBrowser := func(authURL string) error {
+		u, err := url.Parse(authURL)
+		if err != nil {
+			return err
+		}
+		q := u.Query()
+		f.challenge = q.Get("code_challenge")
+		f.redirectURI = q.Get("redirect_uri")
+		go func() {
+			forged := fmt.Sprintf("%s?code=evil-code&state=attacker-state", f.redirectURI)
+			if resp, err := http.Get(forged); err == nil {
+				resp.Body.Close()
+			}
+			real := fmt.Sprintf("%s?code=code-xyz&state=%s", f.redirectURI, url.QueryEscape(q.Get("state")))
+			if resp, err := http.Get(real); err == nil {
+				resp.Body.Close()
+			}
+		}()
+		return nil
 	}
-	if rec, _ := oauth.DefaultStore().Get(f.srv.URL); rec != nil {
-		t.Errorf("no tokens should be stored after a failed login, got %+v", rec)
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: openBrowser,
+		store:       store,
+	})
+	if err != nil {
+		t.Fatalf("a forged callback must not abort the login, got %v", err)
+	}
+	if f.exchanged != "code-xyz" {
+		t.Errorf("exchanged code = %q, want the real code-xyz (never the forged one)", f.exchanged)
+	}
+	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.AccessToken != "eoat_test" {
+		t.Errorf("tokens should be stored from the real callback, got %+v", rec)
 	}
 }
 

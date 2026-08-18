@@ -63,27 +63,143 @@ func TestLoopbackSuccess(t *testing.T) {
 	}
 }
 
-func TestLoopbackStateMismatch(t *testing.T) {
+func TestLoopbackStateMismatchIsIgnored(t *testing.T) {
 	lb, err := NewLoopback("expected-state")
 	if err != nil {
 		t.Fatalf("NewLoopback: %v", err)
 	}
 	defer lb.Close()
 
-	status, body := get(t, lb.RedirectURI()+"?code=abc&state=wrong-state")
-	if status != http.StatusBadRequest {
-		t.Errorf("state mismatch status = %d, want 400", status)
-	}
-	for _, want := range []string{"Sign-in failed", "extend login"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("error page missing %q, got %q", want, body)
+	// A callback that cannot echo the state (wrong or missing) must be
+	// answered without consuming the result channel: any local process
+	// could otherwise abort a pending real login.
+	for _, qs := range []string{
+		"?code=abc&state=wrong-state",
+		"?code=abc",
+		"?error=access_denied&state=wrong-state",
+		"?error=access_denied",
+	} {
+		status, body := get(t, lb.RedirectURI()+qs)
+		if status != http.StatusNotFound {
+			t.Errorf("%s status = %d, want 404", qs, status)
+		}
+		for _, want := range []string{"Sign-in failed", "extend login"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s page missing %q, got %q", qs, want, body)
+			}
 		}
 	}
 
+	// The channel is untouched: Wait keeps waiting...
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if _, err := lb.Wait(shortCtx); err != context.DeadlineExceeded {
+		t.Fatalf("Wait after ignored callbacks = %v, want DeadlineExceeded (still pending)", err)
+	}
+
+	// ...and the real callback still completes the login.
+	get(t, lb.RedirectURI()+"?code=realcode&state=expected-state")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := lb.Wait(ctx); err == nil || !strings.Contains(err.Error(), "state mismatch") {
-		t.Errorf("Wait err = %v, want state mismatch error", err)
+	code, err := lb.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if code != "realcode" {
+		t.Errorf("code = %q, want realcode", code)
+	}
+}
+
+func TestLoopbackErrorCallbackNeedsState(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	// error= without the right state is ignored (channel untouched);
+	// with the right state it resolves the flow.
+	get(t, lb.RedirectURI()+"?error=access_denied")
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if _, err := lb.Wait(shortCtx); err != context.DeadlineExceeded {
+		t.Fatalf("Wait = %v, want DeadlineExceeded (stateless error ignored)", err)
+	}
+
+	get(t, lb.RedirectURI()+"?error=access_denied&state=s")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := lb.Wait(ctx); err == nil || !strings.Contains(err.Error(), "access_denied") {
+		t.Errorf("Wait err = %v, want access_denied", err)
+	}
+}
+
+func TestLoopbackRejectsNonGET(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	resp, err := http.Post(lb.RedirectURI()+"?code=x&state=s", "text/plain", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST status = %d, want 405", resp.StatusCode)
+	}
+	if allow := resp.Header.Get("Allow"); allow != http.MethodGet {
+		t.Errorf("Allow = %q, want GET", allow)
+	}
+
+	// The POST must not have consumed the channel or the code.
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if _, err := lb.Wait(shortCtx); err != context.DeadlineExceeded {
+		t.Errorf("Wait after POST = %v, want DeadlineExceeded", err)
+	}
+}
+
+func TestLoopbackRejectsOtherPaths(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	base := strings.TrimSuffix(lb.RedirectURI(), "/callback")
+	for _, path := range []string{"/", "/callback/extra", "/other"} {
+		resp, err := http.Get(base + path + "?code=x&state=s")
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, resp.StatusCode)
+		}
+	}
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer shortCancel()
+	if _, err := lb.Wait(shortCtx); err != context.DeadlineExceeded {
+		t.Errorf("Wait after off-path hits = %v, want DeadlineExceeded", err)
+	}
+}
+
+func TestLoopbackPagesAreUncacheable(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	resp, err := http.Get(lb.RedirectURI() + "?code=x&state=s")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
 	}
 }
 

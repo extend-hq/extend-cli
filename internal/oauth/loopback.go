@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // AuthorizeParams carries everything needed to build the authorization
@@ -65,7 +66,13 @@ func NewLoopback(state string) (*Loopback, error) {
 		return nil, fmt.Errorf("bind loopback listener: %w", err)
 	}
 	result := make(chan callbackResult, 1)
-	srv := &http.Server{Handler: newCallbackHandler(state, result)}
+	srv := &http.Server{
+		Handler: newCallbackHandler(state, result),
+		// The only legitimate client is the local browser redirect; a
+		// header timeout keeps a misbehaving local process from
+		// holding connections open for the life of the login.
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	go srv.Serve(ln) //nolint:errcheck // shut down via Close; Serve's error is always non-nil then
 	return &Loopback{ln: ln, srv: srv, result: result}, nil
 }
@@ -96,6 +103,13 @@ func (l *Loopback) Close() error {
 // accepts GET /callback only, verifies the state parameter, and reports
 // exactly one result (the first callback wins; later hits get a plain
 // error page).
+//
+// The state check comes first and gates everything, including error
+// redirects: any local process can hit this port, and a callback that
+// cannot prove it belongs to this login attempt (by echoing the state)
+// must not be able to consume the one-shot result channel and abort a
+// pending real login. Non-matching callbacks are answered without
+// touching the channel.
 func newCallbackHandler(state string, result chan<- callbackResult) http.Handler {
 	report := func(r callbackResult) bool {
 		select {
@@ -107,7 +121,17 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		q := r.URL.Query()
+		if q.Get("state") != state {
+			writeCallbackPage(w, http.StatusNotFound, "Sign-in failed",
+				"This response did not match the current login attempt. You can close this tab and run <code>extend login</code> to try again.")
+			return
+		}
 		if errCode := q.Get("error"); errCode != "" {
 			msg := errCode
 			if desc := q.Get("error_description"); desc != "" {
@@ -121,12 +145,6 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 				writeCallbackPage(w, http.StatusOK, "Sign-in failed",
 					"The authorization was not completed ("+html.EscapeString(msg)+"). You can close this tab and run <code>extend login</code> to try again.")
 			}
-			return
-		}
-		if q.Get("state") != state {
-			report(callbackResult{err: fmt.Errorf("authorization response state mismatch; possible CSRF, aborting login")})
-			writeCallbackPage(w, http.StatusBadRequest, "Sign-in failed",
-				"This response did not match the current login attempt. You can close this tab and run <code>extend login</code> to try again.")
 			return
 		}
 		code := q.Get("code")
@@ -164,6 +182,7 @@ const logomarkSVG = `<svg width="44" height="36" viewBox="0 0 40 32" xmlns="http
 // into it.
 func writeCallbackPage(w http.ResponseWriter, status int, heading, body string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
