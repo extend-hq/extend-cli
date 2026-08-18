@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/url"
@@ -113,21 +114,26 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 				msg = errCode + ": " + desc
 			}
 			report(callbackResult{err: fmt.Errorf("authorization failed: %s", msg)})
-			writeCallbackPage(w, http.StatusOK, "Sign-in failed",
-				"The authorization was not completed ("+msg+"). You can close this tab and return to the terminal.")
+			if errCode == "access_denied" {
+				writeCallbackPage(w, http.StatusOK, "Sign-in canceled",
+					"No access was granted. You can close this tab and return to your terminal.")
+			} else {
+				writeCallbackPage(w, http.StatusOK, "Sign-in failed",
+					"The authorization was not completed ("+html.EscapeString(msg)+"). You can close this tab and run <code>extend login</code> to try again.")
+			}
 			return
 		}
 		if q.Get("state") != state {
 			report(callbackResult{err: fmt.Errorf("authorization response state mismatch; possible CSRF, aborting login")})
 			writeCallbackPage(w, http.StatusBadRequest, "Sign-in failed",
-				"The response did not match this login attempt. Close this tab and run 'extend login' again.")
+				"This response did not match the current login attempt. You can close this tab and run <code>extend login</code> to try again.")
 			return
 		}
 		code := q.Get("code")
 		if code == "" {
 			report(callbackResult{err: fmt.Errorf("authorization response missing code parameter")})
 			writeCallbackPage(w, http.StatusBadRequest, "Sign-in failed",
-				"The response was missing the authorization code. Close this tab and run 'extend login' again.")
+				"The response was missing the authorization code. You can close this tab and run <code>extend login</code> to try again.")
 			return
 		}
 		if !report(callbackResult{code: code}) {
@@ -135,20 +141,57 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 				"This login attempt already completed. You can close this tab.")
 			return
 		}
-		writeCallbackPage(w, http.StatusOK, "Signed in to Extend",
-			"Login complete. You can close this tab and return to the terminal.")
+		writeCallbackPage(w, http.StatusOK, "You're signed in",
+			"You can close this tab and return to your terminal.")
 	})
 	return mux
 }
 
-func writeCallbackPage(w http.ResponseWriter, status int, title, body string) {
+// logomarkSVG is the Extend mark (two stacked hollow blunted diamonds)
+// as inline SVG, derived from the same parametric geometry the terminal
+// logo uses (internal/cli/logo.go: rx 16, ry 9, corner 1.5, inner
+// ratios 0.75/0.67, center gap 6). Inlined so the page renders offline.
+const logomarkSVG = `<svg width="44" height="36" viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Extend">
+<path fill="#1a1a1a" fill-rule="evenodd" d="M20 4 L36 11.5 L36 14.5 L20 22 L4 14.5 L4 11.5 Z M20 7 L32 13 L20 19 L8 13 Z"/>
+<path fill="#1a1a1a" fill-rule="evenodd" d="M20 10 L36 17.5 L36 20.5 L20 28 L4 20.5 L4 17.5 Z M20 13 L32 19 L20 25 L8 19 Z"/>
+</svg>`
+
+// writeCallbackPage renders the branded loopback landing page: a white
+// card on a neutral background with the Extend logomark, a heading, and
+// a short instruction. Everything is inline (embedded CSS, inline SVG,
+// system fonts) because the page must render with no network access.
+// body is trusted HTML; callers escape any dynamic content they splice
+// into it.
+func writeCallbackPage(w http.ResponseWriter, status int, heading, body string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<!doctype html>
-<html><head><title>%s</title></head>
-<body style="font-family: -apple-system, system-ui, sans-serif; margin: 4rem auto; max-width: 32rem; text-align: center;">
-<h1 style="font-size: 1.25rem;">%s</h1>
-<p style="color: #555;">%s</p>
-</body></html>
-`, title, title, body)
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%s - Extend</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#f4f4f2;color:#1a1a1a;-webkit-font-smoothing:antialiased;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+main{background:#fff;border:1px solid #e4e4e0;border-radius:16px;
+box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);
+padding:56px 48px;margin:24px;max-width:360px;text-align:center}
+svg{display:block;margin:0 auto 28px}
+h1{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 10px}
+p{font-size:14px;line-height:1.6;color:#52524d;margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;
+background:#f4f4f2;border:1px solid #e4e4e0;border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<main>
+%s
+<h1>%s</h1>
+<p>%s</p>
+</main>
+</body>
+</html>
+`, html.EscapeString(heading), logomarkSVG, html.EscapeString(heading), body)
 }

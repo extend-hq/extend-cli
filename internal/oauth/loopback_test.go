@@ -10,7 +10,8 @@ import (
 )
 
 // get performs a plain GET against the loopback listener and returns
-// status and body.
+// status and body. Every callback response is a branded HTML page, so
+// the content type is asserted here for all variants at once.
 func get(t *testing.T, url string) (int, string) {
 	t.Helper()
 	resp, err := http.Get(url)
@@ -18,6 +19,9 @@ func get(t *testing.T, url string) (int, string) {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -41,8 +45,11 @@ func TestLoopbackSuccess(t *testing.T) {
 	if status != http.StatusOK {
 		t.Errorf("callback status = %d, want 200", status)
 	}
-	if !strings.Contains(body, "close this tab") {
-		t.Errorf("callback body should tell the user to close the tab, got %q", body)
+	// The heading apostrophe is HTML-escaped on the wire.
+	for _, want := range []string{"You&#39;re signed in", "close this tab", "<svg"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("success page missing %q, got %q", want, body)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -63,9 +70,14 @@ func TestLoopbackStateMismatch(t *testing.T) {
 	}
 	defer lb.Close()
 
-	status, _ := get(t, lb.RedirectURI()+"?code=abc&state=wrong-state")
+	status, body := get(t, lb.RedirectURI()+"?code=abc&state=wrong-state")
 	if status != http.StatusBadRequest {
 		t.Errorf("state mismatch status = %d, want 400", status)
+	}
+	for _, want := range []string{"Sign-in failed", "extend login"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("error page missing %q, got %q", want, body)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -82,7 +94,12 @@ func TestLoopbackErrorParam(t *testing.T) {
 	}
 	defer lb.Close()
 
-	get(t, lb.RedirectURI()+"?error=access_denied&error_description=user+said+no&state=s")
+	_, body := get(t, lb.RedirectURI()+"?error=access_denied&error_description=user+said+no&state=s")
+	for _, want := range []string{"Sign-in canceled", "close this tab"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("denied page missing %q, got %q", want, body)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -92,6 +109,33 @@ func TestLoopbackErrorParam(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "user said no") {
 		t.Errorf("Wait err = %v, want access_denied with description", err)
+	}
+}
+
+func TestLoopbackServerErrorPageEscapesDescription(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	_, body := get(t, lb.RedirectURI()+"?error=server_error&error_description=%3Cscript%3Eboom%3C%2Fscript%3E&state=s")
+	for _, want := range []string{"Sign-in failed", "extend login"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("error page missing %q, got %q", want, body)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Errorf("error page must escape the error_description, got %q", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;boom&lt;/script&gt;") {
+		t.Errorf("error page should show the escaped description, got %q", body)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := lb.Wait(ctx); err == nil || !strings.Contains(err.Error(), "server_error") {
+		t.Errorf("Wait err = %v, want server_error", err)
 	}
 }
 
