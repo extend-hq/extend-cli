@@ -130,7 +130,10 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	pal := paletteFor(app.IO)
 
 	httpc := &http.Client{Timeout: 30 * time.Second}
-	eps := oauth.Discover(ctx, httpc, base)
+	eps, err := oauth.Discover(ctx, httpc, base)
+	if err != nil {
+		return err
+	}
 
 	verifier, err := oauth.NewVerifier()
 	if err != nil {
