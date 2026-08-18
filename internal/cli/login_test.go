@@ -201,6 +201,61 @@ func TestRunLoginPersonalizedSuccessLine(t *testing.T) {
 	}
 }
 
+func TestSanitizeForTerminal(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "Acme Corp", "Acme Corp"},
+		{"unicode kept", "Ăcmé ✓ 名前", "Ăcmé ✓ 名前"},
+		{"csi color", "\x1b[31mAcme\x1b[0m", "Acme"},
+		{"csi cursor", "evil\x1b[2Jclear", "evilclear"},
+		{"osc bel", "\x1b]0;title\x07Acme", "Acme"},
+		{"osc st", "\x1b]8;;https://evil.example\x1b\\Acme", "Acme"},
+		{"bare esc", "A\x1bcB", "AB"},
+		{"trailing esc", "Acme\x1b", "Acme"},
+		{"c0 controls", "A\x00c\tm\re\n!", "Acme!"},
+		{"del", "Acme\x7f", "Acme"},
+		{"raw c1 csi", "Acme\u009b31mRed", "Acme31mRed"},
+	}
+	for _, tc := range cases {
+		if got := sanitizeForTerminal(tc.in); got != tc.want {
+			t.Errorf("%s: sanitizeForTerminal(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRunLoginSanitizesMeOutput(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+			"workspace": {"id": "ws_1", "name": "\u001b[31mEvil\u001b[0m Corp"},
+			"user": {"id": "user_1", "email": "a@b.c\u001b]0;pwned\u0007"},
+			"grantedTargets": [
+				{"workspace": {"id": "ws_1"}, "environments": ["TEST"]}
+			]
+		}`)
+	}
+	loginTestEnv(t, f.srv.URL)
+	app, stderr := testAppForLogin()
+
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: f.browserFor(t, "code-xyz", ""),
+		store:       oauth.DefaultStore(),
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	out := stderr()
+	if strings.Contains(out, "\x1b[31m") || strings.Contains(out, "\x1b]0;") || strings.Contains(out, "pwned") {
+		t.Errorf("stderr leaked an escape sequence from /me: %q", out)
+	}
+	if !strings.Contains(out, "Signed in to Evil Corp (Test) as a@b.c.") {
+		t.Errorf("stderr missing the sanitized success line: %q", out)
+	}
+}
+
 func TestRunLoginMeFailureFallsBackToGenericLine(t *testing.T) {
 	f := newFakeAuthServer(t)
 	f.meHandler = func(w http.ResponseWriter, r *http.Request) {

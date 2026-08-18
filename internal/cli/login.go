@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -334,7 +335,10 @@ func fetchLoginIdentity(ctx context.Context, httpc *http.Client, base, accessTok
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return nil
 	}
-	id := &loginIdentity{workspace: body.Workspace.Name, email: body.User.Email}
+	id := &loginIdentity{
+		workspace: sanitizeForTerminal(body.Workspace.Name),
+		email:     sanitizeForTerminal(body.User.Email),
+	}
 	// The top-level workspace is the one this login resolved to; its
 	// granted target carries the environment. A login is scoped to one
 	// environment, so anything but a single entry stays unlabeled.
@@ -365,6 +369,59 @@ func loginSuccessLine(base string, id *loginIdentity) string {
 		line += " as " + id.email
 	}
 	return line + "."
+}
+
+// sanitizeForTerminal strips escape sequences and control characters
+// from server-provided text before it is printed. A workspace name (or
+// email) is attacker-influenced data; without this, embedded ANSI CSI
+// or OSC sequences could restyle the terminal, spoof output, or (on
+// some emulators) worse. ESC-initiated CSI and OSC sequences are
+// removed whole, including their payload; all other C0 controls, DEL,
+// and the raw C1 range (which includes single-byte CSI) are dropped.
+// These are single-line values, so newlines carry no meaning here and
+// are dropped with the rest.
+func sanitizeForTerminal(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == 0x1b { // ESC
+			if i+1 >= len(runes) {
+				break
+			}
+			switch runes[i+1] {
+			case '[': // CSI: parameters end at a byte in 0x40–0x7e
+				i++
+				for i+1 < len(runes) {
+					i++
+					if runes[i] >= 0x40 && runes[i] <= 0x7e {
+						break
+					}
+				}
+			case ']': // OSC: terminated by BEL or ST (ESC \)
+				i++
+				for i+1 < len(runes) {
+					i++
+					if runes[i] == 0x07 {
+						break
+					}
+					if runes[i] == 0x1b && i+1 < len(runes) && runes[i+1] == '\\' {
+						i++
+						break
+					}
+				}
+			default: // two-character escape (RIS, charset shifts, ...)
+				i++
+			}
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // openBrowser launches the platform's URL opener. Errors are surfaced
