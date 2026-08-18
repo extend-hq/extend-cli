@@ -45,6 +45,12 @@ type Config struct {
 	// bearer header, silently refreshes on expiry, and retries once
 	// on a 401.
 	OAuth BearerSource
+	// TokenContext scopes token refreshes triggered through the SDK's
+	// token func, whose signature takes no context of its own. Pass
+	// the command's signal-aware context so Ctrl-C aborts an in-flight
+	// refresh; nil falls back to context.Background(). The bearer
+	// transport is unaffected — it always uses the request's context.
+	TokenContext context.Context
 	// BaseURL overrides the SDK's default. Wins over Region.
 	BaseURL string
 	// Region is a short selector (us|us2|eu). Resolved to a URL via
@@ -136,8 +142,12 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		// (outermost, so the debug transport logs both attempts) adds
 		// the 401 refresh-and-retry for everything else.
 		src := cfg.OAuth
+		tokenCtx := cfg.TokenContext
+		if tokenCtx == nil {
+			tokenCtx = context.Background()
+		}
 		opts = append(opts, option.WithTokenFunc(func() (string, error) {
-			return src.AccessToken(context.Background())
+			return src.AccessToken(tokenCtx)
 		}))
 		httpClient.Transport = newBearerTransport(httpClient.Transport, cfg.OAuth)
 	}

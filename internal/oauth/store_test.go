@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,33 @@ func TestFileStorePermissions(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("tokens file mode = %o, want 600", perm)
+	}
+}
+
+func TestFileStoreRefusesSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	target := filepath.Join(dir, "elsewhere.json")
+	if err := os.WriteFile(target, []byte(`{"version":1,"tokens":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(dir, "extend")
+	if err := os.MkdirAll(linkDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(linkDir, "oauth_tokens.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &fileStore{}
+	if _, err := s.Get("https://api.extend.ai"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("Get through a symlink = %v, want a refusal", err)
+	}
+	if err := s.Set("https://api.extend.ai", testRecord()); err == nil {
+		t.Error("Set through a symlink should be refused")
 	}
 }
 

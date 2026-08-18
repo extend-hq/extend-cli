@@ -135,6 +135,13 @@ func (s *fileStore) load() (tokensFile, string, error) {
 	if err != nil {
 		return tokensFile{}, "", err
 	}
+	// Refuse to read through a symlink: the tokens file lives in a
+	// user-owned directory, but a planted link could otherwise trick
+	// the CLI into reading (and later atomically replacing) a file
+	// elsewhere.
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return tokensFile{}, "", fmt.Errorf("%s is a symbolic link; refusing to read it", path)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -178,6 +185,12 @@ func (s *fileStore) save(path string, f tokensFile) error {
 	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write temp tokens file: %w", err)
+	}
+	// Flush to disk before the rename: without it a crash can install
+	// an empty file over the previous tokens, losing the login.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp tokens file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp tokens file: %w", err)

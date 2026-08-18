@@ -46,6 +46,10 @@ type App struct {
 	// for a run to reach a terminal state). Zero leaves the SDK's
 	// default timeout in place.
 	HTTPTimeout time.Duration
+	// cmdContext is the executing command's context (signal-aware),
+	// captured in PersistentPreRun. It scopes OAuth token refreshes
+	// issued through the SDK's context-less token func.
+	cmdContext context.Context
 }
 
 // RootDoc returns the typed documentation tree rooted at the `extend`
@@ -149,6 +153,7 @@ func NewRoot() *cobra.Command {
 	// the corresponding flag wasn't passed.
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		applyEnvDefaults(app)
+		app.cmdContext = cmd.Context()
 	}
 
 	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (or EXTEND_OUTPUT; default: command-specific)")
@@ -170,12 +175,13 @@ func NewRoot() *cobra.Command {
 		}
 
 		cfg := extendx.Config{
-			APIKey:      s.key.val,
-			OAuth:       oauthSource,
-			Region:      s.region.val,
-			WorkspaceID: s.workspaceID.val,
-			APIVersion:  s.apiVersion.val,
-			UserAgent:   userAgent(),
+			APIKey:       s.key.val,
+			OAuth:        oauthSource,
+			TokenContext: app.cmdContext,
+			Region:       s.region.val,
+			WorkspaceID:  s.workspaceID.val,
+			APIVersion:   s.apiVersion.val,
+			UserAgent:    userAgent(),
 		}
 		// A non-empty base URL (env or config file) overrides the region.
 		if s.baseURL.val != "" {

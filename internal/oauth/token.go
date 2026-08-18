@@ -137,7 +137,10 @@ func (c *Client) postToken(ctx context.Context, form url.Values) (*TokenResponse
 
 func parseTokenError(resp *http.Response) error {
 	te := &TokenError{StatusCode: resp.StatusCode}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// Error bodies feed error messages only; 64KB is plenty and keeps
+	// a misbehaving endpoint (or intercepting proxy) from streaming an
+	// unbounded body into memory.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err == nil && len(body) > 0 {
 		// Best-effort decode; a non-JSON body (proxy error page)
 		// surfaces as the description.
