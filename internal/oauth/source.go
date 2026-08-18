@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -38,6 +39,9 @@ type TokenSource struct {
 	rec     Record
 	client  *http.Client
 	now     func() time.Time
+	// warn surfaces non-fatal but user-actionable problems (a rotated
+	// refresh token that could not be persisted). Defaults to stderr.
+	warn func(format string, args ...any)
 }
 
 // NewTokenSource builds a source over a stored record.
@@ -48,6 +52,9 @@ func NewTokenSource(store Store, apiBase string, rec Record) *TokenSource {
 		rec:     rec,
 		client:  &http.Client{Timeout: 30 * time.Second},
 		now:     time.Now,
+		warn: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		},
 	}
 }
 
@@ -99,23 +106,50 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	}
 	tr, err := c.Refresh(ctx, s.rec.RefreshToken)
 	if err != nil {
-		var te *TokenError
-		if errors.As(err, &te) && te.StatusCode >= 400 && te.StatusCode < 500 {
+		if isGrantRejection(err) {
 			return &ReauthError{Cause: err}
 		}
 		return fmt.Errorf("refresh access token: %w", err)
 	}
-	s.rec.AccessToken = tr.AccessToken
+	newRec := s.rec
+	newRec.AccessToken = tr.AccessToken
 	if tr.RefreshToken != "" {
-		s.rec.RefreshToken = tr.RefreshToken
+		newRec.RefreshToken = tr.RefreshToken
 	}
-	s.rec.ExpiresAt = s.now().Add(time.Duration(tr.ExpiresIn) * time.Second)
-	// Persisting the rotated refresh token is not optional: the old one
-	// is dead server-side, so losing the new one strands the login.
-	if err := s.store.Set(s.apiBase, s.rec); err != nil {
-		return fmt.Errorf("persist rotated refresh token: %w", err)
+	newRec.ExpiresAt = s.now().Add(time.Duration(tr.ExpiresIn) * time.Second)
+	// Persist the rotated pair before handing the new access token out:
+	// the old refresh token is dead server-side the moment rotation
+	// succeeds, so a pair that exists only in this process's memory
+	// strands the login when the process exits. One retry absorbs a
+	// transient store hiccup; past that, keep working in memory but
+	// tell the user loudly instead of failing (failing would strand
+	// them harder — the rotation has already happened).
+	persistErr := s.store.Set(s.apiBase, newRec)
+	if persistErr != nil {
+		persistErr = s.store.Set(s.apiBase, newRec)
+	}
+	s.rec = newRec
+	if persistErr != nil {
+		s.warn("! Could not save your refreshed Extend login (%v). The refreshed session is available to this command only; if later commands cannot authenticate, run 'extend login' to sign in again.", persistErr)
 	}
 	return nil
+}
+
+// isGrantRejection reports whether the token endpoint definitively
+// rejected the grant itself, meaning re-login is the only way forward.
+// Per RFC 6749 that is a 400/401 carrying invalid_grant (dead or
+// revoked refresh token) or invalid_client. Everything else — 429s,
+// 5xxs, 408s, network timeouts, proxy error pages — is transient and
+// must not be presented as an expired login.
+func isGrantRejection(err error) bool {
+	var te *TokenError
+	if !errors.As(err, &te) {
+		return false
+	}
+	if te.StatusCode != http.StatusBadRequest && te.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	return te.Code == "invalid_grant" || te.Code == "invalid_client"
 }
 
 func (s *TokenSource) endpoints() Endpoints {

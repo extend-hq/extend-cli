@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,7 +63,11 @@ func newRefreshServer(t *testing.T, wantRefreshToken string) (*httptest.Server, 
 	return srv, &calls
 }
 
-func sourceWithRecord(store Store, base string, rec Record) *TokenSource {
+func sourceWithRecord(t *testing.T, store Store, base string, rec Record) *TokenSource {
+	t.Helper()
+	// The refresh path takes a cross-process lock beside the file
+	// fallback store; point it at a throwaway directory.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	s := NewTokenSource(store, base, rec)
 	return s
 }
@@ -74,7 +79,7 @@ func TestAccessTokenFreshTokenNoRefresh(t *testing.T) {
 		RefreshToken: "eort_r",
 		ExpiresAt:    time.Now().Add(time.Hour),
 	}
-	s := sourceWithRecord(store, "https://api.example", rec)
+	s := sourceWithRecord(t, store, "https://api.example", rec)
 	tok, err := s.AccessToken(context.Background())
 	if err != nil {
 		t.Fatalf("AccessToken: %v", err)
@@ -97,7 +102,7 @@ func TestAccessTokenRefreshesExpiredAndPersistsRotation(t *testing.T) {
 		ClientID:      "extend-cli",
 		Resource:      base,
 	}
-	s := sourceWithRecord(store, base, rec)
+	s := sourceWithRecord(t, store, base, rec)
 
 	tok, err := s.AccessToken(context.Background())
 	if err != nil {
@@ -143,7 +148,7 @@ func TestAccessTokenWithinSkewRefreshes(t *testing.T) {
 		ExpiresAt:     time.Now().Add(10 * time.Second), // inside the 60s skew
 		TokenEndpoint: srv.URL,
 	}
-	s := sourceWithRecord(store, "https://api.example", rec)
+	s := sourceWithRecord(t, store, "https://api.example", rec)
 	if _, err := s.AccessToken(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +167,7 @@ func TestForceRefreshReusesConcurrentRefresh(t *testing.T) {
 		ExpiresAt:     time.Now().Add(time.Hour),
 		TokenEndpoint: srv.URL,
 	}
-	s := sourceWithRecord(store, "https://api.example", rec)
+	s := sourceWithRecord(t, store, "https://api.example", rec)
 
 	tok, err := s.ForceRefresh(context.Background(), "eoat_rejected")
 	if err != nil {
@@ -199,7 +204,7 @@ func TestRefreshRejectionYieldsReauthError(t *testing.T) {
 		ExpiresAt:     time.Now().Add(-time.Minute),
 		TokenEndpoint: srv.URL,
 	}
-	s := sourceWithRecord(store, "https://api.example", rec)
+	s := sourceWithRecord(t, store, "https://api.example", rec)
 
 	_, err := s.AccessToken(context.Background())
 	var reauth *ReauthError
@@ -212,8 +217,161 @@ func TestRefreshRejectionYieldsReauthError(t *testing.T) {
 	}
 }
 
+// failingStore wraps memStore and fails the first failSets calls to
+// Set, simulating a keychain or filesystem hiccup during persistence.
+type failingStore struct {
+	*memStore
+	failSets int
+	setCalls int
+}
+
+func (f *failingStore) Set(apiBase string, rec Record) error {
+	f.setCalls++
+	if f.setCalls <= f.failSets {
+		return errors.New("keychain unavailable")
+	}
+	return f.memStore.Set(apiBase, rec)
+}
+
+func TestRefreshPersistFailureRetriesOnce(t *testing.T) {
+	srv, _ := newRefreshServer(t, "eort_old")
+	defer srv.Close()
+	store := &failingStore{memStore: newMemStore(), failSets: 1}
+	s := sourceWithRecord(t, store, "https://api.example", Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_old",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: srv.URL,
+	})
+	warned := false
+	s.warn = func(string, ...any) { warned = true }
+
+	tok, err := s.AccessToken(context.Background())
+	if err != nil || tok != "eoat_new_1" {
+		t.Fatalf("AccessToken = (%q, %v)", tok, err)
+	}
+	if store.setCalls != 2 {
+		t.Errorf("Set calls = %d, want 2 (one failure, one retry)", store.setCalls)
+	}
+	if warned {
+		t.Error("a successful retry must not warn")
+	}
+	persisted, _ := store.Get("https://api.example")
+	if persisted == nil || persisted.RefreshToken != "eort_new_1" {
+		t.Errorf("persisted = %+v, want the rotated pair", persisted)
+	}
+}
+
+func TestRefreshPersistFailureWarnsAndContinues(t *testing.T) {
+	srv, _ := newRefreshServer(t, "eort_old")
+	defer srv.Close()
+	store := &failingStore{memStore: newMemStore(), failSets: 2}
+	s := sourceWithRecord(t, store, "https://api.example", Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_old",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: srv.URL,
+	})
+	var warning string
+	s.warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
+
+	// The rotation already happened server-side, so the source must
+	// keep working in memory rather than fail — but never silently.
+	tok, err := s.AccessToken(context.Background())
+	if err != nil || tok != "eoat_new_1" {
+		t.Fatalf("AccessToken = (%q, %v)", tok, err)
+	}
+	if store.setCalls != 2 {
+		t.Errorf("Set calls = %d, want 2 (initial + one retry)", store.setCalls)
+	}
+	if warning == "" {
+		t.Fatal("a persist failure must surface a warning")
+	}
+	if !strings.Contains(warning, "extend login") {
+		t.Errorf("warning should point at re-login, got %q", warning)
+	}
+}
+
+func TestRefreshTransientErrorsAreNotReauth(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"429 rate limited", http.StatusTooManyRequests, `{"error":"slow_down"}`},
+		{"408 timeout", http.StatusRequestTimeout, ``},
+		{"400 without oauth code", http.StatusBadRequest, `proxy error page`},
+		{"401 without oauth code", http.StatusUnauthorized, ``},
+		{"500", http.StatusInternalServerError, `{"error":"server_error"}`},
+		{"503", http.StatusServiceUnavailable, ``},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer srv.Close()
+			store := newMemStore()
+			s := sourceWithRecord(t, store, "https://api.example", Record{
+				AccessToken:   "eoat_expired",
+				RefreshToken:  "eort_live",
+				ExpiresAt:     time.Now().Add(-time.Minute),
+				TokenEndpoint: srv.URL,
+			})
+			_, err := s.AccessToken(context.Background())
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			var reauth *ReauthError
+			if errors.As(err, &reauth) {
+				t.Errorf("a transient failure must not be a ReauthError, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRefreshNetworkErrorIsNotReauth(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	dead := srv.URL
+	srv.Close()
+	s := sourceWithRecord(t, newMemStore(), "https://api.example", Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_live",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: dead,
+	})
+	_, err := s.AccessToken(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var reauth *ReauthError
+	if errors.As(err, &reauth) {
+		t.Errorf("a connection error must not be a ReauthError, got %v", err)
+	}
+}
+
+func TestRefreshInvalidClientIsReauth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"invalid_client"}`)
+	}))
+	defer srv.Close()
+	s := sourceWithRecord(t, newMemStore(), "https://api.example", Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_x",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: srv.URL,
+	})
+	_, err := s.AccessToken(context.Background())
+	var reauth *ReauthError
+	if !errors.As(err, &reauth) {
+		t.Fatalf("err = %v, want *ReauthError for invalid_client", err)
+	}
+}
+
 func TestMissingRefreshTokenYieldsReauthError(t *testing.T) {
-	s := sourceWithRecord(newMemStore(), "https://api.example", Record{
+	s := sourceWithRecord(t, newMemStore(), "https://api.example", Record{
 		AccessToken: "eoat_expired",
 		ExpiresAt:   time.Now().Add(-time.Minute),
 	})
