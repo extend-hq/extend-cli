@@ -11,7 +11,7 @@
 //     RFC 8414 discovery via {apiBase}/.well-known/oauth-authorization-server
 //     is preferred, with the hardcoded paths as fallback.
 //   - The client is the static public client "extend-cli" (no secret;
-//     PKCE required). EXTEND_OAUTH_CLIENT_ID overrides it for test rigs.
+//     PKCE required).
 //   - The resource parameter (RFC 8707) is required on both the
 //     authorize and token requests and equals the API base URL the CLI
 //     is configured against.

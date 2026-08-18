@@ -40,10 +40,6 @@ const (
 	// path even with a TTY (pseudo-ttys with no human: docker -t | sh,
 	// some CI). Flag wins.
 	envNonInteractive = "EXTEND_NONINTERACTIVE"
-	// envOAuthClientID overrides the OAuth client id `extend login`
-	// presents (default "extend-cli"). Only useful against test rigs
-	// whose authorization server registers a different client.
-	envOAuthClientID = "EXTEND_OAUTH_CLIENT_ID"
 )
 
 // defaultAPIVersion is the API version sent on every request unless the
@@ -65,5 +61,4 @@ var envVars = []envVarSpec{
 	{Name: envDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 	{Name: envOutput, Description: "Default output format when --output is not set: json|yaml|raw|id|table|markdown."},
 	{Name: envEnv, Description: "Environment label (e.g. 'test') that selects EXTEND_<UPPER>_API_KEY in place of EXTEND_API_KEY."},
-	{Name: envOAuthClientID, Description: "Override the OAuth client id used by 'extend login' (default extend-cli). For test rigs only."},
 }

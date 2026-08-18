@@ -55,10 +55,7 @@ the browser, so commands need no --workspace flag under it.
 
 Auth precedence: an API key from the environment (EXTEND_API_KEY) or the
 config file always wins over a stored login. Run 'extend config' to see
-which source is in effect.
-
-EXTEND_OAUTH_CLIENT_ID overrides the OAuth client id (default
-"extend-cli"); only useful against test rigs.`,
+which source is in effect.`,
 		Examples: []Example{
 			{Label: "Sign in", Cmd: "extend login"},
 			{Label: "Print the URL instead of opening a browser", Cmd: "extend login --no-browser"},
@@ -150,12 +147,8 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	}
 	defer lb.Close()
 
-	clientID := os.Getenv(envOAuthClientID)
-	if clientID == "" {
-		clientID = oauth.DefaultClientID
-	}
 	authURL := oauth.AuthorizeURL(eps.Authorization, oauth.AuthorizeParams{
-		ClientID:    clientID,
+		ClientID:    oauth.DefaultClientID,
 		RedirectURI: lb.RedirectURI(),
 		State:       state,
 		Challenge:   oauth.ChallengeS256(verifier),
@@ -187,7 +180,7 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	tokenClient := &oauth.Client{
 		HTTPClient: httpc,
 		Endpoints:  eps,
-		ClientID:   clientID,
+		ClientID:   oauth.DefaultClientID,
 		Resource:   base,
 	}
 	tr, err := tokenClient.Exchange(ctx, code, verifier, lb.RedirectURI())
@@ -202,7 +195,7 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		ExpiresAt:          time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second),
 		TokenEndpoint:      eps.Token,
 		RevocationEndpoint: eps.Revocation,
-		ClientID:           clientID,
+		ClientID:           oauth.DefaultClientID,
 		Resource:           base,
 	}
 	if err := opts.store.Set(base, rec); err != nil {

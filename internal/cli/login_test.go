@@ -26,7 +26,6 @@ func loginTestEnv(t *testing.T, baseURL string) {
 	t.Setenv("EXTEND_REGION", "")
 	t.Setenv("EXTEND_WORKSPACE_ID", "")
 	t.Setenv("EXTEND_ENV", "")
-	t.Setenv("EXTEND_OAUTH_CLIENT_ID", "")
 }
 
 // fakeAuthServer implements the token endpoint side of the contract:

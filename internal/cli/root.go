@@ -89,8 +89,6 @@ Environment variables:
   EXTEND_WEBHOOK_SECRET  Signing secret used by 'extend webhooks verify'
   EXTEND_ENV             Environment label that selects an alternate API key
                          (e.g. --env test reads EXTEND_TEST_API_KEY)
-  EXTEND_OAUTH_CLIENT_ID Override the OAuth client id used by 'extend login'
-                         (default extend-cli; for test rigs only)
 
 The --workspace, --region, and --http-timeout flags override their
 respective env vars.`,
