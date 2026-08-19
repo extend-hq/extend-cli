@@ -23,27 +23,30 @@ import (
 func NewHTTPClient(apiBase string) *http.Client {
 	return &http.Client{
 		Timeout:       30 * time.Second,
-		CheckRedirect: checkSameOriginRedirect(apiBase),
+		CheckRedirect: CheckSameOriginRedirect(apiBase),
 	}
 }
 
-// checkSameOriginRedirect builds a CheckRedirect that admits only
-// redirects staying on apiBase's origin. It is called by the client
-// before each hop of a chain, so the origin is enforced on every hop,
-// not just the first.
-func checkSameOriginRedirect(apiBase string) func(req *http.Request, via []*http.Request) error {
+// CheckSameOriginRedirect builds an http.Client CheckRedirect that
+// admits only redirects staying on apiBase's origin. It is called by
+// the client before each hop of a chain, so the origin is enforced on
+// every hop, not just the first. Install it on any client whose
+// requests carry credentials bound to apiBase: the OAuth clients here
+// re-send token material in request bodies, and the API client's
+// transport re-attaches the Authorization header on every hop.
+func CheckSameOriginRedirect(apiBase string) func(req *http.Request, via []*http.Request) error {
 	base, baseErr := url.Parse(NormalizeBase(apiBase))
 	return func(req *http.Request, via []*http.Request) error {
 		// Re-impose the default chain limit, which installing a
 		// custom CheckRedirect would otherwise replace.
 		if len(via) >= 10 {
-			return errors.New("oauth: stopped after 10 redirects")
+			return errors.New("stopped after 10 redirects")
 		}
 		if baseErr != nil {
-			return fmt.Errorf("oauth: refusing redirect: parse api base url %q: %w", apiBase, baseErr)
+			return fmt.Errorf("refusing redirect: parse api base url %q: %w", apiBase, baseErr)
 		}
 		if req.URL.Scheme != base.Scheme || req.URL.Host != base.Host {
-			return fmt.Errorf("oauth: refusing redirect to %s://%s: not the pinned API origin %s://%s",
+			return fmt.Errorf("refusing redirect to %s://%s: not the pinned API origin %s://%s",
 				req.URL.Scheme, req.URL.Host, base.Scheme, base.Host)
 		}
 		return nil

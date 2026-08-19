@@ -14,6 +14,8 @@ import (
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
 	sdkcore "github.com/extend-hq/extend-go-sdk/core"
 	"github.com/extend-hq/extend-go-sdk/option"
+
+	"github.com/extend-hq/extend-cli/internal/oauth"
 )
 
 // DefaultHTTPTimeout is applied to the HTTP client every API call goes
@@ -115,8 +117,23 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	// Build the underlying http.Client. Wrap with the debug transport
 	// when the caller asked for it. We don't share the http.Client
 	// between commands so a per-command --http-timeout doesn't leak.
+	//
+	// Redirects are pinned to the API base's origin. Both auth paths
+	// put a live bearer on redirect hops — Go's client copies the
+	// Authorization header to same-registrable-host targets, and the
+	// bearer transport below re-attaches a fresh token on every hop —
+	// so an off-origin Location header (open redirect, compromised
+	// endpoint, misconfigured CDN) would hand the credential to
+	// whatever host it names. Refuse those hops instead.
+	pinnedBase := baseURL
+	if pinnedBase == "" {
+		// Matches the base the SDK falls back to when no
+		// option.WithBaseURL is set.
+		pinnedBase = extend.Environments.Production
+	}
 	httpClient := &http.Client{
-		Timeout: DefaultHTTPTimeout,
+		Timeout:       DefaultHTTPTimeout,
+		CheckRedirect: oauth.CheckSameOriginRedirect(pinnedBase),
 	}
 	switch {
 	case cfg.HTTPTimeout < 0:
@@ -355,5 +372,20 @@ func populateFromBodyString(out *APIError, bodyErr error) {
 // live on RequestOptions, not on the HTTP client; only the timeout
 // knob changes.
 func UploadOption() option.RequestOption {
-	return option.WithHTTPClient(&http.Client{})
+	return option.WithHTTPClient(uploadHTTPClient())
+}
+
+// uploadHTTPClient is the untimed client UploadOption swaps in. It
+// refuses redirects outright: upload requests carry the Authorization
+// header, and following a redirect would replay it (and the multipart
+// body) to whatever host the Location header names. The upload
+// endpoint never redirects legitimately, and this client has no view
+// of the configured API base to pin an origin against, so refusing is
+// the safe policy.
+func uploadHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("refusing redirect to %s://%s on an upload request", req.URL.Scheme, req.URL.Host)
+		},
+	}
 }

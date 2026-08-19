@@ -1,8 +1,12 @@
 package extendx
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	extend "github.com/extend-hq/extend-go-sdk"
@@ -247,5 +251,109 @@ func TestNewClient_KnownRegion(t *testing.T) {
 	}
 	if c == nil {
 		t.Fatal("NewClient(us2) returned nil")
+	}
+}
+
+// TestNewClient_RefusesCrossOriginRedirect covers the redirect pin on
+// the general API client. The OAuth-authenticated variant is the worst
+// case: the bearer transport stamps a fresh Authorization header on
+// every hop, so a followed off-origin redirect would hand a live
+// access token to the foreign host.
+func TestNewClient_RefusesCrossOriginRedirect(t *testing.T) {
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("foreign origin received %s %s with Authorization %q; the redirect must not be followed",
+			r.Method, r.URL.Path, r.Header.Get("Authorization"))
+	}))
+	defer foreign.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(Config{OAuth: &fakeSource{token: "eoat_live"}, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	_, err = c.Workflows.List(context.Background(), &extend.WorkflowsListRequest{})
+	if err == nil {
+		t.Fatal("List followed a cross-origin redirect")
+	}
+	if !strings.Contains(err.Error(), "pinned API origin") {
+		t.Errorf("List error = %v, want the redirect refusal", err)
+	}
+}
+
+func TestNewClient_FollowsSameOriginRedirect(t *testing.T) {
+	var gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/workflows", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/workflows-v2", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/workflows-v2", func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		fmt.Fprint(w, `{"object":"list","data":[]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := NewClient(Config{APIKey: "sk_test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.Workflows.List(context.Background(), &extend.WorkflowsListRequest{}); err != nil {
+		t.Fatalf("List through a same-origin redirect: %v", err)
+	}
+	if gotAuth != "Bearer sk_test" {
+		t.Errorf("redirected request Authorization = %q, want the bearer to survive a same-origin hop", gotAuth)
+	}
+}
+
+// TestNewClient_RevalidatesEveryRedirectHop: an allowed same-origin hop
+// must not open the door for a later cross-origin hop in the same
+// chain.
+func TestNewClient_RevalidatesEveryRedirectHop(t *testing.T) {
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("foreign origin received %s %s; hop revalidation failed", r.Method, r.URL.Path)
+	}))
+	defer foreign.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/workflows", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/hop", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/hop", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, foreign.URL+"/workflows", http.StatusTemporaryRedirect)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := NewClient(Config{APIKey: "sk_test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.Workflows.List(context.Background(), &extend.WorkflowsListRequest{}); err == nil {
+		t.Error("List followed a chain ending on a foreign origin")
+	}
+}
+
+func TestUploadClientRefusesRedirect(t *testing.T) {
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("foreign origin received %s %s; upload redirects must not be followed", r.Method, r.URL.Path)
+	}))
+	defer foreign.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	resp, err := uploadHTTPClient().Get(srv.URL + "/files/upload")
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("upload client followed a redirect")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("error = %v, want the upload redirect refusal", err)
 	}
 }
