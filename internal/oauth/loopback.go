@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
 
 // AuthorizeParams carries everything needed to build the authorization
@@ -133,9 +135,12 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 			return
 		}
 		if errCode := q.Get("error"); errCode != "" {
-			msg := errCode
+			// The error and error_description parameters arrive on a
+			// redirect anyone can craft and are printed to the
+			// terminal; strip escape sequences before they travel.
+			msg := iostreams.SanitizeForTerminal(errCode)
 			if desc := q.Get("error_description"); desc != "" {
-				msg = errCode + ": " + desc
+				msg = msg + ": " + iostreams.SanitizeForTerminal(desc)
 			}
 			report(callbackResult{err: fmt.Errorf("authorization failed: %s", msg)})
 			if errCode == "access_denied" {

@@ -15,6 +15,7 @@ import (
 	sdkcore "github.com/extend-hq/extend-go-sdk/core"
 	"github.com/extend-hq/extend-go-sdk/option"
 
+	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/oauth"
 )
 
@@ -242,9 +243,20 @@ func AsAPIError(err error) (*APIError, bool) {
 		if out.Message == "" {
 			out.Message = http.StatusText(coreErr.StatusCode)
 		}
-		return out, true
+		return sanitized(out), true
 	}
 	return nil, false
+}
+
+// sanitized neutralizes terminal escape sequences in the
+// server-controlled fields of an APIError. Applied at construction so
+// every path that renders the error — the CLI error printer as well as
+// %v/%w chains through Error() — inherits it.
+func sanitized(e *APIError) *APIError {
+	e.Code = iostreams.SanitizeForTerminal(e.Code)
+	e.Message = iostreams.SanitizeForTerminal(e.Message)
+	e.RequestID = iostreams.SanitizeForTerminal(e.RequestID)
+	return e
 }
 
 // IsNotFound reports whether err is a 404 from the API. Used by
@@ -292,7 +304,7 @@ func apiErrorFromTypedBody(status int, header http.Header, body *extend.APIError
 	if out.Message == "" {
 		out.Message = http.StatusText(status)
 	}
-	return out
+	return sanitized(out)
 }
 
 // populateFromBodyString best-effort parses a string body that looks

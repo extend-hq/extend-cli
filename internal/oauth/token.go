@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
 
 // DefaultClientID is the static first-party public client the Extend
@@ -148,5 +150,10 @@ func parseTokenError(resp *http.Response) error {
 			te.Description = strings.TrimSpace(string(body))
 		}
 	}
+	// The fields are endpoint-controlled and end up on the user's
+	// terminal via Error(); neutralize escape sequences at the source
+	// so every formatting path inherits it.
+	te.Code = iostreams.SanitizeForTerminal(te.Code)
+	te.Description = iostreams.SanitizeForTerminal(te.Description)
 	return te
 }

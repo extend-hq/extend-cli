@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,38 @@ func TestLoopbackErrorCallbackNeedsState(t *testing.T) {
 	defer cancel()
 	if _, err := lb.Wait(ctx); err == nil || !strings.Contains(err.Error(), "access_denied") {
 		t.Errorf("Wait err = %v, want access_denied", err)
+	}
+}
+
+// TestLoopbackErrorCallbackSanitized: error and error_description ride
+// a redirect any local process (or a malicious authorization server)
+// can craft, and the resulting error is printed to the terminal — ANSI
+// CSI/OSC sequences in them must be neutralized.
+func TestLoopbackErrorCallbackSanitized(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	q := url.Values{
+		"state":             {"s"},
+		"error":             {"server_error"},
+		"error_description": {"\x1b]0;pwned\x07den\x1b[31mied"},
+	}
+	get(t, lb.RedirectURI()+"?"+q.Encode())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, waitErr := lb.Wait(ctx)
+	if waitErr == nil {
+		t.Fatal("Wait = nil, want the authorization error")
+	}
+	if strings.ContainsRune(waitErr.Error(), 0x1b) {
+		t.Errorf("Wait err = %q; leaked an escape byte", waitErr.Error())
+	}
+	if !strings.Contains(waitErr.Error(), "server_error: denied") {
+		t.Errorf("Wait err = %q, want the sanitized description kept", waitErr.Error())
 	}
 }
 

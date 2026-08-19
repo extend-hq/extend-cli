@@ -189,6 +189,47 @@ func TestAsAPIError_UnprocessableEntityError(t *testing.T) {
 	}
 }
 
+func TestAsAPIError_SanitizesEscapeSequences(t *testing.T) {
+	// Server-controlled fields reach the terminal through the CLI's
+	// error printer and through Error() in %v/%w chains; embedded
+	// ANSI CSI and OSC sequences must be neutralized at extraction.
+	// The \u escapes are decoded by the JSON parser into real ESC
+	// bytes (raw control characters are not valid inside JSON strings).
+	body := `{"code":"NOT\u001b[31m_FOUND","message":"boom\u001b]0;pwned\u0007","requestId":"rid\u001b[2J"}`
+	err := sdkcore.NewAPIError(404, http.Header{}, errors.New(body))
+
+	got, ok := AsAPIError(err)
+	if !ok {
+		t.Fatal("AsAPIError ok=false")
+	}
+	if got.Code != "NOT_FOUND" {
+		t.Errorf("Code = %q; want the CSI sequence stripped", got.Code)
+	}
+	if got.Message != "boom" {
+		t.Errorf("Message = %q; want the OSC sequence stripped", got.Message)
+	}
+	if got.RequestID != "rid" {
+		t.Errorf("RequestID = %q; want the CSI sequence stripped", got.RequestID)
+	}
+	if strings.ContainsRune(got.Error(), 0x1b) {
+		t.Errorf("Error() = %q; leaked an escape byte", got.Error())
+	}
+}
+
+func TestAsAPIError_TypedBodySanitizesEscapeSequences(t *testing.T) {
+	wrapped := &extend.ForbiddenError{
+		APIError: &sdkcore.APIError{StatusCode: 403, Header: http.Header{}},
+		Body:     &extend.APIError{Code: "FORBIDDEN", Message: "no\x1b[2Jaccess"},
+	}
+	got, ok := AsAPIError(wrapped)
+	if !ok {
+		t.Fatal("AsAPIError(ForbiddenError) ok=false")
+	}
+	if got.Message != "noaccess" {
+		t.Errorf("Message = %q; want the CSI sequence stripped", got.Message)
+	}
+}
+
 func TestIsNotFound(t *testing.T) {
 	err404 := sdkcore.NewAPIError(404, http.Header{}, errors.New("{}"))
 	if !IsNotFound(err404) {
