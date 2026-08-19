@@ -277,18 +277,24 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 // flow, discovery, resource parameter, and token storage all key off
 // this value.
 func effectiveBaseURL(s resolved) (string, error) {
+	base := ""
 	if s.baseURL.val != "" {
-		return oauth.NormalizeBase(s.baseURL.val), nil
+		base = oauth.NormalizeBase(s.baseURL.val)
+	} else {
+		region := s.region.val
+		if region == "" {
+			region = "us"
+		}
+		u, ok := extendx.RegionBaseURL(region)
+		if !ok {
+			return "", fmt.Errorf("unknown region %q (known: %v)", region, extendx.KnownRegions())
+		}
+		base = oauth.NormalizeBase(u)
 	}
-	region := s.region.val
-	if region == "" {
-		region = "us"
+	if err := oauth.ValidateBaseURL(base); err != nil {
+		return "", err
 	}
-	u, ok := extendx.RegionBaseURL(region)
-	if !ok {
-		return "", fmt.Errorf("unknown region %q (known: %v)", region, extendx.KnownRegions())
-	}
-	return oauth.NormalizeBase(u), nil
+	return base, nil
 }
 
 // loginIdentity is the slice of GET /me the success line needs: the

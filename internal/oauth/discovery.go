@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -121,4 +122,39 @@ func validateEndpointHost(name, endpoint, apiBase string) error {
 // address the same login.
 func NormalizeBase(apiBase string) string {
 	return strings.TrimRight(strings.TrimSpace(apiBase), "/")
+}
+
+// ValidateBaseURL rejects API base URLs that would carry credentials
+// in cleartext. Everything sent to the base — the OAuth handshake
+// (PKCE verifier, authorization code, refresh tokens) and every
+// bearer-authenticated API call — is only as private as the
+// transport, so a remote base must be https. Plain http is allowed
+// solely for loopback hosts (localhost, 127.0.0.0/8, ::1), where
+// local dev servers live and the traffic never leaves the machine.
+func ValidateBaseURL(apiBase string) error {
+	u, err := url.Parse(NormalizeBase(apiBase))
+	if err != nil {
+		return fmt.Errorf("invalid API base URL %q: %w", apiBase, err)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("API base URL %q uses plain http to a non-loopback host, which would send credentials in cleartext; use https:// (http is allowed only for localhost, 127.0.0.0/8, or ::1)", apiBase)
+	default:
+		return fmt.Errorf("API base URL %q must be an https:// URL (or http:// to a loopback host)", apiBase)
+	}
+}
+
+// isLoopbackHost reports whether host (a URL hostname, no port or
+// brackets) can only resolve to the local machine.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

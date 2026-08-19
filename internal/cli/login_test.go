@@ -201,6 +201,30 @@ func TestRunLoginPersonalizedSuccessLine(t *testing.T) {
 	}
 }
 
+// TestEffectiveBaseURLRejectsCleartextRemote: an http base to a remote
+// host would run the whole handshake (verifier, code, tokens) in
+// cleartext, so login/logout/refresh must refuse it before any request
+// is made. Loopback http keeps working for local dev servers.
+func TestEffectiveBaseURLRejectsCleartextRemote(t *testing.T) {
+	_, err := effectiveBaseURL(resolved{baseURL: sourced{val: "http://api.internal.example", src: "env"}})
+	if err == nil {
+		t.Fatal("effectiveBaseURL(http remote) = nil error, want a cleartext refusal")
+	}
+	if !strings.Contains(err.Error(), "https") {
+		t.Errorf("error = %v, want it to point at https", err)
+	}
+
+	for _, base := range []string{"http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]:8080", "https://api.internal.example"} {
+		got, err := effectiveBaseURL(resolved{baseURL: sourced{val: base, src: "env"}})
+		if err != nil {
+			t.Errorf("effectiveBaseURL(%q) = %v, want accepted", base, err)
+		}
+		if got != base {
+			t.Errorf("effectiveBaseURL(%q) = %q", base, got)
+		}
+	}
+}
+
 func TestSanitizeForTerminal(t *testing.T) {
 	cases := []struct {
 		name string

@@ -147,3 +147,48 @@ func TestNormalizeBase(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateBaseURL(t *testing.T) {
+	accepted := []string{
+		"https://api.extend.ai",
+		"https://api.extend.ai/",
+		"https://api.internal.example:8443",
+		// Loopback hosts may use plain http: local dev servers.
+		"http://localhost",
+		"http://localhost:3000",
+		"http://LOCALHOST:3000",
+		"http://127.0.0.1:8080",
+		"http://127.5.6.7",
+		"http://[::1]:9999",
+	}
+	for _, base := range accepted {
+		if err := ValidateBaseURL(base); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want accepted", base, err)
+		}
+	}
+
+	rejected := []string{
+		// Remote http would carry tokens, codes, and the PKCE
+		// verifier in cleartext.
+		"http://api.extend.ai",
+		"http://api.internal.example",
+		"http://api.internal.example:8080",
+		"http://192.168.1.10",
+		"http://10.0.0.5:3000",
+		// Not loopback despite the name.
+		"http://localhost.evil.example",
+		// Missing or unsupported scheme.
+		"api.extend.ai",
+		"ftp://api.extend.ai",
+	}
+	for _, base := range rejected {
+		err := ValidateBaseURL(base)
+		if err == nil {
+			t.Errorf("ValidateBaseURL(%q) = nil, want rejected", base)
+			continue
+		}
+		if !strings.Contains(err.Error(), "https") {
+			t.Errorf("ValidateBaseURL(%q) error = %v, want it to point at https", base, err)
+		}
+	}
+}

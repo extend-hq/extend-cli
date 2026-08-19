@@ -254,6 +254,24 @@ func TestNewClient_KnownRegion(t *testing.T) {
 	}
 }
 
+func TestNewClient_RejectsCleartextRemoteBaseURL(t *testing.T) {
+	_, err := NewClient(Config{APIKey: "k", BaseURL: "http://api.internal.example"})
+	if err == nil {
+		t.Fatal("NewClient(http remote base) = nil error; want a cleartext refusal")
+	}
+	if !strings.Contains(err.Error(), "https") {
+		t.Errorf("error = %v, want it to point at https", err)
+	}
+}
+
+func TestNewClient_AllowsCleartextLoopbackBaseURL(t *testing.T) {
+	for _, base := range []string{"http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+		if _, err := NewClient(Config{APIKey: "k", BaseURL: base}); err != nil {
+			t.Errorf("NewClient(BaseURL=%s) = %v; want loopback http accepted", base, err)
+		}
+	}
+}
+
 // TestNewClient_RefusesCrossOriginRedirect covers the redirect pin on
 // the general API client. The OAuth-authenticated variant is the worst
 // case: the bearer transport stamps a fresh Authorization header on

@@ -166,6 +166,14 @@ func NewRoot() *cobra.Command {
 
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+		// Checked before credential resolution: an invalid base must
+		// surface as its own error, not as "no API key" (a stored
+		// login lookup keyed on the bad base finds nothing).
+		if s.baseURL.val != "" {
+			if err := oauth.ValidateBaseURL(s.baseURL.val); err != nil {
+				return nil, err
+			}
+		}
 		var oauthSource extendx.BearerSource
 		if s.key.val == "" {
 			oauthSource = resolveOAuthSource(app.Env, s)

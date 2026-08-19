@@ -94,6 +94,13 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		}
 		baseURL = url
 	}
+	if baseURL != "" {
+		// Every request to the base carries a bearer; refuse bases
+		// that would send it in cleartext (http to a remote host).
+		if err := oauth.ValidateBaseURL(baseURL); err != nil {
+			return nil, err
+		}
+	}
 
 	// The SDK sets x-extend-api-version unconditionally in its core
 	// request_option.go (to "2026-02-09"). To override it we attach a
