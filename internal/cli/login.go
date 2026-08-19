@@ -130,7 +130,10 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	}
 	pal := paletteFor(app.IO)
 
-	httpc := &http.Client{Timeout: 30 * time.Second}
+	// The redirect policy pins every OAuth call (and /me) to the API
+	// base's origin so request bodies carrying the code, verifier, or
+	// tokens can never be replayed to another host.
+	httpc := oauth.NewHTTPClient(base)
 	eps, err := oauth.Discover(ctx, httpc, base)
 	if err != nil {
 		return err
@@ -250,7 +253,7 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 			clientID = oauth.DefaultClientID
 		}
 		revokeClient := &oauth.Client{
-			HTTPClient: &http.Client{Timeout: 30 * time.Second},
+			HTTPClient: oauth.NewHTTPClient(base),
 			Endpoints:  eps,
 			ClientID:   clientID,
 			Resource:   base,

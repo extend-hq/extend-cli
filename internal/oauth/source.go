@@ -50,7 +50,7 @@ func NewTokenSource(store Store, apiBase string, rec Record) *TokenSource {
 		store:   store,
 		apiBase: NormalizeBase(apiBase),
 		rec:     rec,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  NewHTTPClient(apiBase),
 		now:     time.Now,
 		warn: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
