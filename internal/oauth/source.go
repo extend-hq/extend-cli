@@ -97,26 +97,34 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	// Serialize refreshes across processes: with rotate-on-use refresh
 	// tokens, two concurrent CLI invocations redeeming the same eort_
 	// trip the server's reuse detection and revoke the whole family.
-	// Lock acquisition failures other than cancellation degrade to the
-	// in-process mutex alone rather than blocking the refresh.
-	if lockPath, err := refreshLockPath(); err == nil {
-		release, lockErr := acquireRefreshLock(ctx, lockPath)
-		if lockErr != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-		} else {
-			defer release()
-			// While we waited, another process may have rotated the
-			// pair. Adopt whatever the store holds now; if its access
-			// token is still fresh, the refresh already happened.
-			if latest, err := s.store.Get(s.apiBase); err == nil && latest != nil &&
-				(latest.AccessToken != s.rec.AccessToken || latest.RefreshToken != s.rec.RefreshToken) {
-				s.rec = *latest
-				if s.rec.AccessToken != "" && s.now().Add(expirySkew).Before(s.rec.ExpiresAt) {
-					return nil
-				}
-			}
+	// Fail closed when the lock cannot be taken: refreshing with only
+	// the in-process mutex risks exactly that family revocation, which
+	// strands the login — strictly worse than failing this command.
+	lockPath, err := refreshLockPath(s.apiBase)
+	if err != nil {
+		return fmt.Errorf("locate refresh lock: %w", err)
+	}
+	lockCtx, cancelLock := context.WithTimeout(ctx, lockAcquireTimeout)
+	defer cancelLock()
+	release, err := acquireRefreshLock(lockCtx, lockPath)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("timed out waiting for the token refresh lock (%s); another extend process may be holding it", lockPath)
+		}
+		return err
+	}
+	defer release()
+	// While we waited, another process may have rotated the pair.
+	// Adopt whatever the store holds now; if its access token is
+	// still fresh, the refresh already happened.
+	if latest, err := s.store.Get(s.apiBase); err == nil && latest != nil &&
+		(latest.AccessToken != s.rec.AccessToken || latest.RefreshToken != s.rec.RefreshToken) {
+		s.rec = *latest
+		if s.rec.AccessToken != "" && s.now().Add(expirySkew).Before(s.rec.ExpiresAt) {
+			return nil
 		}
 	}
 	resource := s.rec.Resource

@@ -14,7 +14,58 @@ import (
 
 func testLockPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "oauth_tokens.json.lock")
+	return filepath.Join(t.TempDir(), "refresh-test.lock")
+}
+
+// setTestLockDir points the refresh lock directory at a scratch
+// directory so tests never contend on (or litter) the real per-user
+// lock location.
+func setTestLockDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	prev := lockDir
+	lockDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { lockDir = prev })
+	return dir
+}
+
+// TestRefreshLockPathStableAndPerCredential pins the lock namespace:
+// the path must not vary with the environment (two processes with
+// different XDG_CONFIG_HOME share the keychain and must contend on one
+// lock), must be identical for equivalent spellings of one API base,
+// and must differ between bases so unrelated logins don't serialize.
+func TestRefreshLockPathStableAndPerCredential(t *testing.T) {
+	base := "https://api.example"
+
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "env-a"))
+	pathA, err := refreshLockPath(base)
+	if err != nil {
+		t.Fatalf("refreshLockPath: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "env-b"))
+	pathB, err := refreshLockPath(base)
+	if err != nil {
+		t.Fatalf("refreshLockPath: %v", err)
+	}
+	if pathA != pathB {
+		t.Errorf("lock path varies with XDG_CONFIG_HOME: %q vs %q; concurrent refreshes would not contend", pathA, pathB)
+	}
+
+	slashed, err := refreshLockPath(base + "/")
+	if err != nil {
+		t.Fatalf("refreshLockPath: %v", err)
+	}
+	if slashed != pathA {
+		t.Errorf("lock path for %q = %q, want %q (normalized base)", base+"/", slashed, pathA)
+	}
+
+	other, err := refreshLockPath("https://api.other.example")
+	if err != nil {
+		t.Fatalf("refreshLockPath: %v", err)
+	}
+	if other == pathA {
+		t.Error("different API bases must not share a lock file")
+	}
 }
 
 func TestAcquireRefreshLockBlocksSecondAcquirer(t *testing.T) {
@@ -100,6 +151,7 @@ func TestAcquireRefreshLockBreaksStaleLock(t *testing.T) {
 // eort_ and the family is revoked.
 func TestConcurrentSourcesDoNotDoubleSpendRefreshToken(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestLockDir(t)
 
 	var mu sync.Mutex
 	current := "eort_0"
@@ -172,7 +224,7 @@ func TestConcurrentSourcesDoNotDoubleSpendRefreshToken(t *testing.T) {
 	}
 
 	// The lock is released afterwards.
-	lockPath, err := refreshLockPath()
+	lockPath, err := refreshLockPath(base)
 	if err != nil {
 		t.Fatal(err)
 	}

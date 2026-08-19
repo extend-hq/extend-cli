@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -65,9 +67,9 @@ func newRefreshServer(t *testing.T, wantRefreshToken string) (*httptest.Server, 
 
 func sourceWithRecord(t *testing.T, store Store, base string, rec Record) *TokenSource {
 	t.Helper()
-	// The refresh path takes a cross-process lock beside the file
-	// fallback store; point it at a throwaway directory.
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// The refresh path takes a cross-process lock; point it at a
+	// throwaway directory.
+	setTestLockDir(t)
 	s := NewTokenSource(store, base, rec)
 	return s
 }
@@ -367,6 +369,101 @@ func TestRefreshInvalidClientIsReauth(t *testing.T) {
 	var reauth *ReauthError
 	if !errors.As(err, &reauth) {
 		t.Fatalf("err = %v, want *ReauthError for invalid_client", err)
+	}
+}
+
+// TestRefreshFailsClosedWhenLockUnavailable pins the fail-closed
+// contract: when the cross-process lock cannot be created, the refresh
+// must not proceed under the in-process mutex alone — the token
+// endpoint must never see the request. The failure is environmental,
+// so it must not masquerade as an expired login either.
+func TestRefreshFailsClosedWhenLockUnavailable(t *testing.T) {
+	srv, calls := newRefreshServer(t, "eort_old")
+	defer srv.Close()
+	rec := Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_old",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: srv.URL,
+	}
+
+	cases := []struct {
+		name    string
+		lockDir func(t *testing.T) func() (string, error)
+	}{
+		{
+			name: "lock dir unresolvable",
+			lockDir: func(t *testing.T) func() (string, error) {
+				return func() (string, error) { return "", errors.New("no home directory") }
+			},
+		},
+		{
+			name: "lock file uncreatable",
+			lockDir: func(t *testing.T) func() (string, error) {
+				// A regular file where the lock directory should be
+				// makes MkdirAll (and any create under it) fail.
+				blocker := filepath.Join(t.TempDir(), "not-a-dir")
+				if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return func() (string, error) { return filepath.Join(blocker, "locks"), nil }
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := lockDir
+			lockDir = tc.lockDir(t)
+			t.Cleanup(func() { lockDir = prev })
+
+			s := NewTokenSource(newMemStore(), "https://api.example", rec)
+			_, err := s.AccessToken(context.Background())
+			if err == nil {
+				t.Fatal("refresh must fail when the cross-process lock is unavailable")
+			}
+			var reauth *ReauthError
+			if errors.As(err, &reauth) {
+				t.Errorf("a lock failure must not be a ReauthError, got %v", err)
+			}
+			if *calls != 0 {
+				t.Errorf("token endpoint calls = %d, want 0 (refresh proceeded without the lock)", *calls)
+			}
+		})
+	}
+}
+
+// TestRefreshWaitsForHeldLockAndFailsClosed: a live (non-stale) lock
+// held by another process blocks the refresh; when the caller's
+// context runs out first, the refresh fails without ever hitting the
+// token endpoint.
+func TestRefreshWaitsForHeldLockAndFailsClosed(t *testing.T) {
+	srv, calls := newRefreshServer(t, "eort_old")
+	defer srv.Close()
+	setTestLockDir(t)
+	base := "https://api.example"
+
+	lockPath, err := refreshLockPath(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh lock file, as another mid-refresh process would hold.
+	if err := os.WriteFile(lockPath, []byte("12345\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewTokenSource(newMemStore(), base, Record{
+		AccessToken:   "eoat_expired",
+		RefreshToken:  "eort_old",
+		ExpiresAt:     time.Now().Add(-time.Minute),
+		TokenEndpoint: srv.URL,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := s.AccessToken(ctx); err == nil {
+		t.Fatal("refresh must fail while another process holds the lock")
+	}
+	if *calls != 0 {
+		t.Errorf("token endpoint calls = %d, want 0 (refresh ran despite the held lock)", *calls)
 	}
 }
 
