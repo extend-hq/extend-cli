@@ -295,10 +295,10 @@ func TestRunSetupNonInteractive_InstallsSkill(t *testing.T) {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend-cli", "SKILL.md")); err != nil {
 		t.Fatalf("skill not installed to default location: %v", err)
 	}
-	link := filepath.Join(home, ".claude", "skills", "extend")
+	link := filepath.Join(home, ".claude", "skills", "extend-cli")
 	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("claude symlink not created (fi=%v err=%v)", fi, err)
 	}

@@ -35,7 +35,11 @@ import (
 // skill_test.go. The renderer + tests + this comment are the contract:
 // if a hand-written claim drifts from the typed tree, a test fails.
 
-const skillName = "extend"
+// skillName doubles as the frontmatter `name` and the install directory.
+// "extend-cli", not "extend": the skill teaches this CLI specifically, and
+// Extend has other agent surfaces (the MCP server) that would contend for
+// the bare platform name.
+const skillName = "extend-cli"
 
 // descriptionVerb pairs a user-intent phrase that drives skill triggering
 // with the action-verb command it maps to. The frontmatter description is
@@ -140,7 +144,7 @@ var paginationExampleCommand = []string{"runs", "list"}
 
 // paginationExampleFlags are the flags referenced in the pagination
 // example. Asserted to exist on paginationExampleCommand.
-var paginationExampleFlags = []string{"type", "using", "status", "page-token", "all", "output"}
+var paginationExampleFlags = []string{"type", "using", "status", "page-token", "all", "max", "output"}
 
 // renderDescription assembles the YAML `description` field from
 // descriptionVerbs and the disambiguation examples. Public via tests so
@@ -221,7 +225,10 @@ func writeSkillFrontmatter(b *strings.Builder) {
 
 func writeSkillAuth(b *strings.Builder) {
 	b.WriteString("## Authentication\n\n")
-	b.WriteString("    export EXTEND_API_KEY=sk_xxx              # required\n")
+	b.WriteString("`extend whoami` shows the workspace, environment, and credential in effect. Two credential sources:\n\n")
+	b.WriteString("    export EXTEND_API_KEY=sk_xxx              # API key: scripts, CI, agents\n")
+	b.WriteString("    extend login                              # browser OAuth: interactive use\n\n")
+	b.WriteString("A stored `extend login` session is used automatically when no API key resolves; an API key always takes precedence. If neither is configured, ask the user to run `extend login` or supply `EXTEND_API_KEY` — never invent a key.\n\n")
 	b.WriteString("    export EXTEND_REGION=us|eu                # optional, default us\n")
 	b.WriteString("    export EXTEND_WORKSPACE_ID=ws_xxx         # required only for org-scoped API keys\n\n")
 	b.WriteString("Per-call equivalents: `--region eu`, `--workspace ws_xxx`. For API-version pinning or `EXTEND_BASE_URL`, run `extend help auth`.\n\n")
@@ -673,7 +680,7 @@ no API calls, no filesystem access, no network.
 The body targets ~5,000 tokens to fit comfortably in agent skill catalogs.`,
 		Examples: []Example{
 			{Label: "Print to stdout", Cmd: "extend skill"},
-			{Label: "Pipe to default location", Cmd: "mkdir -p ~/.agents/skills/extend && extend skill > ~/.agents/skills/extend/SKILL.md"},
+			{Label: "Pipe to default location", Cmd: "mkdir -p ~/.agents/skills/extend-cli && extend skill > ~/.agents/skills/extend-cli/SKILL.md"},
 			{Label: "Or use install", Cmd: "extend skill install"},
 		},
 		Gotchas: []string{
@@ -691,7 +698,7 @@ The body targets ~5,000 tokens to fit comfortably in agent skill catalogs.`,
 }
 
 // defaultSkillTarget computes the cross-client default install path:
-// $HOME/.agents/skills/extend/SKILL.md.
+// $HOME/.agents/skills/extend-cli/SKILL.md.
 func defaultSkillTarget() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -749,10 +756,10 @@ func newSkillInstallDoc(app *App) *CommandDoc {
 	var target string
 	return &CommandDoc{
 		Use:     "install",
-		Summary: "Write the SKILL.md to disk (default ~/.agents/skills/extend/SKILL.md)",
+		Summary: "Write the SKILL.md to disk (default ~/.agents/skills/extend-cli/SKILL.md)",
 		Triggers: []string{
 			"install the extend cli skill into the agent skills directory",
-			"write the skill to ~/.agents/skills/extend",
+			"write the skill to ~/.agents/skills/extend-cli",
 			"deploy the skill markdown for an agent harness",
 			"symlink the skill into ~/.claude/skills for claude code",
 		},
@@ -760,7 +767,7 @@ func newSkillInstallDoc(app *App) *CommandDoc {
 in one step, instead of piping ` + "`extend skill > SKILL.md`" + ` yourself. Pass
 ` + "`--target`" + ` to write elsewhere (project-local skill checked into a repo,
 or a Claude/Codex/OpenCode-specific path).`,
-		Details: `By default, writes to ` + "`$HOME/.agents/skills/extend/SKILL.md`" + ` —
+		Details: `By default, writes to ` + "`$HOME/.agents/skills/extend-cli/SKILL.md`" + ` —
 the cross-client convention used by Claude Code, Codex, OpenCode,
 Cursor, Goose, and other agentskills.io consumers. The directory is
 created if missing. The file is overwritten if present.
@@ -768,25 +775,25 @@ created if missing. The file is overwritten if present.
 Override the target with ` + "`--target <path>`" + `. Useful targets:
 
 - ` + "`./SKILL.md`" + ` — alongside the agent harness in a checked-in project
-- ` + "`./.agents/skills/extend/SKILL.md`" + ` — project-local cross-client skills dir
-- ` + "`~/.claude/skills/extend/SKILL.md`" + ` — Claude Code-specific
-- ` + "`~/.codex/skills/extend/SKILL.md`" + ` — Codex-specific
+- ` + "`./.agents/skills/extend-cli/SKILL.md`" + ` — project-local cross-client skills dir
+- ` + "`~/.claude/skills/extend-cli/SKILL.md`" + ` — Claude Code-specific
+- ` + "`~/.codex/skills/extend-cli/SKILL.md`" + ` — Codex-specific
 
 On a default install (no ` + "`--target`" + `), the skill directory is also
-symlinked into ` + "`~/.claude/skills/extend`" + ` — Claude Code reads
+symlinked into ` + "`~/.claude/skills/extend-cli`" + ` — Claude Code reads
 ` + "`~/.claude/skills`" + ` rather than the cross-client ` + "`~/.agents/skills`" + `
 location, so the symlink makes ` + "`extend skill install`" + ` work for it too.
 An existing real directory at that path is left untouched.`,
 		Examples: []Example{
 			{Label: "Default location", Cmd: "extend skill install"},
-			{Label: "Project-local", Cmd: "extend skill install --target ./.agents/skills/extend/SKILL.md"},
+			{Label: "Project-local", Cmd: "extend skill install --target ./.agents/skills/extend-cli/SKILL.md"},
 			{Label: "Stdout", Cmd: "extend skill install --target -"},
 		},
 		Gotchas: []string{
 			"Existing target file is overwritten without prompt; pipe to a different path first if you want to compare.",
 			"Pass `--target -` to stream to stdout (equivalent to running `extend skill`).",
-			"A default install also symlinks the skill dir into ~/.claude/skills/extend for Claude Code; a custom --target is written verbatim with no symlink.",
-			"A non-symlink already at ~/.claude/skills/extend is left untouched and the link step is skipped with a warning.",
+			"A default install also symlinks the skill dir into ~/.claude/skills/extend-cli for Claude Code; a custom --target is written verbatim with no symlink.",
+			"A non-symlink already at ~/.claude/skills/extend-cli is left untouched and the link step is skipped with a warning.",
 		},
 		SeeAlso: []string{"skill"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
@@ -829,7 +836,7 @@ An existing real directory at that path is left untouched.`,
 			return nil
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&target, "target", "", "Output path (default: ~/.agents/skills/extend/SKILL.md; pass '-' for stdout)")
+			cmd.Flags().StringVar(&target, "target", "", "Output path (default: ~/.agents/skills/extend-cli/SKILL.md; pass '-' for stdout)")
 		},
 	}
 }

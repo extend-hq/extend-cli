@@ -88,7 +88,7 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	// Since we override HOME for skill isolation, we must explicitly
 	// point CODEX_HOME at the host's real auth dir or every codex run
 	// fails 401. Skill discovery is still isolated via HOME (codex
-	// reads `$HOME/.agents/skills/extend/SKILL.md`).
+	// reads `$HOME/.agents/skills/extend-cli/SKILL.md`).
 	cmd.Env = append(cmd.Env, "CODEX_HOME="+hostCodexHome())
 
 	stream, err := openStream(opts.EventsPath)
@@ -168,7 +168,7 @@ func hasChatGPTLogin() bool {
 // $HOME/.agents/skills/<name>/SKILL.md (the agentskills.io standard
 // path; see https://developers.openai.com/codex/skills/).
 func installSkillForCodex(homeDir string) error {
-	dst := filepath.Join(homeDir, ".agents", "skills", "extend", "SKILL.md")
+	dst := filepath.Join(homeDir, ".agents", "skills", "extend-cli", "SKILL.md")
 	return generateSkillTo(dst)
 }
 
@@ -233,13 +233,13 @@ func anyCodexSkillUsage(events []map[string]any) bool {
 				continue
 			}
 			cmd, _ := item["command"].(string)
-			if strings.Contains(cmd, "skills/extend/SKILL.md") {
+			if strings.Contains(cmd, "skills/extend-cli/SKILL.md") {
 				return true
 			}
 			// Codex may also emit a tool item type for skill loads;
 			// treat any text mentioning the skill path as activation.
 			text, _ := item["text"].(string)
-			if strings.Contains(text, "skills/extend/SKILL.md") {
+			if strings.Contains(text, "skills/extend-cli/SKILL.md") {
 				return true
 			}
 		case "skill.loaded", "skill.activated":

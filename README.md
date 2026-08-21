@@ -43,51 +43,62 @@ Install to the cross-client default path:
 
     extend skill install
 
-This writes `~/.agents/skills/extend/SKILL.md`, the path Codex,
-OpenCode, Cursor, and most other harnesses look at. Claude Code reads
-from `~/.claude/skills/` instead, so point `--target` at it:
+This writes `~/.agents/skills/extend-cli/SKILL.md` — the skill is named
+`extend-cli` so it stays scoped to this CLI (Extend's other agent
+surfaces, like the MCP server, are separate skills). That path is where
+Codex, OpenCode, Cursor, and most other harnesses look; a default
+install also symlinks the skill into `~/.claude/skills/extend-cli` for
+Claude Code, which reads its own directory instead.
 
-    extend skill install --target ~/.claude/skills/extend/SKILL.md
+To scope the skill to one project instead of your whole machine, write
+it inside the repo:
 
-Make sure to re-run
-`extend skill install` after upgrading to pick up new commands and
-flag changes.
+    extend skill install --target ./.agents/skills/extend-cli/SKILL.md
+
+Re-run `extend skill install` after upgrading to pick up new commands
+and flag changes.
 
 ## Authenticate
 
-Sign in through your browser (no API key needed):
+Two ways in — pick by how you use the CLI.
+
+### On your own machine: `extend login`
+
+Sign in through your browser; no API key to create or copy:
 
     extend login
 
 This runs an OAuth flow: your browser opens Extend's consent screen, you
 pick one workspace and one environment, and the CLI stores the resulting
 tokens in the OS keychain (or a 0600 file under `~/.config/extend/` on
-headless hosts). Tokens refresh silently; `extend logout` revokes the
-session and clears them, and `extend whoami` shows the workspace,
-environment, and user your commands run as.
+headless hosts). Tokens refresh silently. `extend logout` revokes the
+session and clears it; `extend whoami` shows the workspace, environment,
+and user your commands run as.
 
 On macOS, upgrading the CLI binary may make the keychain re-prompt for
 access to the stored login; that prompt is expected — approve it to keep
 the session.
 
-Or run the interactive wizard; it picks your region, validates the API key,
-and saves it to `~/.config/extend/config.json`:
+### For scripts, CI, and agents: an API key
+
+Long-lived credentials that need no browser. The interactive wizard
+picks your region, validates the key, saves it to
+`~/.config/extend/config.json`, and installs the agent skill:
 
     extend setup
 
-Or set environment variables:
+Or set environment variables directly (the usual shape for CI secrets):
 
     export EXTEND_API_KEY=sk_xxx
-
-Optional:
-
     export EXTEND_REGION=us                        # us | us2 | eu (default: us)
     export EXTEND_WORKSPACE_ID=ws_xxx              # for org-scoped keys
 
-Precedence when several sources are configured: `EXTEND_API_KEY` (or
+### Precedence
+
+When several sources are configured: `EXTEND_API_KEY` (or
 `EXTEND_<LABEL>_API_KEY` under `--env <label>`), then the API key saved
 by `extend setup`, then the stored `extend login` session. Check what is
-in effect with `extend config`.
+in effect with `extend whoami` or `extend config`.
 
 ## Examples
 
