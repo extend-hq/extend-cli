@@ -37,8 +37,8 @@ already on your `PATH`. See its options with:
 
     extend setup
 
-The wizard asks how you want to sign in — through your browser (no API
-key needed) or with an API key — then picks your region, walks you
+The wizard asks how you want to sign in, through your browser (no API
+key needed) or with an API key, then picks your region, walks you
 through the rest, and installs the agent skill. See
 [Authentication](#authentication) for how the two credential types
 differ.
@@ -51,7 +51,7 @@ securely and refresh on their own, and the session is scoped to the
 workspace and environment you approve. `extend logout` revokes it;
 `extend whoami` shows who you're signed in as.
 
-**API keys** are long-lived and headless — the right choice for
+**API keys** are long-lived and headless, the right choice for
 scripts, CI, and agents. Save one with `extend setup`, or set
 environment variables directly:
 
