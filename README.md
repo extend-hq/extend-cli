@@ -35,25 +35,21 @@ already on your `PATH`. See its options with:
 
 ## Setup
 
-Sign in with your browser:
-
-    extend login
-
-Or use an API key — the wizard picks your region, validates the key,
-saves it, and installs the agent skill:
-
     extend setup
 
-Either gets you a working CLI. See [Authentication](#authentication)
-for how the two differ.
+The wizard asks how you want to sign in — through your browser (no API
+key needed) or with an API key — then picks your region, walks you
+through the rest, and installs the agent skill. See
+[Authentication](#authentication) for how the two credential types
+differ.
 
 ## Authentication
 
-**Browser login** (`extend login`) is best on your own machine: nothing
-to create or copy, tokens are stored securely and refresh on their own,
-and the session is scoped to the workspace and environment you approve.
-`extend logout` revokes it; `extend whoami` shows who you're signed in
-as.
+**Browser login** (`extend setup`, or `extend login` directly) is best
+on your own machine: nothing to create or copy, tokens are stored
+securely and refresh on their own, and the session is scoped to the
+workspace and environment you approve. `extend logout` revokes it;
+`extend whoami` shows who you're signed in as.
 
 **API keys** are long-lived and headless — the right choice for
 scripts, CI, and agents. Save one with `extend setup`, or set

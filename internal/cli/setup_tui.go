@@ -24,7 +24,8 @@ import (
 type setupStep int
 
 const (
-	stepRegion setupStep = iota
+	stepAuthMethod setupStep = iota
+	stepRegion
 	stepKey
 	stepValidating
 	stepWorkspace
@@ -219,6 +220,11 @@ type setupResult struct {
 	region      regionChoice
 	apiKey      string
 	workspaceID string // set only when an org key required one
+	// browserLogin means the user chose browser sign-in instead of an
+	// API key. The TUI only records the choice; runSetup performs the
+	// login after the wizard exits, so the browser and the login flow's
+	// own output land in a normal terminal rather than the alt screen.
+	browserLogin bool
 	// saved records the user's save-consent choice: true means the key was
 	// written to path; false means they declined and want env-var guidance
 	// instead. saveErr is only meaningful when they consented.
@@ -278,11 +284,16 @@ type setupModel struct {
 	// Linux kernel console chief among them). See enableASCII.
 	ascii bool
 
-	step        setupStep
-	cursor      int
-	region      regionChoice
-	apiKey      string
-	workspaceID string // collected only when an org key needs one
+	step   setupStep
+	cursor int
+	// browserLogin is the auth-method choice from the first step.
+	browserLogin bool
+	// regionCursor remembers the region selection across back-navigation
+	// (m.cursor is reused by every radio step).
+	regionCursor int
+	region       regionChoice
+	apiKey       string
+	workspaceID  string // collected only when an org key needs one
 
 	input   textinput.Model
 	wsInput textinput.Model // workspace ID entry (org keys only)
@@ -379,15 +390,15 @@ func newSetupModel(ctx context.Context, colorOn bool, preRegion string, validate
 	}
 
 	m := setupModel{
-		ctx:      ctx,
-		colorOn:  colorOn,
-		validate: validate,
-		step:     stepRegion,
-		cursor:   cursor,
-		input:    ti,
-		wsInput:  wsi,
-		spin:     sp,
-		cfgPath:  cfgPath,
+		ctx:          ctx,
+		colorOn:      colorOn,
+		validate:     validate,
+		step:         stepAuthMethod,
+		regionCursor: cursor,
+		input:        ti,
+		wsInput:      wsi,
+		spin:         sp,
+		cfgPath:      cfgPath,
 	}
 	if colorOn {
 		m.styles = buildLogoStyles()
@@ -1032,12 +1043,31 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.step {
-	case stepRegion:
+	case stepAuthMethod:
 		switch msg.String() {
 		case "esc", "q":
 			m.canceled = true
 			m.quitting = true
 			return m, tea.Quit
+		case "up", "k", "down", "j", "tab":
+			m.cursor = 1 - m.cursor
+		case "enter", "right", "l", " ":
+			m.browserLogin = m.cursor == 0
+			m.step = stepRegion
+			m.cursor = m.regionCursor
+		}
+		return m, nil
+
+	case stepRegion:
+		switch msg.String() {
+		case "q":
+			m.canceled = true
+			m.quitting = true
+			return m, tea.Quit
+		case "esc":
+			m.regionCursor = m.cursor
+			m.step = stepAuthMethod
+			m.cursor = methodCursorFor(m.browserLogin)
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -1048,8 +1078,15 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter", "right", "l", " ":
 			m.region = setupRegionChoices[m.cursor]
-			m.step = stepKey
+			m.regionCursor = m.cursor
 			m.valErr = nil
+			if m.browserLogin {
+				// No key to collect or validate: the browser consent
+				// screen handles identity, workspace, and environment.
+				m.result = &setupResult{region: m.region, browserLogin: true}
+				return m.continueToSkill()
+			}
+			m.step = stepKey
 			return m, m.input.Focus()
 		}
 		return m, nil
@@ -1127,6 +1164,15 @@ func (m setupModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// methodCursorFor maps the auth-method choice back to its radio index
+// (browser sign-in is option 0), for back-navigation to the method step.
+func methodCursorFor(browserLogin bool) int {
+	if browserLogin {
+		return 0
+	}
+	return 1
 }
 
 // binaryChoiceKey interprets a key press on a two-option chooser: arrows
@@ -1695,6 +1741,8 @@ func (m setupModel) renderScan() string {
 
 func (m setupModel) renderStep() string {
 	switch m.step {
+	case stepAuthMethod:
+		return m.renderAuthMethod()
 	case stepRegion:
 		return m.renderRegion()
 	case stepKey:
@@ -1726,6 +1774,17 @@ func (m setupModel) renderRadio(b *strings.Builder, choices, suffixes []string, 
 		}
 		fmt.Fprintf(b, "%s%s %s%s\n", marker, radio, label, suffix)
 	}
+}
+
+func (m setupModel) renderAuthMethod() string {
+	var b strings.Builder
+	b.WriteString(stHeading.Render("How do you want to sign in?"))
+	b.WriteString("\n\n")
+	m.renderRadio(&b,
+		[]string{"Sign in with your browser", "Paste an API key"},
+		[]string{"no API key needed", "for scripts, CI, and agents"},
+		m.cursor)
+	return b.String()
 }
 
 func (m setupModel) renderRegion() string {
@@ -1780,9 +1839,12 @@ func (m setupModel) renderWorkspace() string {
 
 func (m setupModel) renderSkillPrompt() string {
 	var b strings.Builder
-	if m.result != nil && m.result.saved {
+	switch {
+	case m.result != nil && m.result.browserLogin:
+		b.WriteString(stDim.Render("Browser sign-in opens right after this.") + "\n\n")
+	case m.result != nil && m.result.saved:
 		fmt.Fprintf(&b, "%s Saved to %s\n\n", stGood.Render(m.g("✓", "*")), m.result.path)
-	} else {
+	default:
 		b.WriteString(stDim.Render("Key not saved; export instructions follow.") + "\n\n")
 	}
 	b.WriteString(stHeading.Render("Install the Extend agent skill?"))
@@ -1798,8 +1860,10 @@ func (m setupModel) renderSkillPrompt() string {
 func (m setupModel) footerHint() string {
 	arrows, dot := m.g("↑/↓", "up/down"), m.g("·", "-")
 	switch m.step {
-	case stepRegion:
+	case stepAuthMethod:
 		return arrows + " move " + dot + " enter select " + dot + " q quit"
+	case stepRegion:
+		return arrows + " move " + dot + " enter select " + dot + " esc back " + dot + " q quit"
 	case stepKey:
 		return "enter validate " + dot + " esc back " + dot + " ctrl+c quit"
 	case stepValidating:
