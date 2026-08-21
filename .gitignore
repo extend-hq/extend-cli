@@ -48,3 +48,6 @@ evals/workspace/
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# local build output
+/extend
