@@ -11,6 +11,10 @@ on:
         description: "Version to unpublish (X.Y.Z, no leading v)"
         required: true
         type: string
+      retag_latest:
+        description: "Version to point the latest dist-tag at afterwards (blank to skip)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -43,8 +47,24 @@ jobs:
               echo "$pkg@$VERSION not on the registry, skipping"
               continue
             fi
-            npm unpublish "$pkg@$VERSION"
-            echo "unpublished $pkg@$VERSION"
+            npm unpublish "$pkg@$VERSION" --loglevel http
+          done
+
+      - name: retag latest
+        if: inputs.retag_latest != ''
+        env:
+          RETAG: ${{ inputs.retag_latest }}
+        run: |
+          set -euo pipefail
+          for pkg in \
+            "@extend-ai/cli" \
+            "@extend-ai/cli-linux-x64" \
+            "@extend-ai/cli-linux-arm64" \
+            "@extend-ai/cli-darwin-x64" \
+            "@extend-ai/cli-darwin-arm64" \
+            "@extend-ai/cli-win32-x64"
+          do
+            npm dist-tag add "$pkg@$RETAG" latest
           done
 
       - name: verify latest dist-tags
