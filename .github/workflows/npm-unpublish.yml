@@ -1,0 +1,62 @@
+name: npm-unpublish
+
+# One-off maintenance workflow to pull a released version off npm
+# (e.g. a release cut before its server-side dependencies were live).
+# npm only allows unpublishing within 72 hours of publish, and the
+# unpublished version number can never be reused.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to unpublish (X.Y.Z, no leading v)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  unpublish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+
+      - name: configure npm auth
+        run: npm config set //registry.npmjs.org/:_authToken ${NPM_TOKEN}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: unpublish version across all packages
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for pkg in \
+            "@extend-ai/cli" \
+            "@extend-ai/cli-linux-x64" \
+            "@extend-ai/cli-linux-arm64" \
+            "@extend-ai/cli-darwin-x64" \
+            "@extend-ai/cli-darwin-arm64" \
+            "@extend-ai/cli-win32-x64"
+          do
+            if [ -z "$(npm view "$pkg@$VERSION" version 2>/dev/null)" ]; then
+              echo "$pkg@$VERSION not on the registry, skipping"
+              continue
+            fi
+            npm unpublish "$pkg@$VERSION"
+            echo "unpublished $pkg@$VERSION"
+          done
+
+      - name: verify latest dist-tags
+        run: |
+          set -euo pipefail
+          for pkg in \
+            "@extend-ai/cli" \
+            "@extend-ai/cli-linux-x64" \
+            "@extend-ai/cli-linux-arm64" \
+            "@extend-ai/cli-darwin-x64" \
+            "@extend-ai/cli-darwin-arm64" \
+            "@extend-ai/cli-win32-x64"
+          do
+            echo "$pkg latest: $(npm view "$pkg" version)"
+          done
