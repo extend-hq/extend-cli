@@ -33,6 +33,46 @@ already on your `PATH`. See its options with:
 
     curl -fsSL https://extend.ai/install.sh | sh -s -- --help
 
+## Setup
+
+Sign in with your browser:
+
+    extend login
+
+Or use an API key — the wizard picks your region, validates the key,
+saves it, and installs the agent skill:
+
+    extend setup
+
+Either gets you a working CLI. See [Authentication](#authentication)
+for how the two differ.
+
+## Authentication
+
+**Browser login** (`extend login`) is best on your own machine: nothing
+to create or copy, tokens are stored securely and refresh on their own,
+and the session is scoped to the workspace and environment you approve.
+`extend logout` revokes it; `extend whoami` shows who you're signed in
+as.
+
+**API keys** are long-lived and headless — the right choice for
+scripts, CI, and agents. Save one with `extend setup`, or set
+environment variables directly:
+
+    export EXTEND_API_KEY=sk_xxx
+    export EXTEND_REGION=us                        # us | us2 | eu (default: us)
+    export EXTEND_WORKSPACE_ID=ws_xxx              # for org-scoped keys
+
+When several sources are configured, credentials are used in this
+order:
+
+1. `EXTEND_API_KEY` (or `EXTEND_<LABEL>_API_KEY` under `--env <label>`)
+2. The API key saved by `extend setup`
+3. The stored `extend login` session
+
+Check what is in effect with `extend whoami` or `extend config`. For
+token storage details and troubleshooting, run `extend help auth`.
+
 ## Use with coding agents
 
 The CLI ships a [`SKILL.md`](https://agentskills.io) that teaches
@@ -43,62 +83,15 @@ Install to the cross-client default path:
 
     extend skill install
 
-This writes `~/.agents/skills/extend-cli/SKILL.md` — the skill is named
-`extend-cli` so it stays scoped to this CLI (Extend's other agent
-surfaces, like the MCP server, are separate skills). That path is where
-Codex, OpenCode, Cursor, and most other harnesses look; a default
-install also symlinks the skill into `~/.claude/skills/extend-cli` for
-Claude Code, which reads its own directory instead.
-
-To scope the skill to one project instead of your whole machine, write
-it inside the repo:
+This writes `~/.agents/skills/extend-cli/SKILL.md`, the path Codex,
+OpenCode, Cursor, and most other harnesses read, and symlinks it into
+`~/.claude/skills/extend-cli` for Claude Code. To scope the skill to
+one project instead of your whole machine:
 
     extend skill install --target ./.agents/skills/extend-cli/SKILL.md
 
 Re-run `extend skill install` after upgrading to pick up new commands
 and flag changes.
-
-## Authenticate
-
-Two ways in — pick by how you use the CLI.
-
-### On your own machine: `extend login`
-
-Sign in through your browser; no API key to create or copy:
-
-    extend login
-
-This runs an OAuth flow: your browser opens Extend's consent screen, you
-pick one workspace and one environment, and the CLI stores the resulting
-tokens in the OS keychain (or a 0600 file under `~/.config/extend/` on
-headless hosts). Tokens refresh silently. `extend logout` revokes the
-session and clears it; `extend whoami` shows the workspace, environment,
-and user your commands run as.
-
-On macOS, upgrading the CLI binary may make the keychain re-prompt for
-access to the stored login; that prompt is expected — approve it to keep
-the session.
-
-### For scripts, CI, and agents: an API key
-
-Long-lived credentials that need no browser. The interactive wizard
-picks your region, validates the key, saves it to
-`~/.config/extend/config.json`, and installs the agent skill:
-
-    extend setup
-
-Or set environment variables directly (the usual shape for CI secrets):
-
-    export EXTEND_API_KEY=sk_xxx
-    export EXTEND_REGION=us                        # us | us2 | eu (default: us)
-    export EXTEND_WORKSPACE_ID=ws_xxx              # for org-scoped keys
-
-### Precedence
-
-When several sources are configured: `EXTEND_API_KEY` (or
-`EXTEND_<LABEL>_API_KEY` under `--env <label>`), then the API key saved
-by `extend setup`, then the stored `extend login` session. Check what is
-in effect with `extend whoami` or `extend config`.
 
 ## Examples
 
