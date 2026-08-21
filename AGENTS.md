@@ -27,6 +27,8 @@ under `evals/runner`; see `evals/README.md`.
 - `internal/cli` — every command, group, and help topic; the typed
   CommandDoc tree is the source of truth (see `internal/cli/AGENTS.md`).
 - `internal/extendx` — SDK client construction, run polling/wait, file I/O.
+- `internal/oauth`: browser login (PKCE flow, loopback redirect, token
+  storage in the keychain with file fallback, silent refresh).
 - `internal/output`, `internal/iostreams` — rendering and stream handling.
 - `evals/` — skill-eval harness (see `evals/AGENTS.md`).
 

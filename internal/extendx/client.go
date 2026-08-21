@@ -1,6 +1,7 @@
 package extendx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
 	sdkcore "github.com/extend-hq/extend-go-sdk/core"
 	"github.com/extend-hq/extend-go-sdk/option"
+
+	"github.com/extend-hq/extend-cli/internal/iostreams"
+	"github.com/extend-hq/extend-cli/internal/oauth"
 )
 
 // DefaultHTTPTimeout is applied to the HTTP client every API call goes
@@ -35,9 +39,21 @@ const DefaultUserAgent = "extend-cli/dev"
 // is the caller's responsibility — populate these from the App
 // struct's already-merged values before calling NewClient.
 type Config struct {
-	// APIKey is the bearer token. Required for any command that
-	// actually hits the API.
+	// APIKey is the bearer token. Either it or OAuth is required for
+	// any command that actually hits the API; APIKey wins when both
+	// are set.
 	APIKey string
+	// OAuth supplies access tokens from a stored `extend login` when
+	// no API key resolves. Attached as a transport that injects the
+	// bearer header, silently refreshes on expiry, and retries once
+	// on a 401.
+	OAuth BearerSource
+	// TokenContext scopes token refreshes triggered through the SDK's
+	// token func, whose signature takes no context of its own. Pass
+	// the command's signal-aware context so Ctrl-C aborts an in-flight
+	// refresh; nil falls back to context.Background(). The bearer
+	// transport is unaffected — it always uses the request's context.
+	TokenContext context.Context
 	// BaseURL overrides the SDK's default. Wins over Region.
 	BaseURL string
 	// Region is a short selector (us|us2|eu). Resolved to a URL via
@@ -67,7 +83,7 @@ type Config struct {
 // region/base URL, workspace ID, API version, user agent, debug
 // logging, and HTTP timeout.
 func NewClient(cfg Config) (*sdkclient.Client, error) {
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.OAuth == nil {
 		return nil, errors.New("API key is required")
 	}
 
@@ -78,6 +94,13 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 			return nil, fmt.Errorf("unknown region %q (known: %v)", cfg.Region, KnownRegions())
 		}
 		baseURL = url
+	}
+	if baseURL != "" {
+		// Every request to the base carries a bearer; refuse bases
+		// that would send it in cleartext (http to a remote host).
+		if err := oauth.ValidateBaseURL(baseURL); err != nil {
+			return nil, err
+		}
 	}
 
 	// The SDK sets x-extend-api-version unconditionally in its core
@@ -102,8 +125,23 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	// Build the underlying http.Client. Wrap with the debug transport
 	// when the caller asked for it. We don't share the http.Client
 	// between commands so a per-command --http-timeout doesn't leak.
+	//
+	// Redirects are pinned to the API base's origin. Both auth paths
+	// put a live bearer on redirect hops — Go's client copies the
+	// Authorization header to same-registrable-host targets, and the
+	// bearer transport below re-attaches a fresh token on every hop —
+	// so an off-origin Location header (open redirect, compromised
+	// endpoint, misconfigured CDN) would hand the credential to
+	// whatever host it names. Refuse those hops instead.
+	pinnedBase := baseURL
+	if pinnedBase == "" {
+		// Matches the base the SDK falls back to when no
+		// option.WithBaseURL is set.
+		pinnedBase = extend.Environments.Production
+	}
 	httpClient := &http.Client{
-		Timeout: DefaultHTTPTimeout,
+		Timeout:       DefaultHTTPTimeout,
+		CheckRedirect: oauth.CheckSameOriginRedirect(pinnedBase),
 	}
 	switch {
 	case cfg.HTTPTimeout < 0:
@@ -116,9 +154,27 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	}
 
 	opts := []option.RequestOption{
-		option.WithToken(cfg.APIKey),
 		option.WithHTTPHeader(headers),
 		option.WithHTTPClient(httpClient),
+	}
+	if cfg.APIKey != "" {
+		opts = append(opts, option.WithToken(cfg.APIKey))
+	} else {
+		// OAuth auth is attached twice, and both paths matter:
+		// WithTokenFunc makes the SDK stamp a fresh token on every
+		// request, which covers uploads (UploadOption swaps in a bare
+		// http.Client, bypassing our transport). The bearer transport
+		// (outermost, so the debug transport logs both attempts) adds
+		// the 401 refresh-and-retry for everything else.
+		src := cfg.OAuth
+		tokenCtx := cfg.TokenContext
+		if tokenCtx == nil {
+			tokenCtx = context.Background()
+		}
+		opts = append(opts, option.WithTokenFunc(func() (string, error) {
+			return src.AccessToken(tokenCtx)
+		}))
+		httpClient.Transport = newBearerTransport(httpClient.Transport, cfg.OAuth)
 	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
@@ -187,9 +243,20 @@ func AsAPIError(err error) (*APIError, bool) {
 		if out.Message == "" {
 			out.Message = http.StatusText(coreErr.StatusCode)
 		}
-		return out, true
+		return sanitized(out), true
 	}
 	return nil, false
+}
+
+// sanitized neutralizes terminal escape sequences in the
+// server-controlled fields of an APIError. Applied at construction so
+// every path that renders the error — the CLI error printer as well as
+// %v/%w chains through Error() — inherits it.
+func sanitized(e *APIError) *APIError {
+	e.Code = iostreams.SanitizeForTerminal(e.Code)
+	e.Message = iostreams.SanitizeForTerminal(e.Message)
+	e.RequestID = iostreams.SanitizeForTerminal(e.RequestID)
+	return e
 }
 
 // IsNotFound reports whether err is a 404 from the API. Used by
@@ -237,7 +304,7 @@ func apiErrorFromTypedBody(status int, header http.Header, body *extend.APIError
 	if out.Message == "" {
 		out.Message = http.StatusText(status)
 	}
-	return out
+	return sanitized(out)
 }
 
 // populateFromBodyString best-effort parses a string body that looks
@@ -324,5 +391,20 @@ func populateFromBodyString(out *APIError, bodyErr error) {
 // live on RequestOptions, not on the HTTP client; only the timeout
 // knob changes.
 func UploadOption() option.RequestOption {
-	return option.WithHTTPClient(&http.Client{})
+	return option.WithHTTPClient(uploadHTTPClient())
+}
+
+// uploadHTTPClient is the untimed client UploadOption swaps in. It
+// refuses redirects outright: upload requests carry the Authorization
+// header, and following a redirect would replay it (and the multipart
+// body) to whatever host the Location header names. The upload
+// endpoint never redirects legitimately, and this client has no view
+// of the configured API base to pin an origin against, so refusing is
+// the safe policy.
+func uploadHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("refusing redirect to %s://%s on an upload request", req.URL.Scheme, req.URL.Host)
+		},
+	}
 }

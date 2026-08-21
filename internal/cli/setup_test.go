@@ -17,6 +17,7 @@ import (
 
 	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
+	"github.com/extend-hq/extend-cli/internal/oauth"
 )
 
 // TestResolveSettings pins the precedence chain that makes `extend setup`
@@ -295,10 +296,10 @@ func TestRunSetupNonInteractive_InstallsSkill(t *testing.T) {
 		t.Fatalf("runSetupNonInteractive = %v, want nil", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend-cli", "SKILL.md")); err != nil {
 		t.Fatalf("skill not installed to default location: %v", err)
 	}
-	link := filepath.Join(home, ".claude", "skills", "extend")
+	link := filepath.Join(home, ".claude", "skills", "extend-cli")
 	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("claude symlink not created (fi=%v err=%v)", fi, err)
 	}
@@ -458,6 +459,55 @@ func TestSetupModel_KeyStepShowsSaveNote(t *testing.T) {
 	}
 }
 
+// TestFinishBrowserSetup drives the wizard's browser path end to end
+// against the fake OAuth server: the chosen region is saved, a
+// previously saved API key is removed (it would shadow the login), an
+// environment API key is called out, and the login flow stores tokens.
+func TestFinishBrowserSetup(t *testing.T) {
+	f := newFakeAuthServer(t)
+	loginTestEnv(t, f.srv.URL)
+	t.Setenv("EXTEND_API_KEY", "sk_env")
+
+	if _, err := config.Save(config.File{
+		Region: "eu",
+		Auth:   &config.Auth{Type: config.AuthAPIKey, APIKey: "sk_old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	app, stderr := testAppForLogin()
+	res := &setupResult{region: setupRegionChoices[0], browserLogin: true}
+	err := finishBrowserSetup(context.Background(), app, res, loginOptions{
+		openBrowser: f.browserFor(t, "code-xyz", ""),
+		store:       oauth.DefaultStore(),
+	})
+	if err != nil {
+		t.Fatalf("finishBrowserSetup: %v", err)
+	}
+
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if saved.Region != "us" || saved.APIKey() != "" {
+		t.Errorf("saved config = %+v, want region=us and no API key", saved)
+	}
+	if rec, _ := oauth.DefaultStore().Get(f.srv.URL); rec == nil || rec.AccessToken != "eoat_test" {
+		t.Errorf("stored login = %+v, want the fresh tokens", rec)
+	}
+	out := stderr()
+	for _, want := range []string{
+		"Removed the previously saved API key",
+		"EXTEND_API_KEY is set in your environment",
+		"Signed in to " + f.srv.URL,
+		"You're all set",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stderr missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
 // TestReportSetupResult pins the post-wizard summary both ways: a saved
 // result reports the path; a declined save prints copy-pasteable env-var
 // guidance (region and workspace included only when relevant) and never
@@ -567,12 +617,21 @@ func drive(t *testing.T, m setupModel, msg tea.Msg) setupModel {
 	return sm
 }
 
-// TestSetupModel_RegionSelection walks the region picker: down moves the
-// cursor, enter advances to the key step with the chosen region.
+// TestSetupModel_RegionSelection walks the API-key path through the
+// method and region pickers: down moves the cursor, enter advances to
+// the key step with the chosen region.
 func TestSetupModel_RegionSelection(t *testing.T) {
 	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string, string) error { return nil })
+	if m.step != stepAuthMethod {
+		t.Fatalf("initial step = %v, want stepAuthMethod", m.step)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})  // -> API key
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // select it
 	if m.step != stepRegion {
-		t.Fatalf("initial step = %v, want stepRegion", m.step)
+		t.Fatalf("step after method choice = %v, want stepRegion", m.step)
+	}
+	if m.browserLogin {
+		t.Fatal("browserLogin = true after choosing the API-key option")
 	}
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // -> EU
 	if m.cursor != 1 {
@@ -591,6 +650,50 @@ func TestSetupModel_RegionSelection(t *testing.T) {
 	}
 }
 
+// TestSetupModel_BrowserPathSkipsKeyStep: choosing browser sign-in goes
+// method -> region -> skill prompt, records browserLogin, and never
+// touches the key step or the config file (the login itself runs after
+// the TUI exits).
+func TestSetupModel_BrowserPathSkipsKeyStep(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string, string) error { return nil })
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // browser (default)
+	if !m.browserLogin || m.step != stepRegion {
+		t.Fatalf("after method choice: browserLogin=%v step=%v, want true/stepRegion", m.browserLogin, m.step)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick US
+	if m.step != stepSkill {
+		t.Fatalf("step = %v, want stepSkill (no key step on the browser path)", m.step)
+	}
+	if m.result == nil || !m.result.browserLogin || m.result.region.id != "us" {
+		t.Fatalf("result = %+v, want browserLogin with region us", m.result)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // yes, install skill
+	if m.step != stepDone || !m.result.installSkill {
+		t.Fatalf("step=%v installSkill=%v, want stepDone/true", m.step, m.result.installSkill)
+	}
+	if post, err := config.Load(); err != nil || post.APIKey() != "" {
+		t.Fatalf("config written by the TUI on the browser path: %+v (err=%v)", post, err)
+	}
+}
+
+// TestSetupModel_EscOnRegionGoesBackToMethod: esc at the region step
+// returns to the method chooser with the previous choice highlighted.
+func TestSetupModel_EscOnRegionGoesBackToMethod(t *testing.T) {
+	m := newSetupModel(context.Background(), false, "", func(context.Context, string, string, string) error { return nil })
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})  // -> API key
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // select it
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.step != stepAuthMethod {
+		t.Fatalf("step = %v, want stepAuthMethod (esc goes back)", m.step)
+	}
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (API key stays highlighted)", m.cursor)
+	}
+}
+
 // TestSetupModel_EmptyKeySubmitSkips: the key is optional. Enter on an
 // empty input skips saving: continue to the skill prompt, nothing
 // written, env-var guidance in the summary.
@@ -599,6 +702,8 @@ func TestSetupModel_EmptyKeySubmitSkips(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	m := newSetupModel(context.Background(), false, "us", func(context.Context, string, string, string) error { return nil })
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})  // -> API key
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // select it
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick US
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // submit empty key
 	if m.step != stepSkill {
@@ -843,12 +948,12 @@ func TestSetupView_FitsScreenAndShowsBody(t *testing.T) {
 		t.Errorf("view height = %d, want exactly %d", gh, h)
 	}
 
-	// The whole region-step body must survive — not just the heading.
+	// The whole method-step body must survive — not just the heading.
 	for _, want := range []string{
 		"Document Processing APIs",
-		"Where is your Extend workspace?",
-		"United States",
-		"European Union",
+		"How do you want to sign in?",
+		"Sign in with your browser",
+		"Paste an API key",
 		"move", // footer hint ("↑/↓ move · enter select · q quit")
 	} {
 		if !strings.Contains(content, want) {

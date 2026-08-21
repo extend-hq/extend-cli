@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -164,7 +165,28 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		// x-api-key is not one of the headers Go's client strips on a
+		// cross-host redirect (only Authorization/Cookie are), so a
+		// redirected Messages call would replay the Anthropic key to
+		// whatever host the Location header names. Pin every hop to
+		// the configured judge API origin.
+		base, baseErr := url.Parse(baseURL)
+		client = &http.Client{
+			Timeout: timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return errors.New("stopped after 10 redirects")
+				}
+				if baseErr != nil {
+					return fmt.Errorf("refusing redirect: parse judge base url %q: %w", baseURL, baseErr)
+				}
+				if req.URL.Scheme != base.Scheme || req.URL.Host != base.Host {
+					return fmt.Errorf("refusing redirect to %s://%s: not the judge API origin %s://%s",
+						req.URL.Scheme, req.URL.Host, base.Scheme, base.Host)
+				}
+				return nil
+			},
+		}
 	}
 
 	outputConfig := map[string]any{

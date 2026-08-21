@@ -16,6 +16,7 @@ import (
 
 	"github.com/extend-hq/extend-cli/internal/config"
 	"github.com/extend-hq/extend-cli/internal/extendx"
+	"github.com/extend-hq/extend-cli/internal/oauth"
 )
 
 // newSetupDoc returns the typed documentation for `extend setup`, the
@@ -35,12 +36,15 @@ func newSetupDoc(app *App) *CommandDoc {
 			"configure extend credentials and region",
 			"run the interactive setup wizard",
 			"authenticate the cli by pasting an api key",
+			"sign in to the extend cli with browser or api key",
 			"connect the cli to my extend account",
 		},
-		WhenToUse: `Use for first-time setup or to switch regions/keys. In a terminal it runs
-an interactive wizard: pick a region (US or EU), open the right dashboard
-to create an API key, then paste it to validate and save so every command
-works without exporting environment variables.
+		WhenToUse: `Use for first-time setup or to switch regions/credentials. In a terminal
+it runs an interactive wizard: choose how to sign in (browser login or
+an API key) and a region. The browser path runs the same flow as
+'extend login'; the API-key path opens the right dashboard to create a
+key, then validates and saves it so every command works without
+exporting environment variables.
 
 Without a terminal — an installer, CI, or an agent — it can't prompt, so
 it instead confirms when credentials already resolve, prints setup
@@ -145,7 +149,50 @@ func runSetup(ctx context.Context, app *App, opts setupOptions) error {
 	if m.result == nil {
 		return nil
 	}
+	if m.result.browserLogin {
+		return finishBrowserSetup(ctx, app, m.result, loginOptions{
+			openBrowser: openBrowser,
+			store:       oauth.DefaultStore(),
+		})
+	}
 	return reportSetupResult(app, m.result)
+}
+
+// finishBrowserSetup completes the wizard's browser sign-in path after
+// the TUI exits: it persists the chosen region (dropping any saved API
+// key, which would otherwise shadow the login), runs the same flow as
+// `extend login` in the normal terminal, and installs the agent skill
+// if the user opted in.
+func finishBrowserSetup(ctx context.Context, app *App, res *setupResult, opts loginOptions) error {
+	pal := paletteFor(app.IO)
+
+	cfg, _ := config.Load()
+	hadKey := cfg.Auth != nil && cfg.Auth.APIKey != ""
+	cfg.Auth = nil
+	cfg.Region = res.region.id
+	path, err := config.Save(cfg)
+	if err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	fmt.Fprintf(app.IO.ErrOut, "%s Saved %s (%s) to %s\n",
+		pal.Green("✓"), res.region.title, res.region.api, path)
+	if hadKey {
+		fmt.Fprintf(app.IO.ErrOut, "%s Removed the previously saved API key so the browser login takes effect.\n", pal.Yellow("!"))
+	}
+	if keyEnv := apiKeyEnvVar(app.Env); os.Getenv(keyEnv) != "" {
+		fmt.Fprintf(app.IO.ErrOut, "%s %s is set in your environment and takes precedence over a browser login; unset it to use the new session.\n",
+			pal.Yellow("!"), keyEnv)
+	}
+
+	if err := runLogin(ctx, app, opts); err != nil {
+		return err
+	}
+
+	if res.installSkill {
+		installSkillAndReport(app)
+	}
+	fmt.Fprintf(app.IO.ErrOut, "\nYou're all set. Try: %s\n", pal.Cyan("extend files list"))
+	return nil
 }
 
 // reportSetupResult prints the post-wizard summary to stderr. A saved

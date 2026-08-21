@@ -144,7 +144,7 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 // per-harness path under HomeDir. Claude Code reads from
 // $HOME/.claude/skills/<name>/SKILL.md.
 func installSkillForClaude(homeDir string) error {
-	dst := filepath.Join(homeDir, ".claude", "skills", "extend", "SKILL.md")
+	dst := filepath.Join(homeDir, ".claude", "skills", "extend-cli", "SKILL.md")
 	return generateSkillTo(dst)
 }
 
@@ -203,7 +203,7 @@ func claudeTokens(events []map[string]any) int {
 
 // anyClaudeSkillUsage looks for evidence that the skill was activated:
 // either a Skill tool-use event, or a Read tool-use targeting a path
-// that contains "skills/extend/SKILL.md".
+// that contains "skills/extend-cli/SKILL.md".
 func anyClaudeSkillUsage(events []map[string]any) bool {
 	for _, ev := range events {
 		t, _ := ev["type"].(string)
@@ -233,7 +233,7 @@ func anyClaudeSkillUsage(events []map[string]any) bool {
 			if name == "Read" {
 				input, _ := b["input"].(map[string]any)
 				p, _ := input["file_path"].(string)
-				if strings.Contains(p, "skills/extend/SKILL.md") {
+				if strings.Contains(p, "skills/extend-cli/SKILL.md") {
 					return true
 				}
 			}

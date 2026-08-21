@@ -26,7 +26,7 @@ func TestRenderSkillFrontmatter(t *testing.T) {
 	}
 	front := body[4 : 4+end]
 
-	for _, want := range []string{"name: extend", "description: "} {
+	for _, want := range []string{"name: extend-cli", "description: "} {
 		if !strings.Contains(front, want) {
 			t.Errorf("frontmatter missing %q:\n%s", want, front)
 		}
@@ -232,7 +232,7 @@ func TestSkillInstallWritesToTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read written file: %v", err)
 	}
-	if !strings.HasPrefix(string(data), "---\nname: extend\n") {
+	if !strings.HasPrefix(string(data), "---\nname: extend-cli\n") {
 		t.Errorf("written file does not start with frontmatter:\n%s", string(data[:64]))
 	}
 	if !strings.Contains(ta.errOut.String(), "Wrote") {
@@ -244,7 +244,7 @@ func TestSkillInstallWritesToTarget(t *testing.T) {
 }
 
 // TestSkillInstallSymlinksIntoClaude verifies the default install also
-// links the skill dir into ~/.claude/skills/extend (Claude Code doesn't
+// links the skill dir into ~/.claude/skills/extend-cli (Claude Code doesn't
 // read ~/.agents/skills), and that SKILL.md resolves through the link.
 func TestSkillInstallSymlinksIntoClaude(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -260,10 +260,10 @@ func TestSkillInstallSymlinksIntoClaude(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend-cli", "SKILL.md")); err != nil {
 		t.Fatalf("SKILL.md not written to default location: %v", err)
 	}
-	link := filepath.Join(home, ".claude", "skills", "extend")
+	link := filepath.Join(home, ".claude", "skills", "extend-cli")
 	fi, err := os.Lstat(link)
 	if err != nil {
 		t.Fatalf("claude symlink not created: %v", err)
@@ -275,7 +275,7 @@ func TestSkillInstallSymlinksIntoClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, ".agents", "skills", "extend"); dest != want {
+	if want := filepath.Join(home, ".agents", "skills", "extend-cli"); dest != want {
 		t.Errorf("symlink target = %q, want %q", dest, want)
 	}
 	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
@@ -295,7 +295,7 @@ func TestSkillInstallSymlinksIntoClaude(t *testing.T) {
 }
 
 // TestSkillInstallClaudeLinkSkipsRealDir ensures a real directory already
-// at ~/.claude/skills/extend is left untouched (not clobbered), the link
+// at ~/.claude/skills/extend-cli is left untouched (not clobbered), the link
 // step is skipped with a warning, and the install still succeeds.
 func TestSkillInstallClaudeLinkSkipsRealDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -303,7 +303,7 @@ func TestSkillInstallClaudeLinkSkipsRealDir(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	realDir := filepath.Join(home, ".claude", "skills", "extend")
+	realDir := filepath.Join(home, ".claude", "skills", "extend-cli")
 	if err := os.MkdirAll(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestSkillInstallClaudeLinkSkipsRealDir(t *testing.T) {
 	if !strings.Contains(ta.errOut.String(), "Skipped") {
 		t.Errorf("expected Skipped warning on stderr; got: %q", ta.errOut.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "extend-cli", "SKILL.md")); err != nil {
 		t.Errorf("SKILL.md should still be written: %v", err)
 	}
 }
@@ -346,7 +346,7 @@ func TestSkillInstallStdoutPath(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if !strings.HasPrefix(ta.out.String(), "---\nname: extend\n") {
+	if !strings.HasPrefix(ta.out.String(), "---\nname: extend-cli\n") {
 		t.Errorf("stdout should contain the rendered SKILL.md; got %q", ta.out.String()[:min(64, len(ta.out.String()))])
 	}
 	// And nothing on stderr — install -t - is silent on success.
@@ -364,7 +364,7 @@ func TestSkillCommandPrintsToStdout(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("skill: %v", err)
 	}
-	if !strings.HasPrefix(ta.out.String(), "---\nname: extend\n") {
+	if !strings.HasPrefix(ta.out.String(), "---\nname: extend-cli\n") {
 		t.Errorf("stdout should contain rendered SKILL.md; got %q", ta.out.String()[:min(64, len(ta.out.String()))])
 	}
 	if ta.errOut.Len() != 0 {
@@ -381,7 +381,7 @@ func TestDefaultSkillTargetIsCrossClient(t *testing.T) {
 		t.Fatalf("defaultSkillTarget: %v", err)
 	}
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".agents", "skills", "extend", "SKILL.md")
+	want := filepath.Join(home, ".agents", "skills", "extend-cli", "SKILL.md")
 	if got != want {
 		t.Errorf("defaultSkillTarget() = %q, want %q", got, want)
 	}

@@ -51,7 +51,7 @@ const defaultAPIVersion = "2026-02-09"
 // stable and matches the priority a user is most likely to care about
 // (auth first, then routing, then transport, then per-feature secrets).
 var envVars = []envVarSpec{
-	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for any command that calls the API."},
+	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for API commands unless signed in via 'extend login'."},
 	{Name: envBaseURL, Description: "Override base URL. Wins over EXTEND_REGION."},
 	{Name: envRegion, Description: "Region: us|eu. Selects the regional API endpoint."},
 	{Name: envWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
