@@ -63,7 +63,12 @@ This runs an OAuth flow: your browser opens Extend's consent screen, you
 pick one workspace and one environment, and the CLI stores the resulting
 tokens in the OS keychain (or a 0600 file under `~/.config/extend/` on
 headless hosts). Tokens refresh silently; `extend logout` revokes the
-session and clears them.
+session and clears them, and `extend whoami` shows the workspace,
+environment, and user your commands run as.
+
+On macOS, upgrading the CLI binary may make the keychain re-prompt for
+access to the stored login; that prompt is expected — approve it to keep
+the session.
 
 Or run the interactive wizard; it picks your region, validates the API key,
 and saves it to `~/.config/extend/config.json`:

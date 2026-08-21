@@ -331,6 +331,23 @@ func TestLoopbackFirstResultWins(t *testing.T) {
 	}
 }
 
+func TestLoopbackLateSuccessAfterErrorShowsFailure(t *testing.T) {
+	lb, err := NewLoopback("s")
+	if err != nil {
+		t.Fatalf("NewLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	get(t, lb.RedirectURI()+"?error=server_error&state=s")
+	status, body := get(t, lb.RedirectURI()+"?code=late&state=s")
+	if status != http.StatusConflict {
+		t.Errorf("late success status = %d, want 409", status)
+	}
+	if strings.Contains(body, "Already signed in") || !strings.Contains(body, "Sign-in failed") {
+		t.Errorf("late success page must reflect the failed attempt, got %q", body)
+	}
+}
+
 func TestLoopbackWaitHonorsContext(t *testing.T) {
 	lb, err := NewLoopback("s")
 	if err != nil {

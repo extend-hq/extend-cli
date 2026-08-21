@@ -66,7 +66,7 @@ func runConfig(app *App) error {
 	authNote := ""
 	if s.key.val != "" {
 		authMethod = "API key"
-	} else if src := resolveOAuthSource(app.Env, s); src != nil {
+	} else if src, _ := resolveOAuthSource(app.Env, s, app.IO.ErrOut); src != nil {
 		authMethod = "OAuth login"
 		authNote = "from 'extend login'; 'extend logout' to clear"
 	}

@@ -122,6 +122,7 @@ respective env vars.`,
 			newSetupDoc(app),
 			newLoginDoc(app),
 			newLogoutDoc(app),
+			newWhoamiDoc(app),
 			newConfigDoc(app),
 			// Help topics
 			newAuthTopicDoc(),
@@ -176,9 +177,10 @@ func NewRoot() *cobra.Command {
 		}
 		var oauthSource extendx.BearerSource
 		if s.key.val == "" {
-			oauthSource = resolveOAuthSource(app.Env, s)
+			var storeErr error
+			oauthSource, storeErr = resolveOAuthSource(app.Env, s, app.IO.ErrOut)
 			if oauthSource == nil {
-				return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr)
+				return nil, unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr, storeErr)
 			}
 		}
 
@@ -395,25 +397,30 @@ func apiKeyEnvVar(envLabel string) string {
 }
 
 // resolveOAuthSource returns a token source for the stored `extend
-// login` matching the resolved API base URL, or nil when none applies.
-// Stored logins are consulted only for the default environment label:
-// --env <label> means "use EXTEND_<LABEL>_API_KEY", and silently
-// substituting a login bound to some other environment would defeat the
-// point of the label.
-func resolveOAuthSource(envLabel string, s resolved) extendx.BearerSource {
+// login` matching the resolved API base URL, or nil when none applies —
+// with the store read error, if any, so a corrupted token store is not
+// reported as "you are not logged in". Stored logins are consulted only
+// for the default environment label: --env <label> means "use
+// EXTEND_<LABEL>_API_KEY", and silently substituting a login bound to
+// some other environment would defeat the point of the label.
+func resolveOAuthSource(envLabel string, s resolved, errOut io.Writer) (extendx.BearerSource, error) {
 	if envLabel != "" {
-		return nil
+		return nil, nil
 	}
 	base, err := effectiveBaseURL(s)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	store := oauth.DefaultStore()
 	rec, err := store.Get(base)
 	if err != nil || rec == nil {
-		return nil
+		return nil, err
 	}
-	return oauth.NewTokenSource(store, base, *rec)
+	src := oauth.NewTokenSource(store, base, *rec)
+	src.Warn = func(format string, args ...any) {
+		fmt.Fprintf(errOut, format+"\n", args...)
+	}
+	return src, nil
 }
 
 // unconfiguredKeyError is the "no credentials" error commands return when
@@ -423,7 +430,7 @@ func resolveOAuthSource(envLabel string, s resolved) extendx.BearerSource {
 // config file is present but couldn't be read or parsed), it appends that
 // cause so the user isn't told a key is missing when one is sitting in an
 // unreadable file (the shadowed-binary / bad-permissions trap).
-func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
+func unconfiguredKeyError(keyEnv, region string, fileErr, storeErr error) error {
 	dash := "https://dashboard.extend.ai"
 	if d, ok := extendx.RegionDashboard(region); ok {
 		dash = d
@@ -431,6 +438,9 @@ func unconfiguredKeyError(keyEnv, region string, fileErr error) error {
 	err := fmt.Errorf("%s is not set and you are not logged in. Run 'extend login' to sign in with your browser, run 'extend setup', or create an API key at %s and export %s=sk_... (see 'extend config')", keyEnv, dash, keyEnv)
 	if fileErr != nil {
 		err = fmt.Errorf("%w\nnote: a config file was found but could not be read (run 'extend config'): %v", err, fileErr)
+	}
+	if storeErr != nil {
+		err = fmt.Errorf("%w\nnote: a stored login could not be read: %v", err, storeErr)
 	}
 	return err
 }
@@ -494,6 +504,13 @@ func formatError(w io.Writer, pal palette, err error) {
 		if apiErr.RequestID != "" {
 			fmt.Fprintf(w, "       %s\n", pal.Dimf("request: %s", apiErr.RequestID))
 		}
+		return
+	}
+
+	// A canceled context is the user's own Ctrl-C echoing back, not a
+	// failure to explain.
+	if errors.Is(err, context.Canceled) {
+		fmt.Fprintf(w, "%s\n", pal.Yellow("Canceled."))
 		return
 	}
 

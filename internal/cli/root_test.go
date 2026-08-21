@@ -23,7 +23,7 @@ func TestUnconfiguredKeyError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg := unconfiguredKeyError(tc.keyEnv, tc.region, nil).Error()
+			msg := unconfiguredKeyError(tc.keyEnv, tc.region, nil, nil).Error()
 			for _, want := range []string{tc.keyEnv, tc.wantDash, "extend setup"} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("error %q missing %q", msg, want)
@@ -40,7 +40,7 @@ func TestUnconfiguredKeyError(t *testing.T) {
 // This is the exact trap a shadowed/older binary or an unreadable file hits.
 func TestUnconfiguredKeyErrorReportsUnreadableConfig(t *testing.T) {
 	fileErr := errors.New("parse /home/u/.config/extend/config.json: unexpected end of JSON input")
-	msg := unconfiguredKeyError("EXTEND_API_KEY", "us", fileErr).Error()
+	msg := unconfiguredKeyError("EXTEND_API_KEY", "us", fileErr, nil).Error()
 	for _, want := range []string{
 		"EXTEND_API_KEY",         // still names the key var
 		"could not be read",      // the new hint
@@ -54,8 +54,24 @@ func TestUnconfiguredKeyErrorReportsUnreadableConfig(t *testing.T) {
 
 	// Without a file error the hint must not appear (no false alarm when the
 	// user simply hasn't configured anything yet).
-	if msg := unconfiguredKeyError("EXTEND_API_KEY", "us", nil).Error(); strings.Contains(msg, "could not be read") {
+	if msg := unconfiguredKeyError("EXTEND_API_KEY", "us", nil, nil).Error(); strings.Contains(msg, "could not be read") {
 		t.Errorf("error %q should not mention an unreadable config when there was none", msg)
+	}
+}
+
+// TestUnconfiguredKeyErrorReportsUnreadableStore: same trap as the config
+// file, for the token store — a corrupted store must not masquerade as
+// "you are not logged in".
+func TestUnconfiguredKeyErrorReportsUnreadableStore(t *testing.T) {
+	storeErr := errors.New("parse oauth_tokens.json: unexpected end of JSON input")
+	msg := unconfiguredKeyError("EXTEND_API_KEY", "us", nil, storeErr).Error()
+	for _, want := range []string{"stored login could not be read", "unexpected end of JSON"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+	if msg := unconfiguredKeyError("EXTEND_API_KEY", "us", nil, nil).Error(); strings.Contains(msg, "stored login") {
+		t.Errorf("error %q should not mention the stored login when it read fine", msg)
 	}
 }
 

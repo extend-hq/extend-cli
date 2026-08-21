@@ -141,7 +141,7 @@ func runLoginDrivingBrowser(t *testing.T, env map[string]string) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("extend login exited with error: %v\nstderr: %s", err, collected.String())
 	}
-	if !strings.Contains(collected.String(), "Signed in to Itest Workspace (Production) as itest@example.com.") {
+	if !strings.Contains(collected.String(), "Signed in to Itest Workspace (Production) as itest@example.com on "+env["EXTEND_BASE_URL"]+".") {
 		t.Errorf("login stderr missing personalized success line: %s", collected.String())
 	}
 }

@@ -68,7 +68,7 @@ which source is in effect.`,
 			"Logins are keyed by API base URL: switching --region or EXTEND_BASE_URL selects a different stored session (or none).",
 			"With --env <label> set, commands read EXTEND_<LABEL>_API_KEY only and never fall back to the stored login.",
 		},
-		SeeAlso: []string{"logout", "setup", "auth"},
+		SeeAlso: []string{"logout", "whoami", "setup", "auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		Args:    cobra.NoArgs,
 		Configure: func(cmd *cobra.Command) {
@@ -105,13 +105,72 @@ if needed.`,
 			"Logout only affects the login for the currently selected API base URL (region or EXTEND_BASE_URL); other regions' sessions remain.",
 			"Running logout while not logged in is fine; it reports there was nothing to do and exits 0.",
 		},
-		SeeAlso: []string{"login", "auth"},
+		SeeAlso: []string{"login", "whoami", "auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogout(cmd.Context(), app, oauth.DefaultStore())
 		},
 	}
+}
+
+func newWhoamiDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "whoami",
+		Summary: "Show the workspace, environment, and user of the current credentials",
+		Triggers: []string{
+			"which extend account am i using",
+			"check who the extend cli is signed in as",
+			"show current extend workspace and auth method",
+		},
+		WhenToUse: `Use to confirm which workspace and environment your commands will hit
+and which credential supplies them (API key or a stored 'extend login'),
+before running anything that writes.`,
+		Examples: []Example{
+			{Label: "Show the current identity", Cmd: "extend whoami"},
+		},
+		SeeAlso: []string{"login", "logout", "config", "auth"},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWhoami(cmd.Context(), app)
+		},
+	}
+}
+
+func runWhoami(ctx context.Context, app *App) error {
+	s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
+	base, err := effectiveBaseURL(s)
+	if err != nil {
+		return err
+	}
+
+	bearer := s.key.val
+	method := "API key (" + s.key.src + ")"
+	if bearer == "" {
+		src, srcErr := resolveOAuthSource(app.Env, s, app.IO.ErrOut)
+		if src == nil {
+			return unconfiguredKeyError(apiKeyEnvVar(app.Env), s.region.val, s.fileErr, srcErr)
+		}
+		if bearer, err = src.AccessToken(ctx); err != nil {
+			return err
+		}
+		method = "OAuth login"
+	}
+
+	id, err := fetchIdentity(ctx, oauth.NewHTTPClient(base), base, bearer)
+	if err != nil {
+		return fmt.Errorf("fetch identity: %w", err)
+	}
+	if ws := workspaceLabel(id); ws != "" {
+		fmt.Fprintf(app.IO.Out, "Workspace  %s\n", ws)
+	}
+	if id.email != "" {
+		fmt.Fprintf(app.IO.Out, "User       %s\n", id.email)
+	}
+	fmt.Fprintf(app.IO.Out, "Auth       %s\n", method)
+	fmt.Fprintf(app.IO.Out, "Base URL   %s\n", base)
+	return nil
 }
 
 // loginOptions carries the injectable pieces of runLogin so tests can
@@ -196,10 +255,15 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		return fmt.Errorf("exchange authorization code: %w", err)
 	}
 
+	// Captured before the new record lands so the replaced grant can be
+	// revoked server-side; without this every re-login leaves a live
+	// orphaned grant family behind until it expires.
+	prev, _ := opts.store.Get(base)
+
 	rec := oauth.Record{
 		AccessToken:        tr.AccessToken,
 		RefreshToken:       tr.RefreshToken,
-		ExpiresAt:          time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second),
+		ExpiresAt:          tr.Expiry(time.Now()),
 		TokenEndpoint:      eps.Token,
 		RevocationEndpoint: eps.Revocation,
 		ClientID:           oauth.DefaultClientID,
@@ -209,11 +273,15 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		sp.Stop("")
 		return fmt.Errorf("store login: %w", err)
 	}
+	if prev != nil && prev.RefreshToken != rec.RefreshToken {
+		// Best-effort: the new login already works either way.
+		_ = revokeRecord(ctx, base, prev)
+	}
 
 	// Personalize the success line from GET /me. Best-effort: the
 	// tokens are already stored, so a /me hiccup must never fail the
 	// login; the generic line is the fallback.
-	id := fetchLoginIdentity(ctx, httpc, base, tr.AccessToken)
+	id, _ := fetchIdentity(ctx, httpc, base, tr.AccessToken)
 	sp.Stop("")
 	fmt.Fprintf(app.IO.ErrOut, "%s %s\n", pal.Green("✓"), loginSuccessLine(base, id))
 	if s.key.val != "" {
@@ -243,25 +311,9 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 	// Revoking the refresh token kills the whole grant family
 	// server-side. Best-effort: local tokens are cleared even when the
 	// server is unreachable, so the CLI is signed out either way.
-	if rec.RefreshToken != "" {
-		eps := oauth.DefaultEndpoints(base)
-		if rec.RevocationEndpoint != "" {
-			eps.Revocation = rec.RevocationEndpoint
-		}
-		clientID := rec.ClientID
-		if clientID == "" {
-			clientID = oauth.DefaultClientID
-		}
-		revokeClient := &oauth.Client{
-			HTTPClient: oauth.NewHTTPClient(base),
-			Endpoints:  eps,
-			ClientID:   clientID,
-			Resource:   base,
-		}
-		if revErr := revokeClient.Revoke(ctx, rec.RefreshToken); revErr != nil {
-			fmt.Fprintf(app.IO.ErrOut, "%s Could not revoke the session server-side (%v); clearing local tokens anyway.\n",
-				pal.Yellow("!"), revErr)
-		}
+	if revErr := revokeRecord(ctx, base, rec); revErr != nil {
+		fmt.Fprintf(app.IO.ErrOut, "%s Could not revoke the session server-side (%v); clearing local tokens anyway.\n",
+			pal.Yellow("!"), revErr)
 	}
 
 	if err := store.Delete(base); err != nil {
@@ -269,6 +321,29 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 	}
 	fmt.Fprintf(app.IO.ErrOut, "%s Logged out of %s.\n", pal.Green("✓"), base)
 	return nil
+}
+
+// revokeRecord revokes a stored login's refresh token server-side,
+// killing its whole grant family per RFC 7009.
+func revokeRecord(ctx context.Context, base string, rec *oauth.Record) error {
+	if rec == nil || rec.RefreshToken == "" {
+		return nil
+	}
+	eps := oauth.DefaultEndpoints(base)
+	if rec.RevocationEndpoint != "" {
+		eps.Revocation = rec.RevocationEndpoint
+	}
+	clientID := rec.ClientID
+	if clientID == "" {
+		clientID = oauth.DefaultClientID
+	}
+	c := &oauth.Client{
+		HTTPClient: oauth.NewHTTPClient(base),
+		Endpoints:  eps,
+		ClientID:   clientID,
+		Resource:   base,
+	}
+	return c.Revoke(ctx, rec.RefreshToken)
 }
 
 // effectiveBaseURL resolves the API base URL the CLI is pointed at:
@@ -305,26 +380,26 @@ type loginIdentity struct {
 	email       string
 }
 
-// fetchLoginIdentity calls GET /me with the fresh access token. The
-// SDK has no /me binding yet, so this is a minimal direct call. Any
-// failure returns nil; the caller falls back to the generic line.
-func fetchLoginIdentity(ctx context.Context, httpc *http.Client, base, accessToken string) *loginIdentity {
+// fetchIdentity calls GET /me with a bearer credential (an OAuth
+// access token or an API key; the endpoint accepts both). The SDK has
+// no /me binding yet, so this is a minimal direct call.
+func fetchIdentity(ctx context.Context, httpc *http.Client, base, bearer string) (*loginIdentity, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/me", nil)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("x-extend-api-version", defaultAPIVersion)
 	req.Header.Set("User-Agent", userAgent())
 	resp, err := httpc.Do(req)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return nil, fmt.Errorf("GET /me: http %d", resp.StatusCode)
 	}
 	var body struct {
 		Workspace struct {
@@ -342,7 +417,7 @@ func fetchLoginIdentity(ctx context.Context, httpc *http.Client, base, accessTok
 		} `json:"grantedTargets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return nil
+		return nil, fmt.Errorf("parse /me response: %w", err)
 	}
 	id := &loginIdentity{
 		workspace: iostreams.SanitizeForTerminal(body.Workspace.Name),
@@ -357,27 +432,54 @@ func fetchLoginIdentity(ctx context.Context, httpc *http.Client, base, accessTok
 			break
 		}
 	}
-	return id
+	return id, nil
+}
+
+// workspaceLabel renders "Acme (Production)" from an identity, or ""
+// when /me gave no workspace. The parenthetical is the workspace's
+// granted environment, not the deployment.
+func workspaceLabel(id *loginIdentity) string {
+	if id == nil || id.workspace == "" {
+		return ""
+	}
+	switch id.environment {
+	case "PRODUCTION":
+		return id.workspace + " (Production)"
+	case "TEST":
+		return id.workspace + " (Test)"
+	}
+	return id.workspace
 }
 
 // loginSuccessLine renders the post-login summary: personalized when
 // /me answered ("Signed in to Acme (Production) as a@b.c."), generic
-// otherwise.
+// otherwise. Non-region bases (staging, rigs) are named in the
+// personalized line too — the environment parenthetical would
+// otherwise read as the production deployment.
 func loginSuccessLine(base string, id *loginIdentity) string {
-	if id == nil || id.workspace == "" {
-		return fmt.Sprintf("Logged in to %s.", base)
+	ws := workspaceLabel(id)
+	if ws == "" {
+		return fmt.Sprintf("Signed in to %s.", base)
 	}
-	line := "Signed in to " + id.workspace
-	switch id.environment {
-	case "PRODUCTION":
-		line += " (Production)"
-	case "TEST":
-		line += " (Test)"
-	}
+	line := "Signed in to " + ws
 	if id.email != "" {
 		line += " as " + id.email
 	}
+	if !isKnownRegionBase(base) {
+		line += " on " + base
+	}
 	return line + "."
+}
+
+// isKnownRegionBase reports whether base is one of the advertised
+// regions' API URLs (as opposed to a custom EXTEND_BASE_URL target).
+func isKnownRegionBase(base string) bool {
+	for _, region := range extendx.KnownRegions() {
+		if u, ok := extendx.RegionBaseURL(region); ok && oauth.NormalizeBase(u) == base {
+			return true
+		}
+	}
+	return false
 }
 
 // openBrowser launches the platform's URL opener. Errors are surfaced

@@ -191,6 +191,7 @@ func reportSetupResult(app *App, res *setupResult) error {
 	} else {
 		fmt.Fprintf(app.IO.ErrOut, "\nAfter exporting, try: %s\n", pal.Cyan("extend files list"))
 	}
+	fmt.Fprintf(app.IO.ErrOut, "Tip: %s signs in through your browser, no API key needed.\n", pal.Cyan("extend login"))
 	return nil
 }
 

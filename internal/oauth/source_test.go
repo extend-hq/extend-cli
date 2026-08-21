@@ -246,7 +246,7 @@ func TestRefreshPersistFailureRetriesOnce(t *testing.T) {
 		TokenEndpoint: srv.URL,
 	})
 	warned := false
-	s.warn = func(string, ...any) { warned = true }
+	s.Warn = func(string, ...any) { warned = true }
 
 	tok, err := s.AccessToken(context.Background())
 	if err != nil || tok != "eoat_new_1" {
@@ -275,7 +275,7 @@ func TestRefreshPersistFailureWarnsAndContinues(t *testing.T) {
 		TokenEndpoint: srv.URL,
 	})
 	var warning string
-	s.warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
+	s.Warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
 
 	// The rotation already happened server-side, so the source must
 	// keep working in memory rather than fail — but never silently.

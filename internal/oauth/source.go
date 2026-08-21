@@ -39,9 +39,10 @@ type TokenSource struct {
 	rec     Record
 	client  *http.Client
 	now     func() time.Time
-	// warn surfaces non-fatal but user-actionable problems (a rotated
-	// refresh token that could not be persisted). Defaults to stderr.
-	warn func(format string, args ...any)
+	// Warn surfaces non-fatal but user-actionable problems (a rotated
+	// refresh token that could not be persisted). Defaults to stderr;
+	// callers with their own output streams should point it there.
+	Warn func(format string, args ...any)
 }
 
 // NewTokenSource builds a source over a stored record.
@@ -52,7 +53,7 @@ func NewTokenSource(store Store, apiBase string, rec Record) *TokenSource {
 		rec:     rec,
 		client:  NewHTTPClient(apiBase),
 		now:     time.Now,
-		warn: func(format string, args ...any) {
+		Warn: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		},
 	}
@@ -149,7 +150,7 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	if tr.RefreshToken != "" {
 		newRec.RefreshToken = tr.RefreshToken
 	}
-	newRec.ExpiresAt = s.now().Add(time.Duration(tr.ExpiresIn) * time.Second)
+	newRec.ExpiresAt = tr.Expiry(s.now())
 	// Persist the rotated pair before handing the new access token out:
 	// the old refresh token is dead server-side the moment rotation
 	// succeeds, so a pair that exists only in this process's memory
@@ -163,7 +164,7 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	}
 	s.rec = newRec
 	if persistErr != nil {
-		s.warn("! Could not save your refreshed Extend login (%v). The refreshed session is available to this command only; if later commands cannot authenticate, run 'extend login' to sign in again.", persistErr)
+		s.Warn("! Could not save your refreshed Extend login (%v). The refreshed session is available to this command only; if later commands cannot authenticate, run 'extend login' to sign in again.", persistErr)
 	}
 	return nil
 }

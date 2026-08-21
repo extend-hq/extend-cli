@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/extend-hq/extend-cli/internal/iostreams"
@@ -113,13 +114,24 @@ func (l *Loopback) Close() error {
 // pending real login. Non-matching callbacks are answered without
 // touching the channel.
 func newCallbackHandler(state string, result chan<- callbackResult) http.Handler {
+	var mu sync.Mutex
+	var done, failed bool
+	// report delivers the first result and remembers its outcome, so a
+	// second callback can render a page matching what actually happened.
 	report := func(r callbackResult) bool {
-		select {
-		case result <- r:
-			return true
-		default:
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
 			return false
 		}
+		done, failed = true, r.err != nil
+		result <- r
+		return true
+	}
+	alreadyFailed := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return failed
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -160,8 +172,13 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 			return
 		}
 		if !report(callbackResult{code: code}) {
-			writeCallbackPage(w, http.StatusConflict, "Already signed in",
-				"This login attempt already completed. You can close this tab.")
+			if alreadyFailed() {
+				writeCallbackPage(w, http.StatusConflict, "Sign-in failed",
+					"This login attempt already ended. You can close this tab and run <code>extend login</code> to try again.")
+			} else {
+				writeCallbackPage(w, http.StatusConflict, "Already signed in",
+					"This login attempt already completed. You can close this tab.")
+			}
 			return
 		}
 		writeCallbackPage(w, http.StatusOK, "You're signed in",

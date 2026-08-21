@@ -96,7 +96,10 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("A login is scoped to the one workspace and environment approved on the\n")
 	b.WriteString("consent screen and is stored per API base URL (OS keychain, or a 0600\n")
 	b.WriteString("file under the config dir on headless hosts). 'extend logout' revokes\n")
-	b.WriteString("it. Any resolved API key takes precedence over a stored login.\n\n")
+	b.WriteString("it; 'extend whoami' shows the identity in effect. Any resolved API key\n")
+	b.WriteString("takes precedence over a stored login. On macOS, upgrading the CLI\n")
+	b.WriteString("binary may make the keychain re-prompt for access to the stored login;\n")
+	b.WriteString("that prompt is expected — approve it to keep the session.\n\n")
 	b.WriteString("Environment variables:\n\n")
 	maxNameLen := 0
 	for _, ev := range envVars {

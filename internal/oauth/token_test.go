@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExchangeSendsContractFields(t *testing.T) {
@@ -89,6 +90,18 @@ func TestRefreshSendsContractFields(t *testing.T) {
 	}
 	if tr.RefreshToken != "eort_new" {
 		t.Errorf("rotated refresh token = %q, want eort_new", tr.RefreshToken)
+	}
+}
+
+func TestExpiryDefaultsWhenExpiresInMissing(t *testing.T) {
+	now := time.Now()
+	if got := (&TokenResponse{ExpiresIn: 3600}).Expiry(now); !got.Equal(now.Add(time.Hour)) {
+		t.Errorf("Expiry with expires_in = %v", got)
+	}
+	// Absent expires_in must not yield an already-expired token, which
+	// would force a refresh round-trip on every command.
+	if got := (&TokenResponse{}).Expiry(now); !got.After(now.Add(expirySkew)) {
+		t.Errorf("Expiry without expires_in = %v, want past the skew window", got)
 	}
 }
 

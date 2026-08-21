@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
@@ -25,6 +26,19 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int64  `json:"expires_in"`
+}
+
+// fallbackTokenLifetime stands in when the token endpoint omits
+// expires_in. It must comfortably exceed expirySkew, or every command
+// would treat its token as already expired and refresh on each call.
+const fallbackTokenLifetime = 5 * time.Minute
+
+// Expiry computes the access token's expiry from now.
+func (tr *TokenResponse) Expiry(now time.Time) time.Time {
+	if tr.ExpiresIn <= 0 {
+		return now.Add(fallbackTokenLifetime)
+	}
+	return now.Add(time.Duration(tr.ExpiresIn) * time.Second)
 }
 
 // TokenError is the token endpoint's RFC 6749 error payload, carried

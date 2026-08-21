@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -85,12 +86,22 @@ func (s *keyringStore) Get(apiBase string) (*Record, error) {
 	return &rec, nil
 }
 
+// warnKeyringFallback fires at most once per process: the degradation
+// is worth telling the user about, but headless hosts without a
+// keychain would otherwise see it on every token write.
+var warnKeyringFallback sync.Once
+
 func (s *keyringStore) Set(apiBase string, rec Record) error {
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("encode login: %w", err)
 	}
 	if err := keyring.Set(keyringService, NormalizeBase(apiBase), string(b)); err != nil {
+		warnKeyringFallback.Do(func() {
+			if path, perr := tokensPath(); perr == nil {
+				fmt.Fprintf(os.Stderr, "! The OS keychain is unavailable (%v); storing your Extend login in %s (owner-only permissions) instead.\n", err, path)
+			}
+		})
 		return s.fallback.Set(apiBase, rec)
 	}
 	// A keychain write supersedes any stale fallback copy.
@@ -99,16 +110,19 @@ func (s *keyringStore) Set(apiBase string, rec Record) error {
 }
 
 func (s *keyringStore) Delete(apiBase string) error {
-	err := keyring.Delete(keyringService, NormalizeBase(apiBase))
-	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
-		// Keychain unreachable; the record, if any, lives in the file.
-		return s.fallback.Delete(apiBase)
+	key := NormalizeBase(apiBase)
+	kerr := keyring.Delete(keyringService, key)
+	if kerr != nil && !errors.Is(kerr, keyring.ErrNotFound) {
+		// Fail only when a keychain record provably survived the
+		// failed delete — silently succeeding would let it resurrect
+		// the login later. An unreachable keychain (headless hosts,
+		// where Get fails too) must not block logout.
+		if _, gerr := keyring.Get(keyringService, key); gerr == nil {
+			return kerr
+		}
 	}
 	// Clear both places so a fallback copy cannot resurrect the login.
-	if ferr := s.fallback.Delete(apiBase); ferr != nil {
-		return ferr
-	}
-	return nil
+	return s.fallback.Delete(apiBase)
 }
 
 // fileStore keeps every record in one 0600 JSON file next to the CLI

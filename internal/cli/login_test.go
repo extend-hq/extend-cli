@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/oauth"
 )
@@ -161,7 +163,7 @@ func TestRunLoginHappyPath(t *testing.T) {
 
 	// The fake serves no /me, so the success line is the generic one.
 	out := stderr()
-	if !strings.Contains(out, "Logged in to "+f.srv.URL) {
+	if !strings.Contains(out, "Signed in to "+f.srv.URL) {
 		t.Errorf("stderr missing success line: %q", out)
 	}
 	if strings.Contains(out, "eoat_") || strings.Contains(out, "eort_") {
@@ -196,7 +198,7 @@ func TestRunLoginPersonalizedSuccessLine(t *testing.T) {
 		t.Errorf("/me Authorization = %q, want the fresh access token", f.meAuth)
 	}
 	out := stderr()
-	if !strings.Contains(out, "Signed in to Acme Corp (Production) as jam@example.com.") {
+	if !strings.Contains(out, "Signed in to Acme Corp (Production) as jam@example.com on "+f.srv.URL+".") {
 		t.Errorf("stderr missing personalized success line: %q", out)
 	}
 }
@@ -250,7 +252,7 @@ func TestRunLoginSanitizesMeOutput(t *testing.T) {
 	if strings.Contains(out, "\x1b[31m") || strings.Contains(out, "\x1b]0;") || strings.Contains(out, "pwned") {
 		t.Errorf("stderr leaked an escape sequence from /me: %q", out)
 	}
-	if !strings.Contains(out, "Signed in to Evil Corp (Test) as a@b.c.") {
+	if !strings.Contains(out, "Signed in to Evil Corp (Test) as a@b.c on "+f.srv.URL+".") {
 		t.Errorf("stderr missing the sanitized success line: %q", out)
 	}
 }
@@ -274,27 +276,39 @@ func TestRunLoginMeFailureFallsBackToGenericLine(t *testing.T) {
 	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.AccessToken != "eoat_test" {
 		t.Errorf("tokens should be stored despite the /me failure, got %+v", rec)
 	}
-	if out := stderr(); !strings.Contains(out, "Logged in to "+f.srv.URL) {
+	if out := stderr(); !strings.Contains(out, "Signed in to "+f.srv.URL) {
 		t.Errorf("stderr missing generic fallback line: %q", out)
 	}
 }
 
 func TestLoginSuccessLine(t *testing.T) {
+	// A base that is not an advertised region is echoed in personalized
+	// lines: the environment parenthetical alone would misread as the
+	// production deployment when signed in to staging or a rig.
 	cases := []struct {
 		name string
 		id   *loginIdentity
 		want string
 	}{
-		{"nil identity", nil, "Logged in to https://api.example."},
-		{"no workspace", &loginIdentity{email: "a@b.c"}, "Logged in to https://api.example."},
-		{"full", &loginIdentity{workspace: "Acme", environment: "TEST", email: "a@b.c"}, "Signed in to Acme (Test) as a@b.c."},
-		{"unknown env", &loginIdentity{workspace: "Acme", environment: "WEIRD", email: "a@b.c"}, "Signed in to Acme as a@b.c."},
-		{"no email", &loginIdentity{workspace: "Acme", environment: "PRODUCTION"}, "Signed in to Acme (Production)."},
+		{"nil identity", nil, "Signed in to https://api.example."},
+		{"no workspace", &loginIdentity{email: "a@b.c"}, "Signed in to https://api.example."},
+		{"full", &loginIdentity{workspace: "Acme", environment: "TEST", email: "a@b.c"}, "Signed in to Acme (Test) as a@b.c on https://api.example."},
+		{"unknown env", &loginIdentity{workspace: "Acme", environment: "WEIRD", email: "a@b.c"}, "Signed in to Acme as a@b.c on https://api.example."},
+		{"no email", &loginIdentity{workspace: "Acme", environment: "PRODUCTION"}, "Signed in to Acme (Production) on https://api.example."},
 	}
 	for _, tc := range cases {
 		if got := loginSuccessLine("https://api.example", tc.id); got != tc.want {
 			t.Errorf("%s: loginSuccessLine = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+
+	usBase, ok := extendx.RegionBaseURL("us")
+	if !ok {
+		t.Fatal("region us must resolve")
+	}
+	id := &loginIdentity{workspace: "Acme", environment: "PRODUCTION", email: "a@b.c"}
+	if got, want := loginSuccessLine(usBase, id), "Signed in to Acme (Production) as a@b.c."; got != want {
+		t.Errorf("region base: loginSuccessLine = %q, want %q (no base suffix)", got, want)
 	}
 }
 
@@ -391,6 +405,97 @@ func TestRunLoginNoBrowserPrintsURL(t *testing.T) {
 	}
 }
 
+func TestRunLoginRevokesReplacedGrant(t *testing.T) {
+	f := newFakeAuthServer(t)
+	loginTestEnv(t, f.srv.URL)
+	app, _ := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	if err := store.Set(f.srv.URL, oauth.Record{
+		AccessToken:        "eoat_old",
+		RefreshToken:       "eort_old",
+		ExpiresAt:          time.Now().Add(time.Hour),
+		RevocationEndpoint: f.srv.URL + "/oauth2/revoke",
+		ClientID:           oauth.DefaultClientID,
+		Resource:           f.srv.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: f.browserFor(t, "code-xyz", ""),
+		store:       store,
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if len(f.revoked) != 1 || f.revoked[0] != "eort_old" {
+		t.Errorf("revoked = %v, want the replaced grant's refresh token", f.revoked)
+	}
+	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.RefreshToken != "eort_test" {
+		t.Errorf("stored record = %+v, want the new login", rec)
+	}
+}
+
+func TestRunWhoami(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{
+			"workspace": {"id": "ws_1", "name": "Acme Corp"},
+			"user": {"id": "user_1", "email": "jam@example.com"},
+			"grantedTargets": [
+				{"workspace": {"id": "ws_1"}, "environments": ["PRODUCTION"]}
+			]
+		}`)
+	}
+	loginTestEnv(t, f.srv.URL)
+
+	t.Run("no credentials", func(t *testing.T) {
+		ios, _, _, _ := iostreams.Test()
+		err := runWhoami(context.Background(), &App{IO: ios})
+		if err == nil || !strings.Contains(err.Error(), "not logged in") {
+			t.Fatalf("err = %v, want the unconfigured-credentials error", err)
+		}
+	})
+
+	t.Run("stored login", func(t *testing.T) {
+		if err := oauth.DefaultStore().Set(f.srv.URL, oauth.Record{
+			AccessToken:  "eoat_x",
+			RefreshToken: "eort_x",
+			ExpiresAt:    time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ios, _, out, _ := iostreams.Test()
+		if err := runWhoami(context.Background(), &App{IO: ios}); err != nil {
+			t.Fatalf("runWhoami: %v", err)
+		}
+		got := out.String()
+		for _, want := range []string{"Acme Corp (Production)", "jam@example.com", "OAuth login", f.srv.URL} {
+			if !strings.Contains(got, want) {
+				t.Errorf("stdout missing %q: %q", want, got)
+			}
+		}
+		if f.meAuth != "Bearer eoat_x" {
+			t.Errorf("/me Authorization = %q, want the stored access token", f.meAuth)
+		}
+	})
+
+	t.Run("api key wins", func(t *testing.T) {
+		t.Setenv("EXTEND_API_KEY", "sk_whoami")
+		ios, _, out, _ := iostreams.Test()
+		if err := runWhoami(context.Background(), &App{IO: ios}); err != nil {
+			t.Fatalf("runWhoami: %v", err)
+		}
+		if f.meAuth != "Bearer sk_whoami" {
+			t.Errorf("/me Authorization = %q, want the API key", f.meAuth)
+		}
+		if got := out.String(); !strings.Contains(got, "API key") {
+			t.Errorf("stdout should name the API key method: %q", got)
+		}
+	})
+}
+
 func TestRunLogoutRevokesAndClears(t *testing.T) {
 	f := newFakeAuthServer(t)
 	loginTestEnv(t, f.srv.URL)
@@ -467,7 +572,7 @@ func TestResolveOAuthSource(t *testing.T) {
 	loginTestEnv(t, f.srv.URL)
 
 	t.Run("no login stored", func(t *testing.T) {
-		if src := resolveOAuthSource("", resolved{baseURL: sourced{val: f.srv.URL}}); src != nil {
+		if src, _ := resolveOAuthSource("", resolved{baseURL: sourced{val: f.srv.URL}}, io.Discard); src != nil {
 			t.Error("expected nil source with empty store")
 		}
 	})
@@ -480,7 +585,7 @@ func TestResolveOAuthSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("login stored", func(t *testing.T) {
-		src := resolveOAuthSource("", resolved{baseURL: sourced{val: f.srv.URL}})
+		src, _ := resolveOAuthSource("", resolved{baseURL: sourced{val: f.srv.URL}}, io.Discard)
 		if src == nil {
 			t.Fatal("expected a source for the stored login")
 		}
@@ -490,7 +595,7 @@ func TestResolveOAuthSource(t *testing.T) {
 		}
 	})
 	t.Run("env label disables oauth fallback", func(t *testing.T) {
-		if src := resolveOAuthSource("test", resolved{baseURL: sourced{val: f.srv.URL}}); src != nil {
+		if src, _ := resolveOAuthSource("test", resolved{baseURL: sourced{val: f.srv.URL}}, io.Discard); src != nil {
 			t.Error("a non-default env label must not fall back to the stored login")
 		}
 	})
