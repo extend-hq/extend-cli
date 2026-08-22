@@ -189,11 +189,22 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	}
 	pal := paletteFor(app.IO)
 
-	// The redirect policy pins every OAuth call (and /me) to the API
-	// base's origin so request bodies carrying the code, verifier, or
-	// tokens can never be replayed to another host.
+	// The authorization server is the WorkOS AuthKit issuer, not the API:
+	// discovery, the browser authorize URL, and the token endpoint all
+	// live on the issuer domain, while the RFC 8707 resource parameter
+	// and every bearer-authenticated API call point at the API base.
+	issuer, clientID, err := resolveAuthServer(os.Getenv)
+	if err != nil {
+		return err
+	}
+
+	// Two pinned clients, one per origin: OAuth calls (discovery, code
+	// exchange, refresh) may only talk to the issuer, API calls (/me)
+	// only to the API base, so request bodies carrying the code,
+	// verifier, or tokens can never be replayed to another host.
+	authHTTP := oauth.NewHTTPClient(issuer)
 	httpc := oauth.NewHTTPClient(base)
-	eps, err := oauth.Discover(ctx, httpc, base)
+	eps, err := oauth.Discover(ctx, authHTTP, issuer)
 	if err != nil {
 		return err
 	}
@@ -214,7 +225,7 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	defer lb.Close()
 
 	authURL := oauth.AuthorizeURL(eps.Authorization, oauth.AuthorizeParams{
-		ClientID:    oauth.DefaultClientID,
+		ClientID:    clientID,
 		RedirectURI: lb.RedirectURI(),
 		State:       state,
 		Challenge:   oauth.ChallengeS256(verifier),
@@ -244,9 +255,9 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 
 	sp.Update("Completing sign-in...")
 	tokenClient := &oauth.Client{
-		HTTPClient: httpc,
+		HTTPClient: authHTTP,
 		Endpoints:  eps,
-		ClientID:   oauth.DefaultClientID,
+		ClientID:   clientID,
 		Resource:   base,
 	}
 	tr, err := tokenClient.Exchange(ctx, code, verifier, lb.RedirectURI())
@@ -261,21 +272,30 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	prev, _ := opts.store.Get(base)
 
 	rec := oauth.Record{
-		AccessToken:        tr.AccessToken,
-		RefreshToken:       tr.RefreshToken,
-		ExpiresAt:          tr.Expiry(time.Now()),
-		TokenEndpoint:      eps.Token,
-		RevocationEndpoint: eps.Revocation,
-		ClientID:           oauth.DefaultClientID,
-		Resource:           base,
+		AccessToken:   tr.AccessToken,
+		RefreshToken:  tr.RefreshToken,
+		ExpiresAt:     tr.Expiry(time.Now()),
+		TokenEndpoint: eps.Token,
+		// No RevocationEndpoint: WorkOS Connect has no RFC 7009
+		// endpoint; logout revokes via the API's /oauth/revoke-current.
+		ClientID: clientID,
+		Resource: base,
 	}
 	if err := opts.store.Set(base, rec); err != nil {
 		sp.Stop("")
 		return fmt.Errorf("store login: %w", err)
 	}
 	if prev != nil && prev.RefreshToken != rec.RefreshToken {
-		// Best-effort: the new login already works either way.
-		_ = revokeRecord(ctx, base, prev)
+		// Revocation is sid-keyed and the sid is the WorkOS consent id:
+		// while the consent stays on file, a re-login issues tokens with
+		// the SAME sid, so revoking the replaced grant would instantly
+		// invalidate the new one too. Only revoke when the sids differ;
+		// a superseded same-sid token dies with the consent at logout.
+		// Best-effort either way: the new login already works.
+		prevSID := oauth.TokenSID(prev.AccessToken)
+		if prevSID == "" || prevSID != oauth.TokenSID(rec.AccessToken) {
+			_ = revokeRecord(ctx, base, prev)
+		}
 	}
 
 	// Personalize the success line from GET /me. Best-effort: the
@@ -323,27 +343,68 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 	return nil
 }
 
-// revokeRecord revokes a stored login's refresh token server-side,
-// killing its whole grant family per RFC 7009.
+// revokeRecord kills a stored login server-side. WorkOS Connect has no
+// RFC 7009 revocation endpoint; instead POST /oauth/revoke-current on
+// the API denylists the session id inside the presented access token,
+// which invalidates every token of the login instantly (including any
+// still mintable via the refresh token). An expired access token is
+// refreshed first so the revoke call can authenticate.
 func revokeRecord(ctx context.Context, base string, rec *oauth.Record) error {
-	if rec == nil || rec.RefreshToken == "" {
+	if rec == nil || rec.AccessToken == "" {
 		return nil
 	}
-	eps := oauth.DefaultEndpoints(base)
-	if rec.RevocationEndpoint != "" {
-		eps.Revocation = rec.RevocationEndpoint
+	token := rec.AccessToken
+	stale := !rec.ExpiresAt.IsZero() && time.Now().After(rec.ExpiresAt.Add(-30*time.Second))
+	if stale && rec.RefreshToken != "" && rec.TokenEndpoint != "" {
+		clientID := rec.ClientID
+		if clientID == "" {
+			clientID = oauth.DefaultClientID
+		}
+		c := &oauth.Client{
+			HTTPClient: oauth.NewHTTPClient(rec.TokenEndpoint),
+			Endpoints:  oauth.Endpoints{Token: rec.TokenEndpoint},
+			ClientID:   clientID,
+			Resource:   base,
+		}
+		if tr, err := c.Refresh(ctx, rec.RefreshToken); err == nil {
+			token = tr.AccessToken
+		}
 	}
-	clientID := rec.ClientID
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		oauth.NormalizeBase(base)+"/oauth/revoke-current", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", userAgent())
+	resp, err := oauth.NewHTTPClient(base).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("POST /oauth/revoke-current: http %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// resolveAuthServer returns the authorization-server issuer (the WorkOS
+// AuthKit domain) and OAuth client id for 'extend login'. The issuer has
+// no default: it differs per Extend environment and a login attempt
+// without it cannot succeed, so fail with instructions instead.
+func resolveAuthServer(getenv func(string) string) (issuer, clientID string, err error) {
+	issuer = oauth.NormalizeBase(getenv(envOAuthIssuer))
+	if issuer == "" {
+		return "", "", fmt.Errorf("%s is not set; set it to this environment's sign-in domain (e.g. https://auth.extend.ai) to use 'extend login'", envOAuthIssuer)
+	}
+	if err := oauth.ValidateBaseURL(issuer); err != nil {
+		return "", "", err
+	}
+	clientID = getenv(envOAuthClientID)
 	if clientID == "" {
 		clientID = oauth.DefaultClientID
 	}
-	c := &oauth.Client{
-		HTTPClient: oauth.NewHTTPClient(base),
-		Endpoints:  eps,
-		ClientID:   clientID,
-		Resource:   base,
-	}
-	return c.Revoke(ctx, rec.RefreshToken)
+	return issuer, clientID, nil
 }
 
 // effectiveBaseURL resolves the API base URL the CLI is pointed at:
