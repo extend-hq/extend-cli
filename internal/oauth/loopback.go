@@ -226,7 +226,7 @@ box-shadow:0 1px 2px 0 rgb(0 0 0/5%%),
 0 1px 0 light-dark(rgb(0 0 0/4%%),rgb(0 0 0/0%%)),
 0 -1px 0 light-dark(rgb(255 255 255/0%%),rgb(255 255 255/6%%));
 padding:48px 40px;margin:24px;max-width:360px;text-align:center}
-svg{display:block;margin:0 auto 24px;color:light-dark(#1d1916,#fbfaf9)}
+svg{display:block;margin:0 auto 14px;color:light-dark(#1d1916,#fbfaf9)}
 h1{font-size:1.215rem;font-weight:600;letter-spacing:-.01em;margin:0 0 8px}
 p{font-size:.81rem;line-height:1.6;color:light-dark(#787268,#96979c);margin:0}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.70875rem;
