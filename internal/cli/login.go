@@ -395,7 +395,7 @@ func revokeRecord(ctx context.Context, base string, rec *oauth.Record) error {
 func resolveAuthServer(getenv func(string) string) (issuer, clientID string, err error) {
 	issuer = oauth.NormalizeBase(getenv(envOAuthIssuer))
 	if issuer == "" {
-		return "", "", fmt.Errorf("%s is not set; set it to this environment's sign-in domain (e.g. https://auth.extend.ai) to use 'extend login'", envOAuthIssuer)
+		return "", "", fmt.Errorf("%s is not set; set it to this environment's sign-in domain (e.g. https://id.extend.ai) to use 'extend login'", envOAuthIssuer)
 	}
 	if err := oauth.ValidateBaseURL(issuer); err != nil {
 		return "", "", err
