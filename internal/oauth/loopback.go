@@ -192,13 +192,15 @@ func newCallbackHandler(state string, result chan<- callbackResult) http.Handler
 // logo uses (internal/cli/logo.go: rx 16, ry 9, corner 1.5, inner
 // ratios 0.75/0.67, center gap 6). Inlined so the page renders offline.
 const logomarkSVG = `<svg width="44" height="36" viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Extend">
-<path fill="#1a1a1a" fill-rule="evenodd" d="M20 4 L36 11.5 L36 14.5 L20 22 L4 14.5 L4 11.5 Z M20 7 L32 13 L20 19 L8 13 Z"/>
-<path fill="#1a1a1a" fill-rule="evenodd" d="M20 10 L36 17.5 L36 20.5 L20 28 L4 20.5 L4 17.5 Z M20 13 L32 19 L20 25 L8 19 Z"/>
+<path fill="currentColor" fill-rule="evenodd" d="M20 4 L36 11.5 L36 14.5 L20 22 L4 14.5 L4 11.5 Z M20 7 L32 13 L20 19 L8 13 Z"/>
+<path fill="currentColor" fill-rule="evenodd" d="M20 10 L36 17.5 L36 20.5 L20 28 L4 20.5 L4 17.5 Z M20 13 L32 19 L20 25 L8 19 Z"/>
 </svg>`
 
-// writeCallbackPage renders the branded loopback landing page: a white
-// card on a neutral background with the Extend logomark, a heading, and
-// a short instruction. Everything is inline (embedded CSS, inline SVG,
+// writeCallbackPage renders the branded loopback landing page: a card on
+// the dashboard's background with the Extend logomark, a heading, and a
+// short instruction. Colors, radii, and the type scale mirror the Extend
+// dashboard design tokens (and the AuthKit custom CSS), including dark
+// mode via light-dark(). Everything is inline (embedded CSS, inline SVG,
 // system fonts) because the page must render with no network access.
 // body is trusted HTML; callers escape any dynamic content they splice
 // into it.
@@ -213,17 +215,23 @@ func writeCallbackPage(w http.ResponseWriter, status int, heading, body string) 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%s - Extend</title>
 <style>
+:root{color-scheme:light dark}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-background:#f4f4f2;color:#1a1a1a;-webkit-font-smoothing:antialiased;
-font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-main{background:#fff;border:1px solid #e4e4e0;border-radius:16px;
-box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);
-padding:56px 48px;margin:24px;max-width:360px;text-align:center}
-svg{display:block;margin:0 auto 28px}
-h1{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 10px}
-p{font-size:14px;line-height:1.6;color:#52524d;margin:0}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;
-background:#f4f4f2;border:1px solid #e4e4e0;border-radius:4px;padding:1px 5px}
+background:light-dark(#fdfcfb,#19191a);color:light-dark(#0f172a,#f0f0f0);
+-webkit-font-smoothing:antialiased;
+font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+main{background:light-dark(#ffffff,#161718);
+border:1px solid light-dark(rgb(0 0 0/8%%),rgb(255 255 255/8%%));border-radius:16px;
+box-shadow:0 1px 2px 0 rgb(0 0 0/5%%),
+0 1px 0 light-dark(rgb(0 0 0/4%%),rgb(0 0 0/0%%)),
+0 -1px 0 light-dark(rgb(255 255 255/0%%),rgb(255 255 255/6%%));
+padding:48px 40px;margin:24px;max-width:360px;text-align:center}
+svg{display:block;margin:0 auto 24px;color:light-dark(#1d1916,#fbfaf9)}
+h1{font-size:1.215rem;font-weight:600;letter-spacing:-.01em;margin:0 0 8px}
+p{font-size:.81rem;line-height:1.6;color:light-dark(#787268,#96979c);margin:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.70875rem;
+background:light-dark(#f7f6f3,#202122);
+border:1px solid light-dark(#ebe9e5,rgb(255 255 255/8%%));border-radius:4px;padding:1px 5px}
 </style>
 </head>
 <body>
