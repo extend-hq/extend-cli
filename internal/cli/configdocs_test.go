@@ -165,7 +165,7 @@ func TestWorkflowHelpDocumentsRoutingAndVersionRules(t *testing.T) {
 	ta := newTestApp(t, newFakeServer(t, nil))
 	tokens := []string{
 		"extend workflows versions create",
-		"extend run invoice.pdf --using workflow_xxx",
+		"extend workflows run invoice.pdf --using workflow_xxx",
 		"TRIGGER followed by",
 		"WEBHOOK_RESPONSE is terminal",
 		"classificationId",

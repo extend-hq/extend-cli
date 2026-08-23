@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
 func TestCollectBatchInputs_PositionalOnly(t *testing.T) {
@@ -142,7 +144,7 @@ func TestWorkflowBatch_ReturnsBatchIDOnly(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"batchId": "batch_abc"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "run", "batch")
+	cmd := findCmd(t, ta.app, "workflows", "run", "batch")
 	cmd.SetArgs([]string{"file_a", "file_b", "--using", "workflow_xK9"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -164,7 +166,7 @@ func TestWorkflowBatch_RejectsTopLevelPriority(t *testing.T) {
 		t.Fatal("server should not be hit when client validates")
 	})
 	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "run", "batch")
+	cmd := findCmd(t, ta.app, "workflows", "run", "batch")
 	cmd.SetArgs([]string{"file_a", "--using", "workflow_xK9", "--priority", "5"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "priority") {
@@ -177,8 +179,11 @@ func TestRunsList_BatchFilterReachesQuery(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
-		runType: "extract",
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	if _, _, err := collectListRows(context.Background(), cli, extendx.KindExtract, runsListParams{
 		batchID: "bpr_xyz",
 		limit:   5,
 		sortDir: "desc",
@@ -345,7 +350,7 @@ func TestWorkflowBatch_ForwardsSecrets(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"batchId": "wfb_x"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "run", "batch")
+	cmd := findCmd(t, ta.app, "workflows", "run", "batch")
 	cmd.SetArgs([]string{"file_a", "--using", "workflow_abc", "--secret", "API_KEY=xyz"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)

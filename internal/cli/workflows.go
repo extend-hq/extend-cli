@@ -22,7 +22,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 		noun:       "workflow",
 		pluralNoun: "workflows",
 		exampleID:  "workflow_abc",
-		runVerb:    "run",
+		runVerb:    "workflows run",
 		bodyDoc:    workflowBodyDoc,
 		rowFields: func(w *extend.WorkflowSummary) []string {
 			return []string{w.ID, w.Name, relTime(w.CreatedAt)}
@@ -87,4 +87,24 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 			return c.WorkflowVersions.Create(ctx, id, &req)
 		},
 	}
+}
+
+// newWorkflowsDoc assembles the full `extend workflows` group: the
+// generic resource accessor (list/get/create/update/versions) plus the
+// run launcher (`workflows run`, with `workflows run batch`) and the
+// typed workflow runs subgroup (`workflows runs get|list|watch|cancel|
+// delete|update`). Workflow batches have no retrieval endpoint, so
+// there is deliberately no `workflows batches` group; track a batch
+// with `workflows runs list --batch <id>`.
+func newWorkflowsDoc(app *App) *CommandDoc {
+	doc := workflowAccessor().doc(app)
+	doc.Summary = "Run, inspect, and manage workflows"
+	doc.WhenToUse = `Use these commands to run workflows on documents, follow their runs,
+and discover, inspect, create, update, and version workflows in the
+workspace.`
+	doc.Subcommands = append(doc.Subcommands,
+		newWorkflowsRunDoc(app),
+		workflowRunsSpec().doc(app),
+	)
+	return doc
 }

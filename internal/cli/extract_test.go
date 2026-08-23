@@ -142,7 +142,7 @@ func TestExtract_WaitTimeoutSurfacesActionableMessage(t *testing.T) {
 		t.Fatal("expected timeout error")
 	}
 	msg := err.Error()
-	for _, want := range []string{"exr_slow", "--timeout", "--wait=false", "extend runs watch exr_slow"} {
+	for _, want := range []string{"exr_slow", "--timeout", "--wait=false", "extend extract runs watch exr_slow"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("action wait timeout error missing %q: %s", want, msg)
 		}

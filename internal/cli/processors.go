@@ -439,7 +439,7 @@ processors: each deploy is a named snapshot rather than a major/minor bump.
 Pass --from-file with the API body (inline JSON, path, file:// URI, or - for
 stdin), or use --name to name the deployed version.
 
-Once deployed, refer to the version by its name in extend run --version.`
+Once deployed, refer to the version by its name in extend workflows run --version.`
 	}
 	return `Publish a new version of the draft.
 
@@ -468,7 +468,7 @@ func versionCreateGotchas(noun string) []string {
 	if noun == "workflow" {
 		return []string{
 			"Workflows use named deploys; do not pass --release-type.",
-			"Once deployed, the name is how 'extend run --version' refers to the deploy.",
+			"Once deployed, the name is how 'extend workflows run --version' refers to the deploy.",
 		}
 	}
 	return []string{

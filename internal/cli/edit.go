@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -118,7 +119,7 @@ the output must remain editable.
 			"Detection toggles (flattenPdf/nativeFieldsOnly/tableParsingEnabled/radioEnumsEnabled) go in --advanced-options JSON; omitted fields use the server default.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
 		},
-		SeeAlso:  []string{"edit schema generate", "runs watch", "runs get", "files download"},
+		SeeAlso:  []string{"edit schema generate", "edit runs watch", "edit runs get", "files download"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
@@ -146,7 +147,7 @@ the output must remain editable.
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
-		Subcommands: []*CommandDoc{newEditSchemaDoc(app), newEditTemplatesDoc(app)},
+		Subcommands: []*CommandDoc{newEditSchemaDoc(app), newEditTemplatesDoc(app), editRunsSpec().doc(app), newEditDetectionsDoc(app)},
 	}
 }
 
@@ -228,7 +229,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend edit runs watch")
 	}
 
 	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
@@ -338,7 +339,73 @@ func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.ErrOut, "%s edit run %s reported PROCESSED but produced no filled PDF (output.editedFile is missing).\n",
 		pal.Yellow("warning:"), run.ID)
-	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("  This usually means the server detected no fields to fill — double-check your --schema or --instructions. Inspect the full run with: extend runs get %s -o json", run.ID))
+	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("  This usually means the server detected no fields to fill — double-check your --schema or --instructions. Inspect the full run with: extend edit runs get %s -o json", run.ID))
+}
+
+// newEditDetectionsDoc returns the typed documentation for the
+// `extend edit detections` group: read access to asynchronous form
+// detection runs (sgr_...), created via POST /form_detection_runs
+// (e.g. by the dashboard or SDK callers). The synchronous scaffolding
+// path is 'extend edit schema generate'; this group exists to inspect
+// runs created through the async endpoint.
+func newEditDetectionsDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "detections",
+		Summary: "Inspect form detection runs",
+		WhenToUse: `Use this group to fetch an asynchronous form detection run (sgr_...) by
+ID. When the run is PROCESSED, output.schema contains an edit schema you
+can pass directly to 'extend edit --schema'.`,
+		Details: `Form detection runs are created via POST /form_detection_runs (async).
+For synchronous schema scaffolding from the CLI, use 'extend edit schema
+generate' instead.`,
+		Subcommands: []*CommandDoc{
+			newEditDetectionsGetDoc(app),
+		},
+	}
+}
+
+func newEditDetectionsGetDoc(app *App) *CommandDoc {
+	return &CommandDoc{
+		Use:     "get <detection-run-id>",
+		Summary: "Fetch a form detection run by ID",
+		Triggers: []string{
+			"get a form detection run by id",
+			"poll form detection run status",
+			"fetch a detected form schema by run id",
+			"inspect an sgr_ form detection run",
+		},
+		WhenToUse: `Use to retrieve the status and result of an asynchronous form detection
+run (sgr_...). Poll until status is PROCESSED or FAILED; when PROCESSED,
+output.schema is an edit schema usable with 'extend edit --schema'.`,
+		Details: `Returns the full form detection run object as JSON, including status,
+config, and (when PROCESSED) the generated schema under output.schema.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit detections get sgr_xK9mLPq"},
+			{Label: "Just the schema", Cmd: "extend edit detections get sgr_xK9mLPq --jq '.output.schema' -o json"},
+		},
+		Gotchas: []string{
+			"This command never waits; re-run it to poll until status is PROCESSED or FAILED.",
+			"For synchronous schema scaffolding, use 'extend edit schema generate' instead.",
+		},
+		SeeAlso: []string{"edit", "edit schema generate"},
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			if !strings.HasPrefix(id, "sgr_") {
+				return fmt.Errorf("%q is not a recognized form detection run ID (expected sgr_ prefix)", id)
+			}
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			run, err := cli.FormDetectionRuns.Retrieve(cmd.Context(), id, &extend.FormDetectionRunsRetrieveRequest{})
+			if err != nil {
+				return err
+			}
+			return renderWithDefault(app, run, output.FormatJSON)
+		},
+	}
 }
 
 // newEditSchemaDoc returns the typed documentation for the

@@ -98,8 +98,8 @@ and flag changes.
     extend parse contract.pdf > contract.md
 
     # run a workflow async; poll later
-    RUN=$(extend run doc.pdf --using workflow_abc -o id)
-    extend runs watch "$RUN"
+    RUN=$(extend workflows run doc.pdf --using workflow_abc -o id)
+    extend workflows runs watch "$RUN"
 
     # filter JSON with jq
     extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw
@@ -112,13 +112,18 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
 
 ## Commands
 
-    extract | classify | split | run  <input> --using <id>
+    extract | classify | split  <input> --using <id>
     parse <input>
     edit <input> --schema schema.json
+    workflows run <input> --using <id>
     <action> batch <inputs>... [--files-from list.txt]
 
-    runs    get | list | watch | cancel | delete | update
-    batches get | watch
+    extract|classify|split runs   get | list | watch | cancel | delete
+    parse runs                    get | list | watch | delete
+    workflows runs                get | list | watch | cancel | delete | update
+    edit runs                     get | watch | delete
+    edit detections               get
+    <action> batches              get | watch
     files   upload | list | get | delete | download
 
     extractors  | classifiers | splitters | workflows

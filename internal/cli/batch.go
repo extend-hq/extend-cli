@@ -229,8 +229,8 @@ every input identically); the server schema does not accept top-level
 metadata for processor batches. After submission, the command prints the
 batch ID and a hint for following progress.
 
-Track progress with ` + "`extend batches watch <id>`" + ` or list contained
-runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
+Track progress with ` + "`extend extract batches watch <id>`" + ` or list
+contained runs with ` + "`extend extract runs list --batch <id>`" + `.`,
 		Examples: []Example{
 			{Label: "From positional args", Cmd: "extend extract batch invoice1.pdf invoice2.pdf --using ex_abc"},
 			{Label: "From a list file", Cmd: "extend extract batch --files-from list.txt --using ex_abc"},
@@ -239,9 +239,9 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 		Gotchas: []string{
 			"Maximum 1,000 inputs per batch; submit multiple batches for larger sets.",
 			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
-			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+			"Batch submission returns immediately; use 'extend extract batches watch <id>' to follow progress.",
 		},
-		SeeAlso: []string{"extract", "batches watch", "batches get", "runs list"},
+		SeeAlso: []string{"extract", "extract batches watch", "extract batches get", "extract runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
@@ -278,7 +278,7 @@ runs with ` + "`extend runs list --type extract --batch <id>`" + `.`,
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
-			return renderBatchSubmitted(app, br)
+			return renderBatchSubmitted(app, br, "extract")
 		},
 		Configure: func(cmd *cobra.Command) {
 			f.attach(cmd, "using", true)
@@ -307,8 +307,8 @@ identically; the server schema does not accept top-level metadata for
 processor batches. After submission, the command prints the batch ID and a
 hint for following progress.
 
-Track progress with ` + "`extend batches watch <id>`" + ` or list contained
-runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
+Track progress with ` + "`extend classify batches watch <id>`" + ` or list
+contained runs with ` + "`extend classify runs list --batch <id>`" + `.`,
 		Examples: []Example{
 			{Label: "From positional args", Cmd: "extend classify batch invoice1.pdf invoice2.pdf --using cl_abc"},
 			{Label: "From a list file", Cmd: "extend classify batch --files-from list.txt --using cl_abc"},
@@ -317,9 +317,9 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 		Gotchas: []string{
 			"Maximum 1,000 inputs per batch.",
 			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
-			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+			"Batch submission returns immediately; use 'extend classify batches watch <id>' to follow progress.",
 		},
-		SeeAlso: []string{"classify", "batches watch", "batches get", "runs list"},
+		SeeAlso: []string{"classify", "classify batches watch", "classify batches get", "classify runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
@@ -356,7 +356,7 @@ runs with ` + "`extend runs list --type classify --batch <id>`" + `.`,
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
-			return renderBatchSubmitted(app, br)
+			return renderBatchSubmitted(app, br, "classify")
 		},
 		Configure: func(cmd *cobra.Command) {
 			f.attach(cmd, "using", true)
@@ -384,8 +384,8 @@ one-off requests.`,
 identically; the server schema does not accept top-level metadata for
 processor batches.
 
-Track progress with ` + "`extend batches watch <id>`" + ` or list contained
-runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
+Track progress with ` + "`extend split batches watch <id>`" + ` or list
+contained runs with ` + "`extend split runs list --batch <id>`" + `.`,
 		Examples: []Example{
 			{Label: "From positional args", Cmd: "extend split batch bundle1.pdf bundle2.pdf --using spl_abc"},
 			{Label: "From a list file", Cmd: "extend split batch --files-from list.txt --using spl_abc"},
@@ -393,9 +393,9 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 		Gotchas: []string{
 			"Maximum 1,000 inputs per batch.",
 			"--metadata and --tag apply to every input identically; per-item metadata is not supported.",
-			"Batch submission returns immediately; use 'extend batches watch <id>' to follow progress.",
+			"Batch submission returns immediately; use 'extend split batches watch <id>' to follow progress.",
 		},
-		SeeAlso: []string{"split", "batches watch", "batches get", "runs list"},
+		SeeAlso: []string{"split", "split batches watch", "split batches get", "split runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
@@ -432,7 +432,7 @@ runs with ` + "`extend runs list --type split --batch <id>`" + `.`,
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
-			return renderBatchSubmitted(app, br)
+			return renderBatchSubmitted(app, br, "split")
 		},
 		Configure: func(cmd *cobra.Command) {
 			f.attach(cmd, "using", true)
@@ -478,8 +478,8 @@ The same parse tuning as single 'parse' applies to every input:
 and --advanced-options (see 'extend parse --help' for the JSON field
 catalogs). --password applies to URL inputs only.
 
-Track progress with ` + "`extend batches watch <id>`" + ` or list contained
-runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
+Track progress with ` + "`extend parse batches watch <id>`" + ` or list
+contained runs with ` + "`extend parse runs list --batch <id>`" + `.`,
 		Examples: []Example{
 			{Label: "From positional args", Cmd: "extend parse batch file_a file_b"},
 			{Label: "Specific engine", Cmd: "extend parse batch --engine parse_performance --engine-version 1.0.1 file_a file_b"},
@@ -490,7 +490,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			"No processor reference is required; engine is selected via --engine/--engine-version.",
 			"Parse runs cannot be cancelled once submitted.",
 		},
-		SeeAlso: []string{"parse", "batches watch", "batches get", "runs list"},
+		SeeAlso: []string{"parse", "parse batches watch", "parse batches get", "parse runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Build (and validate) the config before uploading, so a bad
@@ -532,7 +532,7 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
 			}
-			return renderBatchSubmitted(app, br)
+			return renderBatchSubmitted(app, br, "parse")
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&filesFrom, "files-from", "", "Path to a file with one input per line (- for stdin)")
@@ -552,8 +552,9 @@ runs with ` + "`extend runs list --type parse --batch <id>`" + `.`,
 	}
 }
 
-// newWorkflowBatchDoc returns the typed documentation for `extend run
-// batch`. Composed under newRunDoc via CommandDoc.Subcommands.
+// newWorkflowBatchDoc returns the typed documentation for `extend
+// workflows run batch`. Composed under newWorkflowsRunDoc via
+// CommandDoc.Subcommands.
 func newWorkflowBatchDoc(app *App) *CommandDoc {
 	var (
 		f       batchFlags
@@ -569,23 +570,23 @@ func newWorkflowBatchDoc(app *App) *CommandDoc {
 			"trigger up to 1000 workflow runs at once",
 		},
 		WhenToUse: `Use when you have many inputs to feed through the same workflow and want
-to fan them out as a single batch. Prefer single-input 'run' for one-off
-runs.`,
+to fan them out as a single batch. Prefer single-input 'workflows run'
+for one-off runs.`,
 		Details: `Workflow batches return only a batch_id; unlike processor batches there
-is no GET /batch_runs/{id} endpoint for workflow batches and
-'extend batches watch' will not work on them. Track progress with:
+is no GET /batch_runs/{id} endpoint for workflow batches, so there are
+no 'workflows batches' commands. Track progress with:
 
-    extend runs list --type workflow --batch <batch-id>`,
+    extend workflows runs list --batch <batch-id>`,
 		Examples: []Example{
-			{Label: "From positional args", Cmd: "extend run batch doc1.pdf doc2.pdf --using workflow_abc"},
-			{Label: "From a list file", Cmd: "extend run batch --files-from inputs.txt --using workflow_abc"},
+			{Label: "From positional args", Cmd: "extend workflows run batch doc1.pdf doc2.pdf --using workflow_abc"},
+			{Label: "From a list file", Cmd: "extend workflows run batch --files-from inputs.txt --using workflow_abc"},
 		},
 		Gotchas: []string{
 			"Workflow batch does not accept --priority (server schema omits it).",
 			"Workflow batch does not accept top-level --metadata/--tag (only per-input metadata is allowed; the CLI rejects top-level use).",
-			"'extend batches watch' does not work on workflow batches; use 'extend runs list --type workflow --batch <id>' to follow progress.",
+			"Workflow batches have no get/watch endpoint; use 'extend workflows runs list --batch <id>' to follow progress.",
 		},
-		SeeAlso: []string{"run", "runs list"},
+		SeeAlso: []string{"workflows run", "workflows runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Workflow batch has two CLI-level rejections that must
@@ -659,75 +660,124 @@ func renderWorkflowBatchSubmitted(app *App, resp *extend.WorkflowRunsCreateBatch
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.Out, "%s %s (%d run%s submitted)\n",
 		pal.Cyan("⋯"), resp.BatchID, runCount, pluralize(runCount))
-	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Track:   extend runs list --type workflow --batch %s --all", resp.BatchID))
-	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Note:    workflow batches do not support 'extend batches watch'; use the list command above"))
+	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Track:   extend workflows runs list --batch %s --all", resp.BatchID))
+	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Note:    workflow batches have no get/watch endpoint; use the list command above"))
 	return nil
 }
 
-func renderBatchSubmitted(app *App, br *extend.BatchRun) error {
+// renderBatchSubmitted formats a processor or parse batch, pointing at
+// the typed follow-up commands under verb ("extract", "parse", ...).
+func renderBatchSubmitted(app *App, br *extend.BatchRun, verb string) error {
 	if app.Format != "" {
 		return renderWithDefault(app, br, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.Out, "%s %s (%s, %d run%s)\n",
 		statusIcon(pal, extendx.RunStatus(br.Status)), br.ID, br.Status, br.RunCount, pluralize(br.RunCount))
-	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Watch:   extend batches watch %s", br.ID))
-	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Results: extend runs list --type <type> --batch %s", br.ID))
+	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Watch:   extend %s batches watch %s", verb, br.ID))
+	fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Results: extend %s runs list --batch %s", verb, br.ID))
 	return nil
 }
 
-// newBatchesDoc returns the typed documentation for `extend batches` (the
-// inspect-and-follow group for batch runs) and its 2 leaves: get, watch.
-func newBatchesDoc(app *App) *CommandDoc {
+// batchesGroupSpec parameterizes the generated `extend <verb> batches`
+// subgroup. Only verbs whose batch endpoint supports GET
+// /batch_runs/{id} attach one: extract, classify, and split share the
+// processor batch kind (bpr_), parse has its own (bpar_). Workflow
+// batches have no retrieval endpoint, so `workflows` has no batches
+// group.
+type batchesGroupSpec struct {
+	verb      string
+	batchKind extendx.BatchKind
+	exampleID string
+}
+
+func extractBatchesSpec() batchesGroupSpec {
+	return batchesGroupSpec{verb: "extract", batchKind: extendx.BatchKindProcessor, exampleID: "bpr_xK9mLPq"}
+}
+
+func classifyBatchesSpec() batchesGroupSpec {
+	return batchesGroupSpec{verb: "classify", batchKind: extendx.BatchKindProcessor, exampleID: "bpr_kMXkR"}
+}
+
+func splitBatchesSpec() batchesGroupSpec {
+	return batchesGroupSpec{verb: "split", batchKind: extendx.BatchKindProcessor, exampleID: "bpr_s8Yqw"}
+}
+
+func parseBatchesSpec() batchesGroupSpec {
+	return batchesGroupSpec{verb: "parse", batchKind: extendx.BatchKindParse, exampleID: "bpar_pJDa8"}
+}
+
+func (s batchesGroupSpec) prefix() string {
+	if s.batchKind == extendx.BatchKindParse {
+		return "bpar_"
+	}
+	return "bpr_"
+}
+
+// sharedPrefixNote documents the bpr_ ambiguity for the processor
+// verbs: prefix validation alone cannot tell an extract batch from a
+// classify or split batch, so the server resolves the exact type.
+func (s batchesGroupSpec) sharedPrefixNote() string {
+	if s.batchKind != extendx.BatchKindProcessor {
+		return ""
+	}
+	return "The bpr_ prefix is shared by extract, classify, and split batches; the server resolves the exact type."
+}
+
+// doc returns the typed documentation tree for `extend <verb> batches`.
+func (s batchesGroupSpec) doc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "batches",
-		Summary: "Inspect and follow batch runs",
-		Group:   "Inspection",
-		WhenToUse: `Use these commands to inspect or watch a processor or parse batch run
-by its batch ID. Workflow batches do not have a get/watch endpoint; use
-'extend runs list --type workflow --batch <id>' for those.`,
-		Details: `Operations on batch runs identified by their bpr_/bpar_ ID. Workflow
-batches (returned by 'extend run batch') do NOT have a get endpoint;
-list their member runs with 'extend runs list --type workflow --batch
-<id>' instead.`,
+		Summary: fmt.Sprintf("Inspect and follow %s batch runs", s.verb),
+		WhenToUse: fmt.Sprintf(`Use these commands to inspect or watch a %s batch run (submitted with
+'extend %s batch') by its %s ID.`, s.verb, s.verb, s.prefix()),
+		Details: fmt.Sprintf(`Operations on %s batch runs identified by their %s ID.`, s.verb, s.prefix()),
 		Subcommands: []*CommandDoc{
-			newBatchesGetDoc(app),
-			newBatchesWatchDoc(app),
+			s.getDoc(app),
+			s.watchDoc(app),
 		},
 	}
 }
 
-func newBatchesGetDoc(app *App) *CommandDoc {
+func (s batchesGroupSpec) getDoc(app *App) *CommandDoc {
+	gotchas := []string{
+		fmt.Sprintf("This command never waits; use 'extend %s batches watch' for live polling.", s.verb),
+	}
+	if n := s.sharedPrefixNote(); n != "" {
+		gotchas = append(gotchas, n)
+	}
 	return &CommandDoc{
 		Use:     "get <batch-id>",
-		Summary: "Show one batch run by ID",
+		Summary: fmt.Sprintf("Show one %s batch run by ID", s.verb),
 		Triggers: []string{
-			"show one batch run",
-			"inspect a processor or parse batch",
-			"check batch status by id",
+			fmt.Sprintf("show one %s batch run", s.verb),
+			fmt.Sprintf("inspect a %s batch by id", s.verb),
+			fmt.Sprintf("check %s batch status", s.verb),
 		},
-		WhenToUse: `Use to retrieve the current status, member-run count, and timestamps
-for a single batch run. Does not poll; for live progress use
-'extend batches watch'.`,
-		Details: `Show one processor or parse batch run, including its overall status,
-member-run count, and timestamps. Workflow batches do NOT have a get
-endpoint; for those, use 'extend runs list --type workflow --batch <id>'.`,
+		WhenToUse: fmt.Sprintf(`Use to retrieve the current status, member-run count, and timestamps
+for a single %s batch run. Does not poll; for live progress use
+'extend %s batches watch'.`, s.verb, s.verb),
+		Details: fmt.Sprintf(`Show one %s batch run, including its overall status, member-run count,
+and timestamps. To list the individual runs inside the batch, use
+'extend %s runs list --batch <id>'.`, s.verb, s.verb),
 		Examples: []Example{
-			{Label: "Processor batch", Cmd: "extend batches get bpr_abc123"},
-			{Label: "Parse batch", Cmd: "extend batches get bpar_xyz"},
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s batches get %s", s.verb, s.exampleID)},
+			{Label: "Just the status", Cmd: fmt.Sprintf("extend %s batches get %s --jq '.status' -o raw", s.verb, s.exampleID)},
 		},
-		Gotchas: []string{
-			"Workflow batches do not have a get endpoint; use 'extend runs list --type workflow --batch <id>' instead.",
-		},
-		SeeAlso: []string{"batches watch", "runs list"},
+		Gotchas: gotchas,
+		SeeAlso: []string{s.verb + " batches watch", s.verb + " runs list"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			if err := extendx.ValidateBatchID(s.batchKind, id, "get"); err != nil {
+				return err
+			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			br, err := getBatchRun(cmd.Context(), cli, args[0])
+			br, err := cli.BatchRuns.Get(cmd.Context(), id)
 			if err != nil {
 				return err
 			}
@@ -736,75 +786,65 @@ endpoint; for those, use 'extend runs list --type workflow --batch <id>'.`,
 	}
 }
 
-// getBatchRun is the CLI-side wrapper around BatchRuns.Get that
-// surfaces the friendly "workflow batches have no get endpoint" error
-// instead of letting a 404 leak through. The SDK has no equivalent
-// because the API endpoint really does exist for processor and parse
-// batches; the workflow-batch carve-out lives at the schema level on
-// the server side, not the SDK's.
-func getBatchRun(ctx context.Context, cli *sdkclient.Client, id string) (*extend.BatchRun, error) {
-	if kind, ok := extendx.BatchKindFromID(id); ok && kind == extendx.BatchKindWorkflow {
-		return nil, extendx.ErrWorkflowBatchNotRetrievable
-	}
-	return cli.BatchRuns.Get(ctx, id)
-}
-
-func newBatchesWatchDoc(app *App) *CommandDoc {
+func (s batchesGroupSpec) watchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
 		exitStatus bool
 	)
+	gotchas := []string{
+		"Without --exit-status, the command exits 0 on terminal regardless of FAILED/CANCELLED.",
+	}
+	if n := s.sharedPrefixNote(); n != "" {
+		gotchas = append(gotchas, n)
+	}
 	return &CommandDoc{
 		Use:     "watch <batch-id>",
-		Summary: "Poll a batch run until it reaches a terminal state",
+		Summary: fmt.Sprintf("Poll %s %s batch until it reaches a terminal state", articleFor(s.verb), s.verb),
 		Triggers: []string{
-			"watch a batch run until it finishes",
-			"poll a processor or parse batch",
-			"block until extract batch completes",
-			"follow batch progress live",
+			fmt.Sprintf("watch %s %s batch until it finishes", articleFor(s.verb), s.verb),
+			fmt.Sprintf("poll %s %s batch run", articleFor(s.verb), s.verb),
+			fmt.Sprintf("block until %s %s batch completes", articleFor(s.verb), s.verb),
 		},
-		WhenToUse: `Use to block until a processor or parse batch reaches a terminal
-state. Combine with --exit-status to gate downstream scripts on success.`,
-		Details: `Poll a processor or parse batch and print the final status when it
-reaches a terminal state. Workflow batches do not have a get endpoint and
-cannot be watched here; use 'extend runs list --type workflow --batch <id>'
-to monitor them instead.
+		WhenToUse: fmt.Sprintf(`Use to block until %s %s batch reaches a terminal state. Combine with
+--exit-status to gate downstream scripts on success.`, articleFor(s.verb), s.verb),
+		Details: fmt.Sprintf(`Poll %s %s batch and print the final status when it reaches a terminal
+state.
 
 Pass --exit-status to make the command exit non-zero when the batch
 finishes in FAILED or CANCELLED status, suitable for shell composition:
 
-    extend batches watch bpr_abc --exit-status && downstream-script.sh
+    extend %s batches watch %s --exit-status && downstream-script.sh
 
-Polls every 2s, backing off to 30s.`,
+Polls every 2s, backing off to 30s.`, articleFor(s.verb), s.verb, s.verb, s.exampleID),
 		Examples: []Example{
-			{Label: "Basic", Cmd: "extend batches watch bpr_abc123"},
-			{Label: "Custom timeout", Cmd: "extend batches watch bpr_abc123 --timeout 2h"},
-			{Label: "Gate downstream script", Cmd: "extend batches watch bpr_abc123 --exit-status"},
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s batches watch %s", s.verb, s.exampleID)},
+			{Label: "Custom timeout", Cmd: fmt.Sprintf("extend %s batches watch %s --timeout 2h", s.verb, s.exampleID)},
+			{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s batches watch %s --exit-status", s.verb, s.exampleID)},
 		},
-		Gotchas: []string{
-			"Workflow batches cannot be watched here; use 'extend runs list --type workflow --batch <id>'.",
-			"Without --exit-status, the command exits 0 on terminal regardless of FAILED/CANCELLED.",
-		},
-		SeeAlso:  []string{"batches get", "runs list", "runs watch"},
+		Gotchas:  gotchas,
+		SeeAlso:  []string{s.verb + " batches get", s.verb + " runs list", s.verb + " runs watch"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			if err := extendx.ValidateBatchID(s.batchKind, id, "watch"); err != nil {
+				return err
+			}
 			cli, err := app.NewClient()
 			if err != nil {
 				return err
 			}
-			id := args[0]
 			sp := app.IO.StartSpinner(fmt.Sprintf("Batch %s: ?", id))
 			final, err := waitForBatchRun(cmd.Context(), cli, id, extendx.WaitProfileOptions(extendx.ProfileLong, timeout), func(r *extend.BatchRun) {
 				sp.Update(fmt.Sprintf("Batch %s: %s (%d run%s)", r.ID, r.Status, r.RunCount, pluralize(r.RunCount)))
 			})
 			sp.Stop("")
 			if err != nil {
-				return formatWatchWaitError(err, id)
+				return formatWatchWaitError(err, id, fmt.Sprintf("extend %s batches watch", s.verb))
 			}
-			if err := renderBatchSubmitted(app, final); err != nil {
+			if err := renderBatchSubmitted(app, final, s.verb); err != nil {
 				return err
 			}
 			if exitStatus {
@@ -827,7 +867,7 @@ Polls every 2s, backing off to 30s.`,
 func waitForBatchRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.BatchRun)) (*extend.BatchRun, error) {
 	return extendx.PollForRun(ctx,
 		func(ctx context.Context) (*extend.BatchRun, error) {
-			return getBatchRun(ctx, c, id)
+			return c.BatchRuns.Get(ctx, id)
 		},
 		func(r *extend.BatchRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
 		opts, onPoll,

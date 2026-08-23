@@ -91,6 +91,20 @@ func main() {
 	case len(args) == 0, isHelpOnly(args):
 		emitHelp(args)
 		return
+	case match(args, "workflows", "run", "batch"):
+		emitWorkflowRunBatch(args, mode)
+	case match(args, "workflows", "run"):
+		emitWorkflowRun(args, mode)
+	case matchTypedRuns(args, "list"):
+		emitRunsList(args, mode)
+	case matchTypedRuns(args, "watch"):
+		emitRunsWatch(args, mode)
+	case matchTypedRuns(args, "get"):
+		emitRunsGet(args, mode)
+	case matchTypedRuns(args, "cancel"):
+		emitRunsCancel(args, mode)
+	case matchTypedBatches(args, "get"), matchTypedBatches(args, "watch"):
+		emitBatchesStatus(args, mode)
 	case match(args, "extract", "batch"):
 		emitExtractBatch(args, mode)
 	case match(args, "extract"):
@@ -107,16 +121,6 @@ func main() {
 		emitEditSchemaGenerate(args, mode)
 	case match(args, "edit"):
 		emitEdit(args, mode)
-	case match(args, "run"):
-		emitWorkflowRun(args, mode)
-	case match(args, "runs", "list"):
-		emitRunsList(args, mode)
-	case match(args, "runs", "watch"):
-		emitRunsWatch(args, mode)
-	case match(args, "runs", "get"):
-		emitRunsGet(args, mode)
-	case match(args, "runs", "cancel"):
-		emitRunsCancel(args, mode)
 	case match(args, "extractors", "list"):
 		emitExtractorsList(args, mode)
 	case match(args, "extractors", "get"):
@@ -178,6 +182,39 @@ func match(args []string, verbs ...string) bool {
 		}
 	}
 	return true
+}
+
+// runVerbGroups are the command groups that own a typed `runs`
+// subgroup; extract/parse/classify/split also own `batches`.
+var runVerbGroups = []string{"extract", "parse", "classify", "split", "edit", "workflows"}
+
+// matchTypedRuns reports whether argv is `<verb> runs <action> ...` for
+// one of the typed run groups.
+func matchTypedRuns(args []string, action string) bool {
+	pos := positional(args)
+	if len(pos) < 3 || pos[1] != "runs" || pos[2] != action {
+		return false
+	}
+	for _, v := range runVerbGroups {
+		if pos[0] == v {
+			return true
+		}
+	}
+	return false
+}
+
+// matchTypedBatches reports whether argv is `<verb> batches <action> ...`.
+func matchTypedBatches(args []string, action string) bool {
+	pos := positional(args)
+	if len(pos) < 3 || pos[1] != "batches" || pos[2] != action {
+		return false
+	}
+	for _, v := range []string{"extract", "parse", "classify", "split"} {
+		if pos[0] == v {
+			return true
+		}
+	}
+	return false
 }
 
 func positional(args []string) []string {

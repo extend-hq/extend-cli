@@ -361,7 +361,7 @@ func TestEdit_ProcessedButNoOutputFileEmitsWarning(t *testing.T) {
 		t.Fatalf("runEdit: %v", err)
 	}
 	warn := ta.errOut.String()
-	for _, want := range []string{"warning", "edr_empty", "no filled PDF", "extend runs get edr_empty"} {
+	for _, want := range []string{"warning", "edr_empty", "no filled PDF", "extend edit runs get edr_empty"} {
 		if !strings.Contains(warn, want) {
 			t.Errorf("stderr warning missing %q:\n%s", want, warn)
 		}

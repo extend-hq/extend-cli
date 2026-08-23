@@ -2,6 +2,7 @@ package extendx
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -36,38 +37,44 @@ func TestBatchKindFromID(t *testing.T) {
 	}
 }
 
-func TestCanCancel(t *testing.T) {
-	// Cancellable kinds: extract, classify, split, workflow.
-	cancellable := []string{"exr_x", "clr_x", "splr_x", "workflow_run_x"}
-	for _, id := range cancellable {
-		if err := CanCancel(id); err != nil {
-			t.Errorf("CanCancel(%q) = %v; want nil", id, err)
+func TestValidateBatchID(t *testing.T) {
+	// Matching kinds pass.
+	if err := ValidateBatchID(BatchKindProcessor, "bpr_x", "get"); err != nil {
+		t.Errorf("ValidateBatchID(processor, bpr_x) = %v; want nil", err)
+	}
+	if err := ValidateBatchID(BatchKindParse, "bpar_x", "watch"); err != nil {
+		t.Errorf("ValidateBatchID(parse, bpar_x) = %v; want nil", err)
+	}
+	// Workflow batch IDs always fail with the sentinel, regardless of
+	// the expected kind.
+	for _, expected := range []BatchKind{BatchKindProcessor, BatchKindParse} {
+		if err := ValidateBatchID(expected, "batch_x", "get"); !errors.Is(err, ErrWorkflowBatchNotRetrievable) {
+			t.Errorf("ValidateBatchID(%s, batch_x) = %v; want ErrWorkflowBatchNotRetrievable", expected, err)
 		}
 	}
-	// Non-cancellable: parse, edit. Each returns a specific error.
-	if err := CanCancel("pr_x"); err == nil {
-		t.Error("CanCancel(parse) = nil; want non-nil")
+	// Cross-kind mismatches redirect to the other command family.
+	if err := ValidateBatchID(BatchKindParse, "bpr_x", "get"); err == nil {
+		t.Error("ValidateBatchID(parse, bpr_x) = nil; want mismatch error")
 	}
-	if err := CanCancel("edr_x"); err == nil {
-		t.Error("CanCancel(edit) = nil; want non-nil")
-	}
-	// Unknown prefix.
-	err := CanCancel("file_x")
+	err := ValidateBatchID(BatchKindProcessor, "bpar_x", "watch")
 	if err == nil {
-		t.Error("CanCancel(unknown) = nil; want non-nil")
+		t.Fatal("ValidateBatchID(processor, bpar_x) = nil; want mismatch error")
 	}
-	// Empty.
-	if err := CanCancel(""); err == nil {
-		t.Error("CanCancel(\"\") = nil; want non-nil")
+	if want := "extend parse batches watch bpar_x"; !strings.Contains(err.Error(), want) {
+		t.Errorf("mismatch error %q does not mention %q", err, want)
+	}
+	// Unknown prefixes fail.
+	if err := ValidateBatchID(BatchKindProcessor, "exr_x", "get"); err == nil {
+		t.Error("ValidateBatchID(processor, exr_x) = nil; want non-nil")
+	}
+	if err := ValidateBatchID(BatchKindProcessor, "", "get"); err == nil {
+		t.Error("ValidateBatchID(processor, \"\") = nil; want non-nil")
 	}
 }
 
 func TestErrSentinels(t *testing.T) {
-	// Lock the sentinel identities — callers compare with errors.Is.
+	// Lock the sentinel identity — callers compare with errors.Is.
 	if !errors.Is(ErrWorkflowBatchNotRetrievable, ErrWorkflowBatchNotRetrievable) {
 		t.Error("ErrWorkflowBatchNotRetrievable must be identity-comparable")
-	}
-	if !errors.Is(ErrNotCancellable, ErrNotCancellable) {
-		t.Error("ErrNotCancellable must be identity-comparable")
 	}
 }

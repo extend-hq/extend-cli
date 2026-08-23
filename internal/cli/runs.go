@@ -18,40 +18,378 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-// newRunsDoc returns the typed documentation for `extend runs` (the
-// inspect-and-follow group across all processor types) and its 6 leaves.
-func newRunsDoc(app *App) *CommandDoc {
-	return &CommandDoc{
-		Use:     "runs",
-		Summary: "Inspect and follow runs across all processor types",
-		Group:   "Inspection",
-		WhenToUse: `Use these commands to inspect, watch, list, update, cancel, or delete
-runs by their opaque ID. The run type (extract/parse/classify/split/
-workflow/edit) is auto-detected from the ID prefix, so a single
-'extend runs get' or 'extend runs watch' works across all kinds.`,
-		Details: `Operations on runs identified by their opaque ID. The run type is
-auto-detected from the ID prefix (exr_, pr_, clr_, splr_,
-workflow_run_, edr_).`,
-		Subcommands: []*CommandDoc{
-			newRunsGetDoc(app),
-			newRunsWatchDoc(app),
-			newRunsListDoc(app),
-			newRunsCancelDoc(app),
-			newRunsDeleteDoc(app),
-			newRunsUpdateDoc(app),
+// runsGroupSpec parameterizes the generated `extend <verb> runs`
+// subgroup for one run kind. Every action verb (extract, parse,
+// classify, split, edit, workflows) attaches one of these; the
+// capability flags control which leaves exist so each typed command
+// carries exactly the operations and flags its kind supports. There
+// is no cross-kind dispatch: the kind is fixed by the command path,
+// and IDs are validated against it (extendx.ValidateRunID) so a
+// pasted ID of the wrong type redirects to the right command.
+type runsGroupSpec struct {
+	kind      extendx.RunKind
+	exampleID string
+	// cancellable: extract/classify/split/workflow. Parse and edit
+	// runs have no cancel endpoint.
+	cancellable bool
+	// listable: everything except edit (the API has no LIST /edit_runs).
+	listable bool
+	// updatable: workflow runs only (rename + metadata patch).
+	updatable bool
+	// responseType: parse runs only (--response-type json|url on get).
+	responseType bool
+	// usingFlag names the processor-ID filter for list ("" = no
+	// --using flag; parse runs have no processor reference).
+	usingFlag string
+	// usingExample is a processor ID for list examples (ex_abc, ...).
+	usingExample string
+	// sourceFilters: --source/--source-id on list. Workflow runs have
+	// no source filters at the server.
+	sourceFilters bool
+	// sortable: --sort-by/--sort on list. Parse runs ignore both.
+	sortable bool
+	// watchFailures are the terminal statuses that gate non-zero exit
+	// for `runs watch --exit-status` (and the lifecycle annotation).
+	watchFailures []extendx.RunStatus
+	// watchGotchas are appended to the generated watch gotchas to
+	// document type-specific semantics (review pauses, non-cancellability).
+	watchGotchas []string
+}
+
+func extractRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindExtract,
+		exampleID:     "exr_xK9mLPq",
+		cancellable:   true,
+		listable:      true,
+		usingFlag:     "extractor",
+		usingExample:  "ex_abc",
+		sourceFilters: true,
+		sortable:      true,
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
+	}
+}
+
+func parseRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindParse,
+		exampleID:     "pr_pJDa8iX",
+		listable:      true,
+		responseType:  true,
+		sourceFilters: true,
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
+		watchGotchas: []string{
+			"Parse runs cannot be cancelled; a watched parse run only ends in PROCESSED or FAILED.",
 		},
 	}
 }
 
-func newRunsUpdateDoc(app *App) *CommandDoc {
+func classifyRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindClassify,
+		exampleID:     "clr_kMXkR",
+		cancellable:   true,
+		listable:      true,
+		usingFlag:     "classifier",
+		usingExample:  "cl_abc",
+		sourceFilters: true,
+		sortable:      true,
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
+	}
+}
+
+func splitRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindSplit,
+		exampleID:     "splr_s8Yqw",
+		cancellable:   true,
+		listable:      true,
+		usingFlag:     "splitter",
+		usingExample:  "spl_abc",
+		sourceFilters: true,
+		sortable:      true,
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
+	}
+}
+
+func editRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindEdit,
+		exampleID:     "edr_aB3xY",
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
+		watchGotchas: []string{
+			"Edit runs cannot be cancelled; a watched edit run only ends in PROCESSED or FAILED.",
+		},
+	}
+}
+
+func workflowRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindWorkflow,
+		exampleID:     "workflow_run_abc",
+		cancellable:   true,
+		listable:      true,
+		updatable:     true,
+		usingFlag:     "workflow",
+		usingExample:  "workflow_abc",
+		sortable:      true,
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled, extendx.StatusRejected},
+		watchGotchas: []string{
+			"NEEDS_REVIEW is terminal for watch: the run pauses for human review at the dashboard and the command returns.",
+		},
+	}
+}
+
+// name returns the kind as prose ("extract", "workflow", ...).
+func (s runsGroupSpec) name() string { return string(s.kind) }
+
+// verb returns the owning command group ("extract", ..., "workflows").
+func (s runsGroupSpec) verb() string { return s.kind.Verb() }
+
+// path renders a command path under this spec's group, e.g.
+// path("runs get") = "extract runs get".
+func (s runsGroupSpec) path(rest string) string { return s.verb() + " " + rest }
+
+// doc returns the typed documentation tree for `extend <verb> runs`.
+func (s runsGroupSpec) doc(app *App) *CommandDoc {
+	subs := []*CommandDoc{s.getDoc(app)}
+	if s.listable {
+		subs = append(subs, s.listDoc(app))
+	}
+	subs = append(subs, s.watchDoc(app))
+	if s.cancellable {
+		subs = append(subs, s.cancelDoc(app))
+	}
+	subs = append(subs, s.deleteDoc(app))
+	if s.updatable {
+		subs = append(subs, s.updateDoc(app))
+	}
+	return &CommandDoc{
+		Use:     "runs",
+		Summary: fmt.Sprintf("Inspect and follow %s runs", s.name()),
+		WhenToUse: fmt.Sprintf(`Use these commands to operate on %s runs (%s...) by ID: fetch current
+state, poll to a terminal state, %sor delete the record.`,
+			s.name(), extendx.RunIDPrefix(s.kind), s.optionalVerbsProse()),
+		Details: fmt.Sprintf(`Operations on %s runs identified by their %s ID. Each run type has its
+own runs group; an ID with a different prefix is rejected with a
+pointer to the owning command.`, s.name(), extendx.RunIDPrefix(s.kind)),
+		Subcommands: subs,
+	}
+}
+
+// optionalVerbsProse lists the capability-dependent operations for the
+// group WhenToUse sentence.
+func (s runsGroupSpec) optionalVerbsProse() string {
+	var parts []string
+	if s.listable {
+		parts = append(parts, "list with filters")
+	}
+	if s.cancellable {
+		parts = append(parts, "cancel in-flight runs")
+	}
+	if s.updatable {
+		parts = append(parts, "update name/metadata")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ", ") + ", "
+}
+
+func (s runsGroupSpec) getDoc(app *App) *CommandDoc {
+	var responseType string
+	details := fmt.Sprintf(`Fetches the %s run and renders it in the same per-type format as the
+originating command.`, s.name())
+	examples := []Example{
+		{Label: "Basic", Cmd: fmt.Sprintf("extend %s %s", s.path("runs get"), s.exampleID)},
+		{Label: "As JSON", Cmd: fmt.Sprintf("extend %s %s -o json", s.path("runs get"), s.exampleID)},
+	}
+	gotchas := []string{
+		fmt.Sprintf("This command never waits; use 'extend %s' for live polling.", s.path("runs watch")),
+	}
+	if s.responseType {
+		details += `
+
+--response-type url returns a presigned URL to the parsed output
+instead of the inline payload (useful for large documents).`
+		examples = append(examples, Example{Label: "URL response", Cmd: fmt.Sprintf("extend %s %s --response-type url -o json", s.path("runs get"), s.exampleID)})
+	}
+	return &CommandDoc{
+		Use:     "get <run-id>",
+		Summary: fmt.Sprintf("Fetch a single %s run by ID", s.name()),
+		Triggers: []string{
+			fmt.Sprintf("fetch %s %s run by id", articleFor(s.name()), s.name()),
+			fmt.Sprintf("get the current status of %s %s run", articleFor(s.name()), s.name()),
+			fmt.Sprintf("check whether %s %s run completed", articleFor(s.name()), s.name()),
+		},
+		WhenToUse: fmt.Sprintf(`Use to retrieve the current state of %s %s run by its ID. Unlike the
+action command, this never waits or polls; it returns whatever state the
+run is currently in. To wait for a terminal state, use 'extend %s'.`,
+			articleFor(s.name()), s.name(), s.path("runs watch")),
+		Details:  details,
+		Examples: examples,
+		Gotchas:  gotchas,
+		SeeAlso:  s.seeAlso("get"),
+		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:     cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTypedRunsGet(cmd.Context(), app, s.kind, args[0], responseType)
+		},
+		Configure: func(cmd *cobra.Command) {
+			if s.responseType {
+				cmd.Flags().StringVar(&responseType, "response-type", "", "Output payload shape: json|url (url returns a presigned link to the parsed output)")
+			}
+		},
+	}
+}
+
+func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
+	var (
+		timeout    time.Duration
+		exitStatus bool
+	)
+	gotchas := append([]string{
+		"Without --exit-status, the command exits 0 on any successful poll regardless of run status.",
+	}, s.watchGotchas...)
+	return &CommandDoc{
+		Use:     "watch <run-id>",
+		Summary: fmt.Sprintf("Poll %s %s run until it reaches a terminal state", articleFor(s.name()), s.name()),
+		Triggers: []string{
+			fmt.Sprintf("watch %s %s run until it finishes", articleFor(s.name()), s.name()),
+			fmt.Sprintf("poll %s %s run for terminal state", articleFor(s.name()), s.name()),
+			fmt.Sprintf("follow %s run progress live", s.name()),
+		},
+		WhenToUse: fmt.Sprintf(`Use to block until %s %s run reaches a terminal state. Combine with
+--exit-status to gate downstream scripts on success.`, articleFor(s.name()), s.name()),
+		Details: fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
+status transitions. The final result is rendered using the same format
+as the originating command.
+
+Use --exit-status for shell composition: the command exits non-zero if
+the run terminates in %s, so:
+
+    extend %s <id> --exit-status && downstream-script.sh
+
+works as expected.`, statusListProse(s.watchFailures), s.path("runs watch")),
+		Examples: []Example{
+			{Label: "Basic", Cmd: fmt.Sprintf("extend %s %s", s.path("runs watch"), s.exampleID)},
+			{Label: "Custom timeout", Cmd: fmt.Sprintf("extend %s %s --timeout 5m", s.path("runs watch"), s.exampleID)},
+			{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --exit-status && deploy.sh", s.path("runs watch"), s.exampleID)},
+		},
+		Gotchas:  gotchas,
+		SeeAlso:  s.seeAlso("watch"),
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: s.watchFailures,
+		Args:     cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTypedRunsWatch(cmd.Context(), app, s, args[0], timeout, exitStatus)
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
+			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero when the run terminates in "+statusListProse(s.watchFailures))
+		},
+	}
+}
+
+func (s runsGroupSpec) cancelDoc(app *App) *CommandDoc {
+	var yes bool
+	return &CommandDoc{
+		Use:     "cancel <run-id>",
+		Summary: fmt.Sprintf("Cancel %s %s run by ID", articleFor(s.name()), s.name()),
+		Triggers: []string{
+			fmt.Sprintf("cancel an in-flight %s run", s.name()),
+			fmt.Sprintf("stop a running %s run", s.name()),
+			fmt.Sprintf("abort a non-terminal %s run", s.name()),
+		},
+		WhenToUse: fmt.Sprintf(`Use to attempt to cancel a non-terminal %s run.`, s.name()),
+		Details: fmt.Sprintf(`Cancellation is best-effort: an in-flight run may still complete before
+the cancellation takes effect. The terminal status will be CANCELLED if
+cancellation succeeded, or the original outcome (PROCESSED/FAILED/etc.)
+if the run finished first.
+
+Cancel stops a running operation; it does not remove the historical
+record. Use 'extend %s' for that.`, s.path("runs delete")),
+		Examples: []Example{
+			{Label: "With prompt", Cmd: fmt.Sprintf("extend %s %s", s.path("runs cancel"), s.exampleID)},
+			{Label: "Skip confirmation", Cmd: fmt.Sprintf("extend %s %s --yes", s.path("runs cancel"), s.exampleID)},
+		},
+		Gotchas: []string{
+			"Cancellation is best-effort; an in-flight run may complete first.",
+			fmt.Sprintf("Cancel does not delete the run record; use 'extend %s' to remove the history.", s.path("runs delete")),
+		},
+		SeeAlso: s.seeAlso("cancel"),
+		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTypedRunsCancel(cmd.Context(), app, s.kind, args[0], yes)
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+		},
+	}
+}
+
+func (s runsGroupSpec) deleteDoc(app *App) *CommandDoc {
+	var yes bool
+	stopHint := ""
+	if s.cancellable {
+		stopHint = fmt.Sprintf(" To stop a still-running operation, use 'extend %s' instead.", s.path("runs cancel"))
+	}
+	return &CommandDoc{
+		Use:     "delete <run-id>",
+		Summary: fmt.Sprintf("Delete %s %s run record", articleFor(s.name()), s.name()),
+		Triggers: []string{
+			fmt.Sprintf("delete %s %s run record", articleFor(s.name()), s.name()),
+			fmt.Sprintf("remove %s %s run from workspace history", articleFor(s.name()), s.name()),
+			fmt.Sprintf("clean up old %s runs", s.name()),
+		},
+		WhenToUse: fmt.Sprintf(`Use to permanently remove %s %s run's historical record once it has
+reached a terminal state.%s`, articleFor(s.name()), s.name(), stopHint),
+		Details: `Deletion is permanent and the record cannot be recovered. Use this to
+clean up runs from the workspace inventory; it does not affect billing.`,
+		Examples: []Example{
+			{Label: "With prompt", Cmd: fmt.Sprintf("extend %s %s", s.path("runs delete"), s.exampleID)},
+			{Label: "Skip confirmation", Cmd: fmt.Sprintf("extend %s %s --yes", s.path("runs delete"), s.exampleID)},
+		},
+		Gotchas: []string{
+			"Deletion is permanent; the record cannot be recovered.",
+			"Deletion does not affect billing or already-emitted webhook events.",
+		},
+		SeeAlso: s.seeAlso("delete"),
+		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			if err := extendx.ValidateRunID(s.kind, id, "delete"); err != nil {
+				return err
+			}
+			return deleteWithConfirm(cmd.Context(), app, "run", id, yes,
+				func(ctx context.Context, id string) error {
+					c, err := app.NewClient()
+					if err != nil {
+						return err
+					}
+					return deleteRun(ctx, c, s.kind, id)
+				})
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+		},
+	}
+}
+
+// updateDoc is workflow-only: workflow runs are the single kind with a
+// PATCH endpoint (rename + metadata).
+func (s runsGroupSpec) updateDoc(app *App) *CommandDoc {
 	var (
 		fromFile string
 		name     string
 		meta     metaFlags
 	)
 	return &CommandDoc{
-		Use:     "update <workflow-run-id>",
-		Summary: "Update workflow run name and metadata (workflow runs only)",
+		Use:     "update <run-id>",
+		Summary: "Update workflow run name and metadata",
 		Triggers: []string{
 			"update metadata on a workflow run",
 			"rename a workflow run",
@@ -59,33 +397,27 @@ func newRunsUpdateDoc(app *App) *CommandDoc {
 			"patch a workflow run's metadata",
 		},
 		WhenToUse: `Use to rename a workflow run or attach/modify its metadata, in-flight or
-completed. Only workflow runs (workflow_run_...) support this; other run
-types do not.`,
+completed. Workflow runs are the only run type with an update endpoint.`,
 		Details: `Provide a JSON body with --from-file (inline JSON, path, file:// URI, or
 - for stdin; overrides everything), or set fields individually with
 --name (rename the run), --metadata, and --tag.`,
 		Examples: []Example{
-			{Label: "Rename", Cmd: `extend runs update workflow_run_abc --name "Q3 reprocess"`},
-			{Label: "Add metadata + tag", Cmd: "extend runs update workflow_run_abc --metadata customer=acme --tag prod"},
-			{Label: "From patch file", Cmd: "extend runs update workflow_run_abc --from-file patch.json"},
-			{Label: "Inline patch", Cmd: `extend runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`},
+			{Label: "Rename", Cmd: `extend workflows runs update workflow_run_abc --name "Q3 reprocess"`},
+			{Label: "Add metadata + tag", Cmd: "extend workflows runs update workflow_run_abc --metadata customer=acme --tag prod"},
+			{Label: "From patch file", Cmd: "extend workflows runs update workflow_run_abc --from-file patch.json"},
+			{Label: "Inline patch", Cmd: `extend workflows runs update workflow_run_abc --from-file '{"metadata":{"customer":"acme"}}'`},
 		},
 		Gotchas: []string{
-			"Only workflow runs support updates; the command rejects other run types.",
 			"--from-file overrides --name/--metadata/--tag if both are passed.",
 			"Pass at least one of --from-file, --name, --metadata, or --tag; otherwise the command rejects with 'nothing to update'.",
 		},
-		SeeAlso: []string{"runs get", "runs list"},
+		SeeAlso: s.seeAlso("update"),
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			kind, ok := extendx.RunKindFromID(id)
-			if !ok {
-				return fmt.Errorf("cannot determine run type from id %q", id)
-			}
-			if kind != extendx.KindWorkflow {
-				return fmt.Errorf("only workflow runs (workflow_run_...) support metadata updates; got %s run", kind)
+			if err := extendx.ValidateRunID(extendx.KindWorkflow, id, "update"); err != nil {
+				return err
 			}
 			cli, err := app.NewClient()
 			if err != nil {
@@ -129,112 +461,55 @@ types do not.`,
 	}
 }
 
-func newRunsGetDoc(app *App) *CommandDoc {
-	var responseType string
-	return &CommandDoc{
-		Use:     "get <run-id>",
-		Summary: "Fetch a single run by ID",
-		Triggers: []string{
-			"fetch a run by id",
-			"get the current status of a run",
-			"inspect an extract or workflow run",
-			"check whether a run completed",
-		},
-		WhenToUse: `Use to retrieve the current state of a run by its ID. Unlike action
-commands, this never waits or polls; it returns whatever state the run
-is currently in. To wait for a terminal state, use 'extend runs watch'.`,
-		Details: `The run type is auto-detected from the ID prefix (exr_ extract, pr_
-parse, clr_ classify, splr_ split, workflow_run_, edr_ edit), so a
-single 'extend runs get' call works across all kinds.
-
-For parse runs, --response-type url returns a presigned URL to the
-parsed output instead of the inline payload (useful for large documents).`,
-		Examples: []Example{
-			{Label: "Extract run", Cmd: "extend runs get exr_xK9mLPq"},
-			{Label: "Parse run as YAML", Cmd: "extend runs get pr_pJDa8iX -o yaml"},
-			{Label: "Parse run, URL response", Cmd: "extend runs get pr_pJDa8iX --response-type url -o json"},
-			{Label: "Just classify confidence", Cmd: "extend runs get clr_kMXk --jq '.output.confidence' -o raw"},
-		},
-		Gotchas: []string{
-			"--response-type only applies to parse runs; the command rejects it for other types.",
-			"This command never waits; use 'extend runs watch' for live polling.",
-		},
-		SeeAlso: []string{"runs watch", "runs list", "runs cancel", "runs delete"},
-		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsGet(cmd.Context(), app, args[0], responseType)
-		},
-		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&responseType, "response-type", "", "Parse runs only: json|url output payload shape")
-		},
+// seeAlso builds the sibling cross-references for one leaf, excluding
+// itself and filtered to the capabilities this kind actually has.
+func (s runsGroupSpec) seeAlso(self string) []string {
+	var out []string
+	add := func(action string) {
+		if action != self {
+			out = append(out, s.path("runs "+action))
+		}
 	}
+	add("get")
+	add("watch")
+	if s.listable {
+		add("list")
+	}
+	if s.cancellable {
+		add("cancel")
+	}
+	add("delete")
+	return out
 }
 
-func newRunsWatchDoc(app *App) *CommandDoc {
-	var (
-		timeout    time.Duration
-		exitStatus bool
-	)
-	return &CommandDoc{
-		Use:     "watch <run-id>",
-		Summary: "Poll a run until it reaches a terminal state",
-		Triggers: []string{
-			"watch a run until it finishes",
-			"poll a run for terminal state",
-			"block until extract or workflow run completes",
-			"follow run progress live",
-		},
-		WhenToUse: `Use to block until a run reaches a terminal state. Combine with
---exit-status to gate downstream scripts on success.`,
-		Details: `Block until the run reaches a terminal state, showing a spinner with
-status transitions. The final result is rendered using the same per-type
-natural format as the originating command.
-
-Use --exit-status for shell composition: the command exits non-zero if
-the run terminates in FAILED or CANCELLED state, so:
-
-    extend runs watch <id> --exit-status && downstream-script.sh
-
-works as expected.`,
-		Examples: []Example{
-			{Label: "Basic", Cmd: "extend runs watch exr_xK9mLPq"},
-			{Label: "Custom timeout", Cmd: "extend runs watch pr_pJDa8iX --timeout 5m"},
-			{Label: "Gate downstream script", Cmd: "extend runs watch clr_kMXk --exit-status && deploy.sh"},
-		},
-		Gotchas: []string{
-			"Without --exit-status, the command exits 0 on any successful poll regardless of run status.",
-			"Watching uses the short polling profile uniformly, even for workflow runs (live progress is the explicit ask).",
-		},
-		SeeAlso:  []string{"runs get", "runs list", "batches watch"},
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
-		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsWatch(cmd.Context(), app, args[0], timeout, exitStatus)
-		},
-		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
-			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero on FAILED or CANCELLED")
-		},
+// statusListProse renders a status slice as "FAILED or CANCELLED" /
+// "FAILED, CANCELLED, or REJECTED" for help prose.
+func statusListProse(statuses []extendx.RunStatus) string {
+	names := make([]string, len(statuses))
+	for i, s := range statuses {
+		names[i] = string(s)
 	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " or " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
 }
 
-func runRunsGet(ctx context.Context, app *App, id, responseType string) error {
-	cli, err := app.NewClient()
-	if err != nil {
+func runTypedRunsGet(ctx context.Context, app *App, kind extendx.RunKind, id, responseType string) error {
+	if err := extendx.ValidateRunID(kind, id, "get"); err != nil {
 		return err
-	}
-	kind, ok := extendx.RunKindFromID(id)
-	if !ok {
-		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
-	}
-	if responseType != "" && kind != extendx.KindParse {
-		return fmt.Errorf("--response-type is only supported for parse runs (pr_...); got %s run", kind)
 	}
 	if responseType != "" && responseType != "json" && responseType != "url" {
 		return fmt.Errorf("--response-type must be one of: json|url")
+	}
+	cli, err := app.NewClient()
+	if err != nil {
+		return err
 	}
 	switch kind {
 	case extendx.KindExtract:
@@ -286,14 +561,13 @@ func runRunsGet(ctx context.Context, app *App, id, responseType string) error {
 	}
 }
 
-func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duration, exitStatus bool) error {
+func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string, timeout time.Duration, exitStatus bool) error {
+	if err := extendx.ValidateRunID(s.kind, id, "watch"); err != nil {
+		return err
+	}
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
-	}
-	kind, ok := extendx.RunKindFromID(id)
-	if !ok {
-		return fmt.Errorf("cannot determine run type from id %q (expected exr_/pr_/clr_/splr_/workflow_run_/edr_ prefix)", id)
 	}
 
 	sp := app.IO.StartSpinner(fmt.Sprintf("Watching %s...", id))
@@ -301,17 +575,18 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 	// runs: users invoking `runs watch` are explicitly asking for live
 	// progress and expect responsive updates.
 	opts := extendx.WaitProfileOptions(extendx.ProfileShort, timeout)
+	watchCmd := "extend " + s.path("runs watch")
 
 	var status extendx.RunStatus
 	var renderErr error
-	switch kind {
+	switch s.kind {
 	case extendx.KindExtract:
 		final, err := waitForExtractRun(ctx, cli, id, opts, func(r *extend.ExtractRun) {
 			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderWithDefault(app, final, output.FormatJSON)
@@ -321,7 +596,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderParseResult(app, final, "markdown")
@@ -331,7 +606,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderClassifyResult(app, final)
@@ -341,7 +616,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderSplitResult(app, final)
@@ -351,7 +626,7 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderWorkflowResult(app, final)
@@ -361,13 +636,13 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 		})
 		sp.Stop("")
 		if err != nil {
-			return formatWatchWaitError(err, id)
+			return formatWatchWaitError(err, id, watchCmd)
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderEditResult(app, final)
 	default:
 		sp.Stop("")
-		return fmt.Errorf("unsupported run kind %s", kind)
+		return fmt.Errorf("unsupported run kind %s", s.kind)
 	}
 
 	if renderErr != nil {
@@ -379,6 +654,8 @@ func runRunsWatch(ctx context.Context, app *App, id string, timeout time.Duratio
 			return fmt.Errorf("run %s failed", id)
 		case extendx.StatusCancelled:
 			return fmt.Errorf("run %s was cancelled", id)
+		case extendx.StatusRejected:
+			return fmt.Errorf("run %s was rejected", id)
 		}
 	}
 	return nil
@@ -427,108 +704,10 @@ func relTimeFromISO(iso string) string {
 	return relTime(t)
 }
 
-func newRunsCancelDoc(app *App) *CommandDoc {
-	var yes bool
-	return &CommandDoc{
-		Use:     "cancel <run-id>",
-		Summary: "Cancel a run by ID",
-		Triggers: []string{
-			"cancel an in-flight run",
-			"stop a running extract or workflow run",
-			"abort a non-terminal run",
-		},
-		WhenToUse: `Use to attempt to cancel a non-terminal run. The run type is determined
-from the ID prefix.`,
-		Details: `Parse runs cannot be cancelled (the API rejects the attempt).
-
-Cancellation is best-effort: an in-flight run may still complete before
-the cancellation takes effect. The terminal status will be CANCELLED if
-cancellation succeeded, or the original outcome (PROCESSED/FAILED/etc.)
-if the run finished first.
-
-Cancel stops a running operation; it does not remove the historical
-record. Use 'extend runs delete' for that.`,
-		Examples: []Example{
-			{Label: "With prompt", Cmd: "extend runs cancel exr_xK9"},
-			{Label: "Skip confirmation", Cmd: "extend runs cancel workflow_run_abc --yes"},
-		},
-		Gotchas: []string{
-			"Parse runs cannot be cancelled (API rejects).",
-			"Cancellation is best-effort; an in-flight run may complete first.",
-			"Cancel does not delete the run record; use 'extend runs delete' to remove the history.",
-		},
-		SeeAlso: []string{"runs get", "runs delete", "runs watch"},
-		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsCancel(cmd.Context(), app, args[0], yes)
-		},
-		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
-		},
-	}
-}
-
-func newRunsDeleteDoc(app *App) *CommandDoc {
-	var yes bool
-	return &CommandDoc{
-		Use:     "delete <run-id>",
-		Summary: "Delete a run record (any run type)",
-		Triggers: []string{
-			"delete a run record",
-			"remove a run from workspace history",
-			"clean up old runs",
-		},
-		WhenToUse: `Use to permanently remove a run's historical record once it has
-reached a terminal state. To stop a still-running operation, use
-'extend runs cancel' instead.`,
-		Details: `The run type is auto-detected from the ID prefix
-(exr_/pr_/clr_/splr_/edr_/workflow_run_). Deletion is permanent and the
-record cannot be recovered. Use this to clean up runs from the workspace
-inventory; it does not affect billing.`,
-		Examples: []Example{
-			{Label: "With prompt", Cmd: "extend runs delete exr_xK9"},
-			{Label: "Skip confirmation", Cmd: "extend runs delete pr_abc --yes"},
-		},
-		Gotchas: []string{
-			"Deletion is permanent; the record cannot be recovered.",
-			"Deletion does not affect billing or already-emitted webhook events.",
-		},
-		SeeAlso: []string{"runs get", "runs cancel", "runs list"},
-		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsDelete(cmd.Context(), app, args[0], yes)
-		},
-		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
-		},
-	}
-}
-
-func runRunsDelete(ctx context.Context, app *App, id string, yes bool) error {
-	if _, ok := extendx.RunKindFromID(id); !ok {
-		return fmt.Errorf("cannot determine run type from id %q", id)
-	}
-	return deleteWithConfirm(ctx, app, "run", id, yes,
-		func(ctx context.Context, id string) error {
-			c, err := app.NewClient()
-			if err != nil {
-				return err
-			}
-			return deleteRun(ctx, c, id)
-		})
-}
-
-// deleteRun dispatches to the right per-kind delete endpoint on the
-// SDK client based on the run ID's prefix. Centralized so both
-// `extend runs delete` and any other generic deleter can share the
-// dispatch.
-func deleteRun(ctx context.Context, c *sdkclient.Client, id string) error {
-	kind, ok := extendx.RunKindFromID(id)
-	if !ok {
-		return fmt.Errorf("unknown run id prefix: %s", id)
-	}
+// deleteRun calls the per-kind delete endpoint on the SDK client. The
+// kind comes from the invoked typed command; the ID has already been
+// validated against it.
+func deleteRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) error {
 	switch kind {
 	case extendx.KindExtract:
 		_, err := c.ExtractRuns.Delete(ctx, id, &extend.ExtractRunsDeleteRequest{})
@@ -553,14 +732,10 @@ func deleteRun(ctx context.Context, c *sdkclient.Client, id string) error {
 	}
 }
 
-// cancelRun dispatches a cancel call to the right per-kind endpoint
-// based on the run ID's prefix. Parse and edit runs return
-// extendx.ErrNotCancellable.
-func cancelRun(ctx context.Context, c *sdkclient.Client, id string) error {
-	kind, ok := extendx.RunKindFromID(id)
-	if !ok {
-		return fmt.Errorf("unknown run id prefix: %s", id)
-	}
+// cancelRun calls the per-kind cancel endpoint. Only kinds with a
+// cancel endpoint have a cancel command, so parse/edit never reach
+// this switch.
+func cancelRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) error {
 	switch kind {
 	case extendx.KindExtract:
 		_, err := c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
@@ -574,19 +749,17 @@ func cancelRun(ctx context.Context, c *sdkclient.Client, id string) error {
 	case extendx.KindWorkflow:
 		_, err := c.WorkflowRuns.Cancel(ctx, id, &extend.WorkflowRunsCancelRequest{})
 		return err
-	case extendx.KindParse, extendx.KindEdit:
-		return fmt.Errorf("%s runs are not cancellable: %w", kind, extendx.ErrNotCancellable)
 	default:
 		return fmt.Errorf("unsupported run kind: %s", kind)
 	}
 }
 
-func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
-	cli, err := app.NewClient()
-	if err != nil {
+func runTypedRunsCancel(ctx context.Context, app *App, kind extendx.RunKind, id string, yes bool) error {
+	if err := extendx.ValidateRunID(kind, id, "cancel"); err != nil {
 		return err
 	}
-	if err := extendx.CanCancel(id); err != nil {
+	cli, err := app.NewClient()
+	if err != nil {
 		return err
 	}
 
@@ -604,7 +777,7 @@ func runRunsCancel(ctx context.Context, app *App, id string, yes bool) error {
 		}
 	}
 
-	if err := cancelRun(ctx, cli, id); err != nil {
+	if err := cancelRun(ctx, cli, kind, id); err != nil {
 		return err
 	}
 	fmt.Fprintf(app.IO.ErrOut, "%s Cancelled %s\n", paletteFor(app.IO).Green("✓"), id)

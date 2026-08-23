@@ -67,19 +67,19 @@ func TestExtractRun_AsyncLifecycle(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "exr_") {
 		t.Fatalf("expected exr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete extract run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete extract run", "extract", "runs", "delete", submitted.ID, "-y")
 
 	// Wait for terminal state via the watch command rather than open-coding
 	// a poll loop — the CLI's watcher has its own logic that's worth
 	// exercising end-to-end.
-	watchRes := runExtend(t, env, "runs", "watch", submitted.ID, "--timeout", "2m")
+	watchRes := runExtend(t, env, "extract", "runs", "watch", submitted.ID, "--timeout", "2m")
 	if watchRes.ExitCode != 0 {
-		t.Fatalf("runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
+		t.Fatalf("extract runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
 	}
 
 	// Now fetch the terminal state and verify shape.
-	getRes := runExtend(t, env, "runs", "get", submitted.ID, "-o", "json")
-	getRes.requireOK(t, "runs", "get", submitted.ID)
+	getRes := runExtend(t, env, "extract", "runs", "get", submitted.ID, "-o", "json")
+	getRes.requireOK(t, "extract", "runs", "get", submitted.ID)
 
 	var run map[string]any
 	getRes.decodeJSON(t, &run)
@@ -140,13 +140,13 @@ func TestWorkflowRun_AsyncLifecycle(t *testing.T) {
 	workflowID := pickFirstID(t, env, "workflows")
 
 	submitRes := runExtend(t, env,
-		"run", "testdata/sample.txt",
+		"workflows", "run", "testdata/sample.txt",
 		"--using", workflowID,
 		"--wait",
 		"--timeout", "5m",
 		"-o", "json",
 	)
-	submitRes.requireOK(t, "run", "--using", workflowID)
+	submitRes.requireOK(t, "workflows", "run", "--using", workflowID)
 
 	var run map[string]any
 	submitRes.decodeJSON(t, &run)
@@ -155,7 +155,7 @@ func TestWorkflowRun_AsyncLifecycle(t *testing.T) {
 	if !strings.HasPrefix(id, "workflow_run_") {
 		t.Fatalf("expected workflow_run_ prefix on run id, got %q", id)
 	}
-	rememberCleanup(t, env, "delete workflow run", "runs", "delete", id, "-y")
+	rememberCleanup(t, env, "delete workflow run", "workflows", "runs", "delete", id, "-y")
 
 	if obj, _ := run["object"].(string); obj != "workflow_run" {
 		t.Errorf("object = %q, want workflow_run", obj)
@@ -219,12 +219,12 @@ func TestWorkflowBatch_ReturnsBatchID(t *testing.T) {
 	workflowID := pickFirstID(t, env, "workflows")
 
 	res := runExtend(t, env,
-		"run", "batch",
+		"workflows", "run", "batch",
 		"testdata/sample.txt", "testdata/sample.txt",
 		"--using", workflowID,
 		"-o", "json",
 	)
-	res.requireOK(t, "run", "batch", "--using", workflowID)
+	res.requireOK(t, "workflows", "run", "batch", "--using", workflowID)
 
 	var got map[string]any
 	res.decodeJSON(t, &got)
@@ -271,15 +271,15 @@ func TestClassifyRun_AsyncLifecycle(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "clr_") {
 		t.Fatalf("expected clr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete classify run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete classify run", "classify", "runs", "delete", submitted.ID, "-y")
 
-	watchRes := runExtend(t, env, "runs", "watch", submitted.ID, "--timeout", "2m")
+	watchRes := runExtend(t, env, "classify", "runs", "watch", submitted.ID, "--timeout", "2m")
 	if watchRes.ExitCode != 0 {
-		t.Fatalf("runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
+		t.Fatalf("classify runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
 	}
 
-	getRes := runExtend(t, env, "runs", "get", submitted.ID, "-o", "json")
-	getRes.requireOK(t, "runs", "get", submitted.ID)
+	getRes := runExtend(t, env, "classify", "runs", "get", submitted.ID, "-o", "json")
+	getRes.requireOK(t, "classify", "runs", "get", submitted.ID)
 
 	var run map[string]any
 	getRes.decodeJSON(t, &run)
@@ -319,15 +319,15 @@ func TestSplitRun_AsyncLifecycle(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "splr_") {
 		t.Fatalf("expected splr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete split run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete split run", "split", "runs", "delete", submitted.ID, "-y")
 
-	watchRes := runExtend(t, env, "runs", "watch", submitted.ID, "--timeout", "2m")
+	watchRes := runExtend(t, env, "split", "runs", "watch", submitted.ID, "--timeout", "2m")
 	if watchRes.ExitCode != 0 {
-		t.Fatalf("runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
+		t.Fatalf("split runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
 	}
 
-	getRes := runExtend(t, env, "runs", "get", submitted.ID, "-o", "json")
-	getRes.requireOK(t, "runs", "get", submitted.ID)
+	getRes := runExtend(t, env, "split", "runs", "get", submitted.ID, "-o", "json")
+	getRes.requireOK(t, "split", "runs", "get", submitted.ID)
 
 	var run map[string]any
 	getRes.decodeJSON(t, &run)
@@ -353,28 +353,28 @@ func TestWorkflowRun_UpdateMetadata(t *testing.T) {
 	workflowID := pickFirstID(t, env, "workflows")
 
 	// Workflow runs are async by default (--wait defaults to false on
-	// `run`). We don't wait here because the metadata update endpoint
-	// accepts in-flight runs.
+	// `workflows run`). We don't wait here because the metadata update
+	// endpoint accepts in-flight runs.
 	submitRes := runExtend(t, env,
-		"run", "testdata/sample.txt",
+		"workflows", "run", "testdata/sample.txt",
 		"--using", workflowID,
 		"-o", "json",
 	)
-	submitRes.requireOK(t, "run")
+	submitRes.requireOK(t, "workflows", "run")
 
 	var submitted struct {
 		ID string `json:"id"`
 	}
 	submitRes.decodeJSON(t, &submitted)
-	rememberCleanup(t, env, "delete workflow run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete workflow run", "workflows", "runs", "delete", submitted.ID, "-y")
 
 	updateRes := runExtend(t, env,
-		"runs", "update", submitted.ID,
+		"workflows", "runs", "update", submitted.ID,
 		"--metadata", "customer=acme",
 		"--tag", "integration-test",
 		"-o", "json",
 	)
-	updateRes.requireOK(t, "runs", "update", submitted.ID)
+	updateRes.requireOK(t, "workflows", "runs", "update", submitted.ID)
 
 	var updated map[string]any
 	updateRes.decodeJSON(t, &updated)
@@ -423,9 +423,9 @@ func TestRunsCancel_ExtractRun(t *testing.T) {
 		ID string `json:"id"`
 	}
 	submitRes.decodeJSON(t, &submitted)
-	rememberCleanup(t, env, "delete extract run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete extract run", "extract", "runs", "delete", submitted.ID, "-y")
 
-	cancelRes := runExtend(t, env, "runs", "cancel", submitted.ID, "-y")
+	cancelRes := runExtend(t, env, "extract", "runs", "cancel", submitted.ID, "-y")
 	// Cancel can legitimately race with processing: if the run completes
 	// before the cancel reaches the server, the API reports "cannot cancel
 	// terminal run" (a 4xx). Either case is acceptable; what's NOT
@@ -440,8 +440,8 @@ func TestRunsCancel_ExtractRun(t *testing.T) {
 	// wait, the cancel never took effect and that's a bug.
 	var status string
 	for i := 0; i < 10; i++ {
-		getRes := runExtend(t, env, "runs", "get", submitted.ID, "-o", "json")
-		getRes.requireOK(t, "runs", "get", submitted.ID)
+		getRes := runExtend(t, env, "extract", "runs", "get", submitted.ID, "-o", "json")
+		getRes.requireOK(t, "extract", "runs", "get", submitted.ID)
 		var got map[string]any
 		getRes.decodeJSON(t, &got)
 		status, _ = got["status"].(string)
@@ -457,19 +457,19 @@ func TestRunsCancel_ExtractRun(t *testing.T) {
 }
 
 // TestRunsUpdate_RejectsNonWorkflowRun confirms the CLI's guard against
-// using `runs update` on non-workflow run IDs (the server only supports
-// metadata mutation on workflow runs).
+// using `workflows runs update` on non-workflow run IDs (the server only
+// supports metadata mutation on workflow runs).
 func TestRunsUpdate_RejectsNonWorkflowRun(t *testing.T) {
 	env := requireEnv(t)
 
 	// Use a fake-but-correctly-prefixed extract run ID. The CLI's guard
 	// fires before any HTTP call so the test doesn't need a real run.
 	res := runExtend(t, env,
-		"runs", "update", "exr_nonexistent",
+		"workflows", "runs", "update", "exr_nonexistent",
 		"--metadata", "k=v",
 	)
 	if res.ExitCode == 0 {
-		t.Fatalf("runs update on non-workflow run should fail; got success: %s", res.Stdout)
+		t.Fatalf("workflows runs update on non-workflow run should fail; got success: %s", res.Stdout)
 	}
 	if !strings.Contains(string(res.Stderr), "workflow run") {
 		t.Errorf("error message should mention 'workflow run'; got: %s", res.Stderr)
@@ -500,15 +500,15 @@ func TestParseRun_AsyncLifecycle(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "pr_") {
 		t.Fatalf("expected pr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete parse run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete parse run", "parse", "runs", "delete", submitted.ID, "-y")
 
-	watchRes := runExtend(t, env, "runs", "watch", submitted.ID, "--timeout", "2m")
+	watchRes := runExtend(t, env, "parse", "runs", "watch", submitted.ID, "--timeout", "2m")
 	if watchRes.ExitCode != 0 {
-		t.Fatalf("runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
+		t.Fatalf("parse runs watch %s exited %d\nstderr: %s", submitted.ID, watchRes.ExitCode, watchRes.Stderr)
 	}
 
-	getRes := runExtend(t, env, "runs", "get", submitted.ID, "-o", "json")
-	getRes.requireOK(t, "runs", "get", submitted.ID)
+	getRes := runExtend(t, env, "parse", "runs", "get", submitted.ID, "-o", "json")
+	getRes.requireOK(t, "parse", "runs", "get", submitted.ID)
 
 	var run map[string]any
 	getRes.decodeJSON(t, &run)

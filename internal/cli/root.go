@@ -102,18 +102,15 @@ respective env vars.`,
 			newParseDoc(app),
 			newClassifyDoc(app),
 			newSplitDoc(app),
-			newRunDoc(app),
 			newEditDoc(app),
 			// Inspection
-			newRunsDoc(app),
-			newBatchesDoc(app),
 			newFilesDoc(app),
 			newDownloadDoc(app),
 			// Resources
 			extractorAccessor().doc(app),
 			classifierAccessor().doc(app),
 			splitterAccessor().doc(app),
-			workflowAccessor().doc(app),
+			newWorkflowsDoc(app),
 			newWebhooksDoc(app),
 			newEvaluationsDoc(app),
 			// Agent surface
@@ -532,7 +529,7 @@ func formatError(w io.Writer, pal palette, err error) {
 	if errors.As(err, &urlErr) {
 		if urlErr.Timeout() {
 			fmt.Fprintf(w, "%s request timed out\n", pal.Red("Error:"))
-			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend runs watch'"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend <verb> runs watch'"))
 		} else {
 			fmt.Fprintf(w, "%s could not reach the Extend API\n", pal.Red("Error:"))
 			fmt.Fprintf(w, "       %s\n", pal.Dim("check connectivity, --region/--base-url, and that the API is reachable"))

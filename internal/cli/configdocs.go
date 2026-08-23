@@ -127,7 +127,7 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       1. create a workflow draft: extend workflows create --from-file body.json
       2. update the draft graph: extend workflows update workflow_xxx --from-file steps.json
       3. deploy an immutable version: extend workflows versions create workflow_xxx --name "initial"
-      4. run it async: extend run invoice.pdf --using workflow_xxx [--wait]
+      4. run it async: extend workflows run invoice.pdf --using workflow_xxx [--wait]
 
     Step envelope:
       { "name": "extract", "type": "EXTRACT", "config": { ... }, "next": [{ "step": "review" }] }

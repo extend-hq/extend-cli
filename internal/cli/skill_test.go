@@ -159,7 +159,7 @@ func TestSkillIncludesWorkflowLifecycleRecipe(t *testing.T) {
 		"### Create, deploy, and run a workflow",
 		"extend workflows create",
 		"extend workflows versions create",
-		"extend run invoice.pdf --using",
+		"extend workflows run invoice.pdf --using",
 		"classificationId",
 		"cannot use version \"latest\"",
 	} {
@@ -447,6 +447,11 @@ func TestSkillResourceFamiliesShareShape(t *testing.T) {
 		}
 		got := flattenCommandPaths(fam, "")
 		want := append([]string(nil), processorFamilyCommands...)
+		if f.Plural == "workflows" {
+			// Workflows carry the run launcher and the typed runs
+			// subgroup on top of the shared processor shape.
+			want = append(want, workflowExtraCommands...)
+		}
 
 		gotSorted := append([]string(nil), got...)
 		sortStrings(gotSorted)
@@ -456,6 +461,26 @@ func TestSkillResourceFamiliesShareShape(t *testing.T) {
 			t.Errorf("family %q has commands %v, expected %v", f.Plural, gotSorted, wantSorted)
 		}
 	}
+}
+
+// findDocByPath resolves a space-separated command path ("workflows
+// run") to its CommandDoc, or nil if any segment is missing.
+func findDocByPath(root *CommandDoc, path string) *CommandDoc {
+	d := root
+	for _, seg := range strings.Fields(path) {
+		var next *CommandDoc
+		for _, sub := range d.Subcommands {
+			if sub.Name() == seg {
+				next = sub
+				break
+			}
+		}
+		if next == nil {
+			return nil
+		}
+		d = next
+	}
+	return d
 }
 
 // flattenCommandPaths returns the relative space-separated paths of
@@ -527,9 +552,9 @@ func TestSkillWaitClaimsMatchTree(t *testing.T) {
 	}
 
 	for _, verb := range asyncDefaultVerbs {
-		d, ok := subs[verb]
-		if !ok {
-			t.Errorf("asyncDefaultVerbs entry %q not in root.Subcommands", verb)
+		d := findDocByPath(root, verb)
+		if d == nil {
+			t.Errorf("asyncDefaultVerbs entry %q does not resolve in the doc tree", verb)
 			continue
 		}
 		if d.Wait == nil {

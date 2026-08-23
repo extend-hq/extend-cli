@@ -80,7 +80,7 @@ complete standalone config that replaces the need for one entirely.
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend extract invoice.pdf --using ex_abc"},
 			{Label: "URL input", Cmd: "extend extract https://example.com/doc.pdf --using ex_abc"},
-			{Label: "Async", Cmd: "extend extract file_xK9mLPq --using ex_abc --wait=false", Note: "Returns the run ID immediately; poll with `extend runs watch`."},
+			{Label: "Async", Cmd: "extend extract file_xK9mLPq --using ex_abc --wait=false", Note: "Returns the run ID immediately; poll with `extend extract runs watch`."},
 			{Label: "Patch a saved extractor for this run", Cmd: "extend extract invoice.pdf --using ex_abc --patch tweaks.json"},
 			{Label: "Inline patch", Cmd: `extend extract invoice.pdf --using ex_abc --patch '{"foo":"bar"}'`},
 			{Label: "One-off run with no saved extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
@@ -91,7 +91,7 @@ complete standalone config that replaces the need for one entirely.
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
 			"--patch requires --using; for a standalone config use --config instead.",
 		},
-		SeeAlso:  []string{"parse", "classify", "extract batch", "runs watch", "runs get"},
+		SeeAlso:  []string{"parse", "classify", "extract batch", "extract runs watch", "extract runs get"},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
@@ -139,7 +139,7 @@ complete standalone config that replaces the need for one entirely.
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
-		Subcommands: []*CommandDoc{newExtractBatchDoc(app)},
+		Subcommands: []*CommandDoc{newExtractBatchDoc(app), extractRunsSpec().doc(app), extractBatchesSpec().doc(app)},
 	}
 }
 
@@ -231,7 +231,7 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend extract runs watch")
 	}
 
 	if err := renderWithDefault(app, final, output.FormatJSON); err != nil {

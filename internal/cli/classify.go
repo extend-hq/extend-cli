@@ -83,7 +83,7 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
 			"--patch requires --using; for a standalone config use --config instead.",
 		},
-		SeeAlso:  []string{"extract", "parse", "classify batch", "runs watch", "runs get"},
+		SeeAlso:  []string{"extract", "parse", "classify batch", "classify runs watch", "classify runs get"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
@@ -131,7 +131,7 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
-		Subcommands: []*CommandDoc{newClassifyBatchDoc(app)},
+		Subcommands: []*CommandDoc{newClassifyBatchDoc(app), classifyRunsSpec().doc(app), classifyBatchesSpec().doc(app)},
 	}
 }
 
@@ -223,7 +223,7 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend classify runs watch")
 	}
 
 	if err := renderClassifyResult(app, final); err != nil {

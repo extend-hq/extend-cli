@@ -197,13 +197,13 @@ func emitWorkflowRun(args []string, mode string) {
 // emitRunsList is the centerpiece for pagination tests. In paginated
 // mode we split fixtureFailedRuns across pages keyed by --page-token.
 //
-// Mirrors a real-CLI behaviour: --type edit is rejected (the API has
-// no list-edit-runs endpoint). Agents are expected to recognize this
-// and use `runs get edr_xxx` per ID instead.
+// Mirrors a real-CLI behaviour: `edit runs list` does not exist (the
+// API has no list-edit-runs endpoint). Agents are expected to
+// recognize this and use `edit runs get edr_xxx` per ID instead.
 func emitRunsList(args []string, mode string) {
-	if flagValue(args, "type") == "edit" {
+	if positional(args)[0] == "edit" {
 		fmt.Fprintln(stderr,
-			"Error: --type edit is not supported (edit runs are not listable; use 'extend runs get edr_...' for individual edit runs)")
+			`Error: unknown command "list" for "extend edit runs" (edit runs are not listable; use 'extend edit runs get edr_...' for individual edit runs)`)
 		exitCode = 1
 		return
 	}
@@ -247,14 +247,19 @@ func emitRunsList(args []string, mode string) {
 
 func filterRuns(args []string, in []Run) []Run {
 	status := flagValue(args, "status")
-	if status == "" {
-		return in
+	kind := positional(args)[0]
+	if kind == "workflows" {
+		kind = "workflow"
 	}
 	out := make([]Run, 0, len(in))
 	for _, r := range in {
-		if r.Status == status {
-			out = append(out, r)
+		if r.Type != kind {
+			continue
 		}
+		if status != "" && r.Status != status {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }
@@ -274,12 +279,17 @@ func chunk(in []Run, size int) [][]Run {
 	return out
 }
 
-func emitRunsWatch(args []string, mode string) {
+// typedRunID pulls the run ID from `<verb> runs <action> <id>` argv.
+func typedRunID(args []string) string {
 	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
+	if len(pos) >= 4 {
+		return pos[3]
 	}
+	return ""
+}
+
+func emitRunsWatch(args []string, mode string) {
+	id := typedRunID(args)
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
 		return
@@ -289,11 +299,7 @@ func emitRunsWatch(args []string, mode string) {
 }
 
 func emitRunsGet(args []string, mode string) {
-	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
-	}
+	id := typedRunID(args)
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
 		return
@@ -302,18 +308,37 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
-	}
-	// Parse runs cannot be cancelled in real life. Mirror that.
-	if strings.HasPrefix(id, "pr_") {
-		fmt.Fprintln(stderr, "Error: parse runs cannot be cancelled (use 'runs delete' to remove the record)")
+	// Parse and edit runs have no cancel command in the real CLI;
+	// the dispatch reaches here for them too, so mirror cobra's
+	// unknown-command failure.
+	verb := positional(args)[0]
+	if verb == "parse" || verb == "edit" {
+		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\" (%s runs cannot be cancelled)\n", verb, verb)
 		exitCode = 1
 		return
 	}
-	emitJSON(synthesizeRun(id, "CANCELLED"))
+	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+}
+
+// emitBatchesStatus serves `<verb> batches get|watch` with a terminal
+// processor batch.
+func emitBatchesStatus(args []string, mode string) {
+	pos := positional(args)
+	id := ""
+	if len(pos) >= 4 {
+		id = pos[3]
+	}
+	emitJSON(map[string]any{
+		"id":     id,
+		"status": "PROCESSED",
+		"counts": map[string]any{"submitted": 1, "processed": 1, "failed": 0},
+	})
+}
+
+// emitWorkflowRunBatch mirrors the real workflow batch response, which
+// is just {batchId} — there is no status endpoint for workflow batches.
+func emitWorkflowRunBatch(args []string, mode string) {
+	emitJSON(map[string]any{"batchId": nowID("batch_")})
 }
 
 func synthesizeRun(id, status string) Run {

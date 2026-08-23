@@ -1,6 +1,9 @@
 package extendx
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // RunStatus is the canonical CLI representation of a run's lifecycle
 // state. The SDK exposes a per-kind enum (ProcessorRunStatus,
@@ -58,8 +61,11 @@ func (s RunStatus) IsTerminal() bool {
 	return false
 }
 
-// RunKind names a run resource type. Used by `extend runs get/watch/cancel`
-// to dispatch on the run's ID prefix to the right SDK sub-client.
+// RunKind names a run resource type. Commands are typed per kind
+// (`extend extract runs get`, `extend workflows runs watch`, ...), so
+// the kind is always chosen by the invoked command; the ID-prefix
+// table below exists only to fail fast with a pointer to the right
+// command when an ID of a different type is pasted.
 type RunKind string
 
 const (
@@ -71,6 +77,38 @@ const (
 	KindEdit     RunKind = "edit"
 )
 
+// Verb returns the CLI command group that owns this kind's typed runs
+// subcommands ("extend <verb> runs ..."). It differs from the kind
+// name only for workflows, whose resource group is plural.
+func (k RunKind) Verb() string {
+	if k == KindWorkflow {
+		return "workflows"
+	}
+	return string(k)
+}
+
+// RunIDPrefix returns the server-issued ID prefix for a run kind.
+func RunIDPrefix(k RunKind) string {
+	switch k {
+	case KindExtract:
+		return "exr_"
+	case KindParse:
+		return "pr_"
+	case KindClassify:
+		return "clr_"
+	case KindSplit:
+		return "splr_"
+	case KindWorkflow:
+		return "workflow_run_"
+	case KindEdit:
+		return "edr_"
+	}
+	return ""
+}
+
+// RunKindFromID maps an ID prefix back to its run kind. Used only for
+// mismatch validation (ValidateRunID) and human-readable error
+// messages, never for command dispatch.
 func RunKindFromID(id string) (RunKind, bool) {
 	switch {
 	case strings.HasPrefix(id, "exr_"):
@@ -87,4 +125,44 @@ func RunKindFromID(id string) (RunKind, bool) {
 		return KindEdit, true
 	}
 	return "", false
+}
+
+// SupportsRunAction reports whether a run kind has the given typed
+// runs subcommand. Mirrors the capability flags in the CLI's
+// runsGroupSpec table: parse and edit runs have no cancel endpoint,
+// edit runs have no list endpoint, and only workflow runs support
+// update. Used so mismatch errors never redirect to a command that
+// doesn't exist for the ID's actual kind.
+func SupportsRunAction(k RunKind, action string) bool {
+	switch action {
+	case "cancel":
+		return k != KindParse && k != KindEdit
+	case "list":
+		return k != KindEdit
+	case "update":
+		return k == KindWorkflow
+	}
+	return true
+}
+
+// ValidateRunID checks that id carries the ID prefix for kind. Typed
+// run commands call this before hitting the API so an ID of the wrong
+// type fails fast with a pointer to the right command instead of a
+// confusing server-side 404. action is the invoked leaf ("get",
+// "watch", ...) and is echoed into the redirect hint when the ID's
+// actual kind supports it.
+func ValidateRunID(kind RunKind, id, action string) error {
+	actual, ok := RunKindFromID(id)
+	if !ok {
+		return fmt.Errorf("%q is not a recognized %s run ID (expected %s prefix)", id, kind, RunIDPrefix(kind))
+	}
+	if actual == kind {
+		return nil
+	}
+	if SupportsRunAction(actual, action) {
+		return fmt.Errorf("%s is an ID for %s runs, not %s runs; use 'extend %s runs %s %s'",
+			id, actual, kind, actual.Verb(), action, id)
+	}
+	return fmt.Errorf("%s is an ID for %s runs, not %s runs; %s runs do not support %s",
+		id, actual, kind, actual, action)
 }

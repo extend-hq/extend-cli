@@ -62,8 +62,10 @@ var descriptionVerbs = []descriptionVerb{
 	{"classifying or identifying the type of a document (e.g. telling MSA from SOW from NDA)", "classify"},
 	{"splitting multi-document bundles into segments", "split"},
 	{"filling PDF forms via a values schema", "edit"},
-	{"running multi-step document AI workflows", "run"},
-	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, workflow_run_)", "runs"},
+	{"running multi-step document AI workflows", "workflows"},
+	// Run inspection is typed per verb (extract runs, workflows runs, ...);
+	// the guard maps to the primary verb whose runs subgroup carries the shape.
+	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, workflow_run_)", "extract"},
 	{"uploading documents to an Extend workspace and managing the resulting file_xxx IDs", "files"},
 }
 
@@ -98,7 +100,7 @@ type resourceFamily struct {
 	// IDPrefix is the ID prefix for instances of this resource: "ex_", etc.
 	IDPrefix string
 	// RunVerb is the action verb that consumes this resource type:
-	// "extract" for extractors, "run" for workflows.
+	// "extract" for extractors, "workflows run" for workflows.
 	RunVerb string
 }
 
@@ -110,7 +112,7 @@ var resourceFamilies = []resourceFamily{
 	{Plural: "extractors", Singular: "extractor", IDPrefix: "ex_", RunVerb: "extract"},
 	{Plural: "classifiers", Singular: "classifier", IDPrefix: "cl_", RunVerb: "classify"},
 	{Plural: "splitters", Singular: "splitter", IDPrefix: "spl_", RunVerb: "split"},
-	{Plural: "workflows", Singular: "workflow", IDPrefix: "workflow_", RunVerb: "run"},
+	{Plural: "workflows", Singular: "workflow", IDPrefix: "workflow_", RunVerb: "workflows run"},
 }
 
 // processorFamilyCommands is the canonical seven-command shape every
@@ -126,25 +128,40 @@ var processorFamilyCommands = []string{
 	"versions create",
 }
 
+// workflowExtraCommands are the commands the workflows family exposes
+// beyond the shared seven-command processor shape: the run launcher and
+// the typed workflow runs subgroup. Tests verify the workflows family
+// has exactly processorFamilyCommands + these.
+var workflowExtraCommands = []string{
+	"run",
+	"run batch",
+	"runs get",
+	"runs list",
+	"runs watch",
+	"runs cancel",
+	"runs delete",
+	"runs update",
+}
+
 // waitDefaultVerbs lists the action verbs whose runs wait for terminal
 // state by default. The "Wait, async, watch" prose section asserts these
 // behaviours; a test asserts each entry's CommandDoc.Wait.DefaultsToWait
 // matches the documented value.
 var waitDefaultVerbs = []string{"extract", "classify", "parse", "split", "edit"}
 
-// asyncDefaultVerbs lists the action verbs whose runs are async by
+// asyncDefaultVerbs lists the command paths whose runs are async by
 // default (workflow runs only, currently). Same guard as
-// waitDefaultVerbs.
-var asyncDefaultVerbs = []string{"run"}
+// waitDefaultVerbs; entries are space-separated command paths.
+var asyncDefaultVerbs = []string{"workflows run"}
 
 // paginationExampleCommand is the command path used in the bash example
 // in the Pagination section. A test asserts it resolves and that each
 // flag in paginationExampleFlags exists on it.
-var paginationExampleCommand = []string{"runs", "list"}
+var paginationExampleCommand = []string{"extract", "runs", "list"}
 
 // paginationExampleFlags are the flags referenced in the pagination
 // example. Asserted to exist on paginationExampleCommand.
-var paginationExampleFlags = []string{"type", "using", "status", "page-token", "all", "max", "output"}
+var paginationExampleFlags = []string{"using", "status", "page-token", "all", "max", "output"}
 
 // renderDescription assembles the YAML `description` field from
 // descriptionVerbs and the disambiguation examples. Public via tests so
@@ -209,7 +226,7 @@ func writeSkillActiveBehaviour(b *strings.Builder) {
 	b.WriteString("## When this skill is active\n\n")
 	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
 	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
-	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for `extend runs get|watch|cancel` — not a host-tool task tracker.\n")
+	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for the typed runs commands (`extend <verb> runs get|watch|cancel`) — not a host-tool task tracker.\n")
 	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
 }
 
@@ -250,30 +267,43 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 		fmt.Fprintf(b, "| %s | `extend %s` |\n", sub.Summary, sub.Use)
 	}
 
-	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch`.\n\n")
+	// The workflow-run launcher lives under the workflows resource
+	// group rather than at the top level, so add its row explicitly.
+	for _, sub := range root.Subcommands {
+		if sub.Name() != "workflows" {
+			continue
+		}
+		for _, wsub := range sub.Subcommands {
+			if wsub.Name() == "run" {
+				fmt.Fprintf(b, "| %s | `extend workflows %s` |\n", wsub.Summary, wsub.Use)
+			}
+		}
+	}
+
+	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch` or `workflows run batch`.\n\n")
 	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` takes `--instructions` (free-form prose). See `extend edit --help` for the full set.\n\n")
 }
 
 func writeSkillWait(b *strings.Builder) {
 	b.WriteString("## Wait, async, watch\n\n")
 	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`) **wait by default** for terminal state and print the result. Pass `--wait=false` to return the run ID immediately.\n\n")
-	b.WriteString("`extend run` (workflow runs) is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
-	b.WriteString("Follow a run by ID, regardless of type:\n\n")
-	b.WriteString("    extend runs watch <run-id>\n\n")
-	b.WriteString("The run type is auto-detected from the ID prefix (`exr_`, `pr_`, `clr_`, `splr_`, `workflow_run_`, `edr_`). Use `--exit-status` to gate downstream scripts on success:\n\n")
-	b.WriteString("    extend runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
-	b.WriteString("To inspect current state without polling: `extend runs get <id>`.\n\n")
+	b.WriteString("`extend workflows run` is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
+	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `workflow_run_` workflows):\n\n")
+	b.WriteString("    extend extract runs watch exr_xxx\n\n")
+	b.WriteString("A wrong-type ID fails fast, naming the right command. Use `--exit-status` to gate downstream scripts on success:\n\n")
+	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
+	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
 	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
-	b.WriteString("- **Edit runs** (`edr_*`) are not listable — the API has no `LIST /edit_runs`. Use `extend runs get edr_xxx` for individual edit runs.\n")
-	b.WriteString("- **Parse runs** (`pr_*`) cannot be cancelled; the API rejects the attempt. Other run types support best-effort cancel.\n")
-	b.WriteString("- **Workflow batches** (returned by `extend run batch`) have **no GET endpoint**. `extend batches get`/`watch` work only on processor batches (`bpr_*`). Track workflow batches with `extend runs list --type workflow --batch <id>`.\n\n")
+	b.WriteString("- **Edit runs** (`edr_*`) are not listable; the API has no `LIST /edit_runs`.\n")
+	b.WriteString("- **Parse and edit runs** cannot be cancelled; those groups have no cancel command. Other run types support best-effort cancel.\n")
+	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
 
 func writeSkillPagination(b *strings.Builder) {
 	b.WriteString("## Pagination\n\n")
 	b.WriteString("List commands return one page by default. Pass `--max N` to fetch up to N total results — the CLI auto-paginates internally and never makes you handle page tokens:\n\n")
-	b.WriteString(`    extend runs list --type extract --status FAILED --max 100
+	b.WriteString(`    extend extract runs list --status FAILED --max 100
 
 `)
 	b.WriteString("Use `--all` only when you genuinely want every result (scripts, not agents). Power users can still cursor explicitly with `--page-token`, but most callers should not need to see tokens at all.\n\n")
@@ -339,8 +369,8 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 4. Run it asynchronously, or add --wait to block until terminal:
 
-       RUN=$(extend run invoice.pdf --using "$WORKFLOW" --version v1 -o id)
-       extend runs watch "$RUN"
+       RUN=$(extend workflows run invoice.pdf --using "$WORKFLOW" --version v1 -o id)
+       extend workflows runs watch "$RUN"
 
 ### Process a folder of inputs and inspect failures
 
@@ -350,15 +380,15 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 2. Wait for the batch to finish; gate downstream work on success:
 
-       extend batches watch "$BATCH" --exit-status || echo "batch failed"
+       extend extract batches watch "$BATCH" --exit-status || echo "batch failed"
 
 3. List runs that failed (or any other status) for inspection:
 
-       extend runs list --type extract --batch "$BATCH" --status FAILED -o json
+       extend extract runs list --batch "$BATCH" --status FAILED -o json
 
-4. Pull a specific failed run's full payload (auto-detects type from prefix):
+4. Pull a specific failed run's full payload:
 
-       extend runs get exr_yyy -o json
+       extend extract runs get exr_yyy -o json
 
 ### Configure a webhook for workflow completions
 
@@ -562,7 +592,8 @@ func writeCatalogProcessorFamilies(b *strings.Builder) {
 	b.WriteString("- `extend <plural> versions list <id>` — List published versions.\n")
 	b.WriteString("- `extend <plural> versions get <id> <version|draft>` — Show one version (or the draft).\n")
 	b.WriteString("- `extend <plural> versions create <id> --release-type major|minor` — Publish the draft as a new version.\n\n")
-	b.WriteString("**Workflows differ:** `versions create` uses `--name <deploy-name>` instead of `--release-type`. The deployed name is what `extend run --version` references.\n\n")
+	b.WriteString("**Workflows differ:** `versions create` uses `--name <deploy-name>` instead of `--release-type`. The deployed name is what `extend workflows run --version` references.\n\n")
+	b.WriteString("**Workflows also expose runs:** `extend workflows run <input>` / `run batch` start runs; `extend workflows runs get|list|watch|cancel|delete|update` inspect and control them (the action verbs' `runs` shape, plus `update`).\n\n")
 }
 
 // writeCatalogEntry renders one command in the catalog as a single line:

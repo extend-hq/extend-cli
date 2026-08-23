@@ -73,7 +73,7 @@ func TestWorkflowRun_TextInputForwardsText(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "workflow_run_x", "object": "workflow_run", "status": "PENDING"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "run")
+	cmd := findCmd(t, ta.app, "workflows", "run")
 	cmd.SetArgs([]string{"--using", "workflow_abc", "--text", "wf text"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)

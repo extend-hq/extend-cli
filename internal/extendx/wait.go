@@ -56,7 +56,7 @@ const (
 	// edit, and `runs watch` on those run kinds.
 	ProfileShort WaitProfile = "short"
 	// ProfileLong: 2s -> 30s. Used by workflow runs (`extend run`) and
-	// batch watching (`extend batches watch`).
+	// batch watching (`extend <verb> batches watch`).
 	ProfileLong WaitProfile = "long"
 )
 
