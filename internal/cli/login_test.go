@@ -48,6 +48,18 @@ type fakeAuthServer struct {
 	exchanged string
 	// accessToken overrides the token endpoint's access_token when set.
 	accessToken string
+	// deviceEnabled makes discovery advertise the device authorization
+	// endpoint, like WorkOS does when the grant is enabled for the app.
+	deviceEnabled bool
+	// devicePendingPolls device-grant token calls answer
+	// authorization_pending before tokens are issued.
+	devicePendingPolls int
+	// deviceErr, when set, is the terminal error code for device-grant
+	// token calls.
+	deviceErr string
+	// deviceExchanged records the device_code redeemed at the token
+	// endpoint.
+	deviceExchanged string
 	// revoked records the bearer tokens presented to /oauth/revoke-current.
 	revoked []string
 	// meHandler, when set, serves GET /me; unset answers 404 so tests
@@ -61,13 +73,55 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 	t.Helper()
 	f := &fakeAuthServer{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
+		if !f.deviceEnabled {
+			// Discovery 404s fall back to the default endpoints, the
+			// pre-device-flow behavior most tests run under.
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"device_authorization_endpoint":"%s/oauth2/device_authorization"}`, f.srv.URL)
+	})
+	mux.HandleFunc("/oauth2/device_authorization", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
-		if got := r.PostForm.Get("grant_type"); got != "authorization_code" {
-			t.Errorf("grant_type = %q", got)
+		if got := r.PostForm.Get("client_id"); got != oauth.DefaultClientID {
+			t.Errorf("device authorization client_id = %q", got)
 		}
 		if got := r.PostForm.Get("resource"); got != f.srv.URL {
+			t.Errorf("device authorization resource = %q, want %q", got, f.srv.URL)
+		}
+		fmt.Fprintf(w, `{
+			"device_code": "device-code-1",
+			"user_code": "WXYZ-1234",
+			"verification_uri": "%[1]s/device",
+			"verification_uri_complete": "%[1]s/device?user_code=WXYZ-1234",
+			"expires_in": 300,
+			"interval": 1
+		}`, f.srv.URL)
+	})
+	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		if got := r.PostForm.Get("resource"); got != f.srv.URL {
 			t.Errorf("resource = %q, want %q", got, f.srv.URL)
+		}
+		if r.PostForm.Get("grant_type") == oauth.DeviceCodeGrant {
+			if f.devicePendingPolls > 0 {
+				f.devicePendingPolls--
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, `{"error":"authorization_pending"}`)
+				return
+			}
+			if f.deviceErr != "" {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, `{"error":%q}`, f.deviceErr)
+				return
+			}
+			f.deviceExchanged = r.PostForm.Get("device_code")
+			fmt.Fprint(w, `{"access_token":"eoat_test","refresh_token":"eort_test","token_type":"Bearer","expires_in":3600}`)
+			return
+		}
+		if got := r.PostForm.Get("grant_type"); got != "authorization_code" {
+			t.Errorf("grant_type = %q", got)
 		}
 		if got := r.PostForm.Get("redirect_uri"); got != f.redirectURI {
 			t.Errorf("redirect_uri = %q, want %q", got, f.redirectURI)
@@ -519,6 +573,155 @@ func TestRunLoginRevokesDifferentConsentGrant(t *testing.T) {
 	}
 	if len(f.revoked) != 1 || f.revoked[0] != oldToken {
 		t.Errorf("revoked = %v, want the replaced login's access token", f.revoked)
+	}
+}
+
+func TestRunLoginDeviceFlag(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.deviceEnabled = true
+	f.devicePendingPolls = 1
+	loginTestEnv(t, f.srv.URL)
+	app, stderr := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		device: true,
+		openBrowser: func(string) error {
+			t.Error("openBrowser must not be called for a device sign-in")
+			return nil
+		},
+		store: store,
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if f.deviceExchanged != "device-code-1" {
+		t.Errorf("deviceExchanged = %q, want device-code-1", f.deviceExchanged)
+	}
+	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.AccessToken != "eoat_test" || rec.RefreshToken != "eort_test" {
+		t.Errorf("stored record = %+v, want the device-flow tokens", rec)
+	}
+
+	out := stderr()
+	if !strings.Contains(out, "WXYZ-1234") {
+		t.Errorf("stderr missing the one-time code: %q", out)
+	}
+	if !strings.Contains(out, f.srv.URL+"/device?user_code=WXYZ-1234") {
+		t.Errorf("stderr missing the verification URL: %q", out)
+	}
+	if !strings.Contains(out, "Signed in to "+f.srv.URL) {
+		t.Errorf("stderr missing success line: %q", out)
+	}
+}
+
+func TestRunLoginDeviceFallbackWhenBrowserUnavailable(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.deviceEnabled = true
+	loginTestEnv(t, f.srv.URL)
+	app, stderr := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser: func(string) error {
+			t.Error("openBrowser must not be called when no browser is available")
+			return nil
+		},
+		browserUnavailable: func() bool { return true },
+		store:              store,
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if f.deviceExchanged != "device-code-1" {
+		t.Errorf("deviceExchanged = %q, want the device flow to have run", f.deviceExchanged)
+	}
+	if out := stderr(); !strings.Contains(out, "switching to device sign-in") {
+		t.Errorf("stderr missing the fallback notice: %q", out)
+	}
+}
+
+// Without a device endpoint in discovery, a browserless machine keeps
+// the loopback flow (and its printed URL) rather than failing outright.
+func TestRunLoginBrowserUnavailableWithoutDeviceSupportStaysLoopback(t *testing.T) {
+	f := newFakeAuthServer(t)
+	loginTestEnv(t, f.srv.URL)
+	app, _ := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		openBrowser:        f.browserFor(t, "code-xyz", ""),
+		browserUnavailable: func() bool { return true },
+		store:              store,
+	})
+	if err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	if f.exchanged != "code-xyz" {
+		t.Errorf("exchanged code = %q, want the loopback flow to have run", f.exchanged)
+	}
+}
+
+func TestRunLoginDeviceFlagUnsupportedServer(t *testing.T) {
+	f := newFakeAuthServer(t)
+	loginTestEnv(t, f.srv.URL)
+	app, _ := testAppForLogin()
+
+	err := runLogin(context.Background(), app, loginOptions{
+		device: true,
+		openBrowser: func(string) error {
+			t.Error("openBrowser must not be called")
+			return nil
+		},
+		store: oauth.DefaultStore(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support device sign-in") {
+		t.Fatalf("err = %v, want the unsupported-server error", err)
+	}
+}
+
+func TestRunLoginDeviceDenied(t *testing.T) {
+	f := newFakeAuthServer(t)
+	f.deviceEnabled = true
+	f.deviceErr = "access_denied"
+	loginTestEnv(t, f.srv.URL)
+	app, _ := testAppForLogin()
+
+	store := oauth.DefaultStore()
+	err := runLogin(context.Background(), app, loginOptions{
+		device:      true,
+		openBrowser: func(string) error { return nil },
+		store:       store,
+	})
+	if err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("err = %v, want the declined-sign-in error", err)
+	}
+	if rec, _ := store.Get(f.srv.URL); rec != nil {
+		t.Errorf("no tokens must be stored after a declined sign-in, got %+v", rec)
+	}
+}
+
+func TestBrowserUnavailable(t *testing.T) {
+	env := func(vars map[string]string) func(string) string {
+		return func(k string) string { return vars[k] }
+	}
+	cases := []struct {
+		name string
+		vars map[string]string
+		goos string
+		want bool
+	}{
+		{"ssh connection", map[string]string{"SSH_CONNECTION": "1.2.3.4 5 6.7.8.9 22"}, "darwin", true},
+		{"ssh tty", map[string]string{"SSH_TTY": "/dev/pts/0"}, "linux", true},
+		{"linux without display", map[string]string{}, "linux", true},
+		{"linux with X display", map[string]string{"DISPLAY": ":0"}, "linux", false},
+		{"linux with wayland", map[string]string{"WAYLAND_DISPLAY": "wayland-0"}, "linux", false},
+		{"macos desktop", map[string]string{}, "darwin", false},
+		{"windows desktop", map[string]string{}, "windows", false},
+	}
+	for _, tc := range cases {
+		if got := browserUnavailable(env(tc.vars), tc.goos); got != tc.want {
+			t.Errorf("%s: browserUnavailable = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

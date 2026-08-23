@@ -11,16 +11,22 @@ import (
 	"strings"
 )
 
-// Endpoints holds the three authorization-server endpoints the CLI
-// talks to. All are absolute URLs.
+// Endpoints holds the authorization-server endpoints the CLI talks
+// to. All are absolute URLs.
 type Endpoints struct {
 	Authorization string
 	Token         string
 	Revocation    string
+	// DeviceAuthorization is the RFC 8628 device authorization
+	// endpoint, used when no local browser can run the loopback flow.
+	DeviceAuthorization string
 }
 
 // DefaultEndpoints returns the hardcoded /oauth2/* endpoints for an API
-// base URL. Used directly when RFC 8414 discovery is unavailable.
+// base URL. Used directly when RFC 8414 discovery is unavailable. The
+// device authorization endpoint has no default: RFC 8628 defines no
+// conventional path, so it is only ever taken from discovery metadata
+// and stays empty (device flow unsupported) on fallback.
 func DefaultEndpoints(apiBase string) Endpoints {
 	base := NormalizeBase(apiBase)
 	return Endpoints{
@@ -33,9 +39,10 @@ func DefaultEndpoints(apiBase string) Endpoints {
 // metadata is the subset of the RFC 8414 authorization-server metadata
 // document the CLI consumes.
 type metadata struct {
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	RevocationEndpoint    string `json:"revocation_endpoint"`
+	AuthorizationEndpoint       string `json:"authorization_endpoint"`
+	TokenEndpoint               string `json:"token_endpoint"`
+	RevocationEndpoint          string `json:"revocation_endpoint"`
+	DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint"`
 }
 
 // Discover fetches {apiBase}/.well-known/oauth-authorization-server and
@@ -82,6 +89,7 @@ func Discover(ctx context.Context, client *http.Client, apiBase string) (Endpoin
 		{"authorization_endpoint", m.AuthorizationEndpoint, &out.Authorization},
 		{"token_endpoint", m.TokenEndpoint, &out.Token},
 		{"revocation_endpoint", m.RevocationEndpoint, &out.Revocation},
+		{"device_authorization_endpoint", m.DeviceAuthorizationEndpoint, &out.DeviceAuthorization},
 	} {
 		if ep.val == "" {
 			continue

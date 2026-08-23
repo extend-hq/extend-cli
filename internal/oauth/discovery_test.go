@@ -20,7 +20,8 @@ func TestDiscoverUsesMetadata(t *testing.T) {
 			"issuer": %[1]q,
 			"authorization_endpoint": "%[1]s/custom/authorize",
 			"token_endpoint": "%[1]s/custom/token",
-			"revocation_endpoint": "%[1]s/custom/revoke"
+			"revocation_endpoint": "%[1]s/custom/revoke",
+			"device_authorization_endpoint": "%[1]s/custom/device"
 		}`, srv.URL)
 	}))
 	defer srv.Close()
@@ -38,6 +39,9 @@ func TestDiscoverUsesMetadata(t *testing.T) {
 	if want := srv.URL + "/custom/revoke"; eps.Revocation != want {
 		t.Errorf("Revocation = %q, want %q", eps.Revocation, want)
 	}
+	if want := srv.URL + "/custom/device"; eps.DeviceAuthorization != want {
+		t.Errorf("DeviceAuthorization = %q, want %q", eps.DeviceAuthorization, want)
+	}
 }
 
 func TestDiscoverFallsBackOn404(t *testing.T) {
@@ -54,6 +58,11 @@ func TestDiscoverFallsBackOn404(t *testing.T) {
 	}
 	if eps.Authorization != srv.URL+"/oauth2/authorize" {
 		t.Errorf("fallback authorize = %q", eps.Authorization)
+	}
+	// RFC 8628 defines no conventional path, so the fallback must
+	// leave the device endpoint empty (device flow unsupported).
+	if eps.DeviceAuthorization != "" {
+		t.Errorf("fallback device endpoint = %q, want empty", eps.DeviceAuthorization)
 	}
 }
 
@@ -96,6 +105,7 @@ func TestDiscoverRejectsForeignHostEndpoints(t *testing.T) {
 		"foreign token endpoint":     `{"token_endpoint": "https://evil.example/token"}`,
 		"foreign authorize endpoint": `{"authorization_endpoint": "https://evil.example/authorize"}`,
 		"foreign revocation":         `{"revocation_endpoint": "https://evil.example/revoke"}`,
+		"foreign device endpoint":    `{"device_authorization_endpoint": "https://evil.example/device"}`,
 		"same host different port":   `{"token_endpoint": "https://127.0.0.1:1/token"}`,
 	}
 	for name, doc := range cases {

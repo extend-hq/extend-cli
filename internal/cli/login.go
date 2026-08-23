@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,7 @@ const loginWaitTimeout = 10 * time.Minute
 
 func newLoginDoc(app *App) *CommandDoc {
 	var noBrowser bool
+	var device bool
 	return &CommandDoc{
 		Use:     "login",
 		Summary: "Sign in to Extend through your browser (no API key needed)",
@@ -34,16 +36,24 @@ func newLoginDoc(app *App) *CommandDoc {
 			"log in to the extend cli with my browser",
 			"authenticate the cli without creating an api key",
 			"oauth login for the extend cli",
+			"sign in to extend over ssh or on a headless machine",
 		},
 		WhenToUse: `Use to authenticate interactively without creating an API key: it opens
 your browser, you pick one workspace and one environment on the consent
 screen, and the CLI stores the resulting tokens securely. Prefer an API
 key (EXTEND_API_KEY or 'extend setup') for CI and unattended use; login
-needs a browser once, though the stored session then works headlessly
-until it expires or is revoked.`,
+needs a browser once — on this machine or, with the device flow, on any
+other device — and the stored session then works headlessly until it
+expires or is revoked.`,
 		Details: `The flow is a standard native-app OAuth authorization code grant with
 PKCE: the CLI listens on an ephemeral 127.0.0.1 port, sends you to the
 Extend consent screen, and exchanges the returned code for tokens.
+
+When no usable local browser is detected (an SSH session, or a Linux
+host with no display), login automatically switches to the OAuth device
+flow: it prints a short one-time code and a URL, you approve the
+sign-in from a browser on any device, and the CLI picks the tokens up.
+Pass --device to use that flow explicitly.
 
 Tokens are stored in the OS keychain when one is available, otherwise in
 a 0600 file next to the config file (~/.config/extend/oauth_tokens.json).
@@ -59,6 +69,7 @@ config file always wins over a stored login. Run 'extend config' to see
 which source is in effect.`,
 		Examples: []Example{
 			{Label: "Sign in", Cmd: "extend login"},
+			{Label: "Sign in from an SSH session or headless machine", Cmd: "extend login --device"},
 			{Label: "Print the URL instead of opening a browser", Cmd: "extend login --no-browser"},
 			{Label: "Sign in to the EU region", Cmd: "extend login --region eu"},
 		},
@@ -67,18 +78,24 @@ which source is in effect.`,
 			"Each login targets exactly one workspace and one environment, chosen on the consent screen; log in again to switch.",
 			"Logins are keyed by API base URL: switching --region or EXTEND_BASE_URL selects a different stored session (or none).",
 			"With --env <label> set, commands read EXTEND_<LABEL>_API_KEY only and never fall back to the stored login.",
+			"--no-browser prints a URL that only works in a browser on this machine; to approve from another device, use --device.",
 		},
 		SeeAlso: []string{"logout", "whoami", "setup", "auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		Args:    cobra.NoArgs,
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the sign-in URL instead of opening a browser")
+			cmd.Flags().BoolVar(&device, "device", false, "Sign in by approving a one-time code from a browser on any device")
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogin(cmd.Context(), app, loginOptions{
 				noBrowser:   noBrowser,
+				device:      device,
 				openBrowser: openBrowser,
-				store:       oauth.DefaultStore(),
+				browserUnavailable: func() bool {
+					return browserUnavailable(os.Getenv, runtime.GOOS)
+				},
+				store: oauth.DefaultStore(),
 			})
 		},
 	}
@@ -176,9 +193,16 @@ func runWhoami(ctx context.Context, app *App) error {
 // loginOptions carries the injectable pieces of runLogin so tests can
 // substitute a fake browser and an isolated store.
 type loginOptions struct {
-	noBrowser   bool
+	noBrowser bool
+	// device forces the RFC 8628 device flow instead of the loopback
+	// redirect.
+	device      bool
 	openBrowser func(url string) error
-	store       oauth.Store
+	// browserUnavailable reports that the loopback flow cannot work
+	// here (no local browser), triggering the device-flow fallback.
+	// Nil means a browser is assumed available.
+	browserUnavailable func() bool
+	store              oauth.Store
 }
 
 func runLogin(ctx context.Context, app *App, opts loginOptions) error {
@@ -209,62 +233,34 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		return err
 	}
 
-	verifier, err := oauth.NewVerifier()
-	if err != nil {
-		return err
-	}
-	state, err := oauth.NewState()
-	if err != nil {
-		return err
-	}
-
-	lb, err := oauth.NewLoopback(state)
-	if err != nil {
-		return err
-	}
-	defer lb.Close()
-
-	authURL := oauth.AuthorizeURL(eps.Authorization, oauth.AuthorizeParams{
-		ClientID:    clientID,
-		RedirectURI: lb.RedirectURI(),
-		State:       state,
-		Challenge:   oauth.ChallengeS256(verifier),
-		Resource:    base,
-	})
-
-	if opts.noBrowser {
-		fmt.Fprintf(app.IO.ErrOut, "Open this URL in your browser to sign in:\n\n    %s\n\n", authURL)
-	} else if openErr := opts.openBrowser(authURL); openErr != nil {
-		fmt.Fprintf(app.IO.ErrOut, "%s Could not open a browser (%v).\n", pal.Yellow("!"), openErr)
-		fmt.Fprintf(app.IO.ErrOut, "Open this URL to sign in:\n\n    %s\n\n", authURL)
-	} else {
-		fmt.Fprintf(app.IO.ErrOut, "Opening your browser to sign in. If nothing opens, use this URL:\n\n    %s\n\n", authURL)
-	}
-
-	waitCtx, cancel := context.WithTimeout(ctx, loginWaitTimeout)
-	defer cancel()
-	sp := app.IO.StartSpinner("Waiting for you to approve access in the browser...")
-	code, err := lb.Wait(waitCtx)
-	if err != nil {
-		sp.Stop("")
-		if waitCtx.Err() != nil && ctx.Err() == nil {
-			return fmt.Errorf("timed out waiting for the browser sign-in; run 'extend login' to try again")
-		}
-		return err
-	}
-
-	sp.Update("Completing sign-in...")
 	tokenClient := &oauth.Client{
 		HTTPClient: authHTTP,
 		Endpoints:  eps,
 		ClientID:   clientID,
 		Resource:   base,
 	}
-	tr, err := tokenClient.Exchange(ctx, code, verifier, lb.RedirectURI())
-	if err != nil {
-		sp.Stop("")
-		return fmt.Errorf("exchange authorization code: %w", err)
+
+	useDevice := opts.device
+	if opts.device && eps.DeviceAuthorization == "" {
+		return fmt.Errorf("this authorization server does not support device sign-in; run 'extend login' without --device")
 	}
+	if !useDevice && !opts.noBrowser && eps.DeviceAuthorization != "" &&
+		opts.browserUnavailable != nil && opts.browserUnavailable() {
+		fmt.Fprintf(app.IO.ErrOut, "No usable local browser detected; switching to device sign-in.\n\n")
+		useDevice = true
+	}
+
+	var tr *oauth.TokenResponse
+	if useDevice {
+		tr, err = deviceLogin(ctx, app, tokenClient)
+	} else {
+		tr, err = loopbackLogin(ctx, app, opts, tokenClient)
+	}
+	if err != nil {
+		return err
+	}
+
+	sp := app.IO.StartSpinner("Completing sign-in...")
 
 	// Captured before the new record lands so the replaced grant can be
 	// revoked server-side; without this every re-login leaves a live
@@ -309,6 +305,116 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 			pal.Yellow("!"), s.key.src)
 	}
 	return nil
+}
+
+// loopbackLogin runs the RFC 8252 native-app flow: authorization code
+// with PKCE, redirected back to an ephemeral 127.0.0.1 listener. It
+// requires a browser on this machine.
+func loopbackLogin(ctx context.Context, app *App, opts loginOptions, tc *oauth.Client) (*oauth.TokenResponse, error) {
+	pal := paletteFor(app.IO)
+	verifier, err := oauth.NewVerifier()
+	if err != nil {
+		return nil, err
+	}
+	state, err := oauth.NewState()
+	if err != nil {
+		return nil, err
+	}
+
+	lb, err := oauth.NewLoopback(state)
+	if err != nil {
+		return nil, err
+	}
+	defer lb.Close()
+
+	authURL := oauth.AuthorizeURL(tc.Endpoints.Authorization, oauth.AuthorizeParams{
+		ClientID:    tc.ClientID,
+		RedirectURI: lb.RedirectURI(),
+		State:       state,
+		Challenge:   oauth.ChallengeS256(verifier),
+		Resource:    tc.Resource,
+	})
+
+	if opts.noBrowser {
+		fmt.Fprintf(app.IO.ErrOut, "Open this URL in your browser to sign in:\n\n    %s\n\n", authURL)
+	} else if openErr := opts.openBrowser(authURL); openErr != nil {
+		fmt.Fprintf(app.IO.ErrOut, "%s Could not open a browser (%v).\n", pal.Yellow("!"), openErr)
+		fmt.Fprintf(app.IO.ErrOut, "Open this URL to sign in:\n\n    %s\n\n", authURL)
+	} else {
+		fmt.Fprintf(app.IO.ErrOut, "Opening your browser to sign in. If nothing opens, use this URL:\n\n    %s\n\n", authURL)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, loginWaitTimeout)
+	defer cancel()
+	sp := app.IO.StartSpinner("Waiting for you to approve access in the browser...")
+	code, err := lb.Wait(waitCtx)
+	sp.Stop("")
+	if err != nil {
+		if waitCtx.Err() != nil && ctx.Err() == nil {
+			return nil, fmt.Errorf("timed out waiting for the browser sign-in; run 'extend login' to try again")
+		}
+		return nil, err
+	}
+
+	tr, err := tc.Exchange(ctx, code, verifier, lb.RedirectURI())
+	if err != nil {
+		return nil, fmt.Errorf("exchange authorization code: %w", err)
+	}
+	return tr, nil
+}
+
+// deviceLogin runs the RFC 8628 device flow: the CLI shows a one-time
+// code and URL, the user approves the sign-in from a browser on any
+// device, and the CLI polls the token endpoint for the result. No
+// local browser or loopback listener is involved, so it works over
+// SSH and on headless machines.
+func deviceLogin(ctx context.Context, app *App, tc *oauth.Client) (*oauth.TokenResponse, error) {
+	pal := paletteFor(app.IO)
+	da, err := tc.DeviceAuthorize(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("start device sign-in: %w", err)
+	}
+
+	// verification_uri_complete carries the code prefilled; the bare
+	// code is still shown so the user can confirm what the approval
+	// page displays.
+	verifyURL := da.VerificationURIComplete
+	if verifyURL == "" {
+		verifyURL = da.VerificationURI
+	}
+	fmt.Fprintf(app.IO.ErrOut, "Your one-time code is: %s\n\n", pal.Cyan(da.UserCode))
+	fmt.Fprintf(app.IO.ErrOut, "To sign in, open this URL in a browser on any device and confirm the code:\n\n    %s\n\n", verifyURL)
+
+	waitCtx, cancel := context.WithTimeout(ctx, loginWaitTimeout)
+	defer cancel()
+	sp := app.IO.StartSpinner("Waiting for you to approve the sign-in...")
+	tr, err := tc.PollDeviceToken(waitCtx, da)
+	sp.Stop("")
+	if err != nil {
+		var te *oauth.TokenError
+		switch {
+		case errors.As(err, &te) && te.Code == "access_denied":
+			return nil, fmt.Errorf("the sign-in was declined in the browser")
+		case errors.As(err, &te) && te.Code == "expired_token":
+			return nil, fmt.Errorf("the one-time code expired before the sign-in was approved; run 'extend login' to get a new one")
+		case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
+			return nil, fmt.Errorf("timed out waiting for the sign-in approval; run 'extend login' to try again")
+		}
+		return nil, fmt.Errorf("device sign-in: %w", err)
+	}
+	return tr, nil
+}
+
+// browserUnavailable reports whether the loopback flow is doomed on
+// this machine: in an SSH session or on a displayless Linux host the
+// browser would open elsewhere (or not at all) and the 127.0.0.1
+// redirect could never come back, so login falls back to the device
+// flow instead.
+func browserUnavailable(getenv func(string) string, goos string) bool {
+	if getenv("SSH_CONNECTION") != "" || getenv("SSH_TTY") != "" {
+		return true
+	}
+	return goos == "linux" && getenv("DISPLAY") == "" && getenv("WAYLAND_DISPLAY") == ""
 }
 
 func runLogout(ctx context.Context, app *App, store oauth.Store) error {
