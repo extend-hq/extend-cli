@@ -122,7 +122,7 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
     parse runs                    get | list | watch | delete
     workflows runs                get | list | watch | cancel | delete | update
     edit runs                     get | watch | delete
-    edit detections               get
+    edit detections               create | get
     <action> batches              get | watch
     files   upload | list | get | delete | download
 

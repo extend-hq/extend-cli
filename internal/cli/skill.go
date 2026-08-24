@@ -295,7 +295,7 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
 	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
 	b.WriteString("- **Edit runs** (`edr_*`) are not listable; the API has no `LIST /edit_runs`.\n")
-	b.WriteString("- **Parse and edit runs** cannot be cancelled; those groups have no cancel command. Other run types support best-effort cancel.\n")
+	b.WriteString("- **Parse and edit runs** have no cancel command; other run types support best-effort cancel.\n")
 	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
@@ -306,7 +306,7 @@ func writeSkillPagination(b *strings.Builder) {
 	b.WriteString(`    extend extract runs list --status FAILED --max 100
 
 `)
-	b.WriteString("Use `--all` only when you genuinely want every result (scripts, not agents). Power users can still cursor explicitly with `--page-token`, but most callers should not need to see tokens at all.\n\n")
+	b.WriteString("Use `--all` only when you genuinely want every result (scripts, not agents). Power users can still cursor explicitly with `--page-token`.\n\n")
 	b.WriteString("`--jq <expr>` filters JSON output before rendering, but cannot combine with `-o markdown` (markdown is not JSON). Use `-o json --jq '...'` and select the markdown chunk paths instead.\n\n")
 }
 

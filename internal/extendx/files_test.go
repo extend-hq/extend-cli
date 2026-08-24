@@ -248,6 +248,13 @@ func TestBuildEditSchemaFile_RejectsText(t *testing.T) {
 	}
 }
 
+func TestBuildFormDetectionFile_RejectsText(t *testing.T) {
+	_, err := BuildFormDetectionFile(FileRef{Text: "raw"})
+	if err == nil {
+		t.Error("BuildFormDetectionFile(text) = nil; want non-nil")
+	}
+}
+
 func TestBuildWorkflowFile_AcceptsAllInputs(t *testing.T) {
 	// Workflows pass the file through to the underlying step;
 	// builder accepts URL, ID, and Text.

@@ -343,25 +343,165 @@ func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
 }
 
 // newEditDetectionsDoc returns the typed documentation for the
-// `extend edit detections` group: read access to asynchronous form
-// detection runs (sgr_...), created via POST /form_detection_runs
-// (e.g. by the dashboard or SDK callers). The synchronous scaffolding
-// path is 'extend edit schema generate'; this group exists to inspect
-// runs created through the async endpoint.
+// `extend edit detections` group: asynchronous form detection runs
+// (sgr_..., POST /form_detection_runs). 'create' starts one and
+// 'get' fetches it; the synchronous scaffolding path is 'extend edit
+// schema generate'.
 func newEditDetectionsDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "detections",
-		Summary: "Inspect form detection runs",
-		WhenToUse: `Use this group to fetch an asynchronous form detection run (sgr_...) by
-ID. When the run is PROCESSED, output.schema contains an edit schema you
-can pass directly to 'extend edit --schema'.`,
-		Details: `Form detection runs are created via POST /form_detection_runs (async).
-For synchronous schema scaffolding from the CLI, use 'extend edit schema
-generate' instead.`,
+		Summary: "Start and inspect form detection runs",
+		WhenToUse: `Use this group to start an asynchronous form detection run (sgr_...) or
+fetch one by ID. When a run is PROCESSED, output.schema contains an edit
+schema you can pass directly to 'extend edit --schema'.`,
+		Details: `Form detection runs wrap POST /form_detection_runs (async). For
+synchronous schema scaffolding from the CLI, use 'extend edit schema
+generate' instead; the async variant suits large or slow documents.`,
 		Subcommands: []*CommandDoc{
+			newEditDetectionsCreateDoc(app),
 			newEditDetectionsGetDoc(app),
 		},
 	}
+}
+
+// newEditDetectionsCreateDoc returns the typed documentation for
+// `extend edit detections create`: the async counterpart of
+// 'extend edit schema generate', sharing the same
+// EditSchemaGenerationConfig knobs.
+func newEditDetectionsCreateDoc(app *App) *CommandDoc {
+	var (
+		advancedOptionsPath string
+		instructions        string
+		inputSchemaPath     string
+		password            string
+		wait                bool
+		timeout             time.Duration
+	)
+	return &CommandDoc{
+		Use:     "create <input>",
+		Summary: "Start an async form detection run",
+		Triggers: []string{
+			"start an async form detection run",
+			"detect form fields without blocking",
+			"create a form detection run for a pdf",
+			"scaffold an edit schema asynchronously",
+		},
+		WhenToUse: `Use to detect form fields in a PDF via the asynchronous endpoint. By
+default the command waits and prints the finished run; when PROCESSED,
+output.schema is an edit schema usable with 'extend edit --schema'. For
+a one-call synchronous scaffold, prefer 'extend edit schema generate'.`,
+		Details: `Start a form detection run (sgr_...) and, by default, poll until it
+reaches PROCESSED or FAILED, then print the full run as JSON. Pass
+--wait=false to print the newly created run immediately and poll later
+with 'extend edit detections get <id>'.
+
+The config knobs match 'extend edit schema generate': --instructions
+guides the generator, --input-schema seeds it with a starting-point
+schema, and detection options ride in --advanced-options as a JSON
+object (omitted fields use the server default):
+
+  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled  bool  Parse table regions as arrays of objects.
+  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.`,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit detections create form.pdf"},
+			{Label: "Just the schema", Cmd: "extend edit detections create form.pdf --jq '.output.schema' -o json > schema.json"},
+			{Label: "Async (return run ID)", Cmd: "extend edit detections create form.pdf --wait=false"},
+			{Label: "With instructions", Cmd: `extend edit detections create form.pdf --instructions "skip the signature block"`},
+		},
+		Gotchas: []string{
+			"For an interactive one-call scaffold, 'extend edit schema generate' returns the schema directly; this command returns the run object with the schema under output.schema.",
+			"With --wait=false, poll with 'extend edit detections get <id>'; there is no watch or cancel for detection runs.",
+		},
+		SeeAlso:  []string{"edit detections get", "edit schema generate", "edit"},
+		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures: []extendx.RunStatus{extendx.StatusFailed},
+		Args:     cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			ref, err := uploadOrResolveWith(cmd.Context(), app, cli, args[0], password)
+			if err != nil {
+				return err
+			}
+			file, err := extendx.BuildFormDetectionFile(ref)
+			if err != nil {
+				return err
+			}
+			cfg := &extend.EditSchemaGenerationConfig{}
+			if advancedOptionsPath != "" {
+				raw, err := readJSONFile(advancedOptionsPath, "--advanced-options")
+				if err != nil {
+					return err
+				}
+				var ao extend.EditSchemaGenerationConfigAdvancedOptions
+				if err := json.Unmarshal(raw, &ao); err != nil {
+					return fmt.Errorf("--advanced-options: %w", err)
+				}
+				cfg.AdvancedOptions = &ao
+			}
+			if instructions != "" {
+				cfg.Instructions = extend.String(instructions)
+			}
+			if inputSchemaPath != "" {
+				raw, err := readJSONFile(inputSchemaPath, "--input-schema")
+				if err != nil {
+					return err
+				}
+				var schema extend.EditRootJSON
+				if err := json.Unmarshal(raw, &schema); err != nil {
+					return fmt.Errorf("--input-schema: %w", err)
+				}
+				cfg.InputSchema = &schema
+			}
+			run, err := cli.FormDetectionRuns.Create(cmd.Context(), &extend.FormDetectionRunsCreateRequest{
+				File:   file,
+				Config: cfg,
+			})
+			if err != nil {
+				return fmt.Errorf("create run: %w", err)
+			}
+			if !wait {
+				return renderWithDefault(app, run, output.FormatJSON)
+			}
+			sp := app.IO.StartSpinner(fmt.Sprintf("Run %s: %s", run.ID, run.Status))
+			final, err := waitForFormDetectionRun(cmd.Context(), cli, run.ID, extendx.WaitProfileOptions(extendx.ProfileShort, timeout), func(r *extend.FormDetectionRun) {
+				sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
+			})
+			sp.Stop("")
+			if err != nil {
+				return formatActionWaitError(err, run.ID, "extend edit detections get")
+			}
+			if extendx.RunStatus(final.Status) == extendx.StatusFailed {
+				// Best-effort render of the failed run before returning
+				// the failure error; a render error here is secondary.
+				_ = renderWithDefault(app, final, output.FormatJSON)
+				return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
+			}
+			return renderWithDefault(app, final, output.FormatJSON)
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
+			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")
+			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run immediately)")
+			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
+		},
+	}
+}
+
+func waitForFormDetectionRun(ctx context.Context, c *sdkclient.Client, id string, opts extendx.WaitOptions, onPoll func(*extend.FormDetectionRun)) (*extend.FormDetectionRun, error) {
+	return extendx.PollForRun(ctx,
+		func(ctx context.Context) (*extend.FormDetectionRun, error) {
+			return c.FormDetectionRuns.Retrieve(ctx, id, &extend.FormDetectionRunsRetrieveRequest{})
+		},
+		func(r *extend.FormDetectionRun) extendx.RunStatus { return extendx.RunStatus(r.Status) },
+		opts, onPoll,
+	)
 }
 
 func newEditDetectionsGetDoc(app *App) *CommandDoc {
@@ -387,7 +527,7 @@ config, and (when PROCESSED) the generated schema under output.schema.`,
 			"This command never waits; re-run it to poll until status is PROCESSED or FAILED.",
 			"For synchronous schema scaffolding, use 'extend edit schema generate' instead.",
 		},
-		SeeAlso: []string{"edit", "edit schema generate"},
+		SeeAlso: []string{"edit detections create", "edit schema generate", "edit"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

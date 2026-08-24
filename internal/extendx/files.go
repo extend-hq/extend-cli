@@ -325,6 +325,22 @@ func BuildEditSchemaFile(ref FileRef) (*extend.EditSchemasGenerateRequestFile, e
 	}, nil
 }
 
+// BuildFormDetectionFile converts a FileRef into the SDK's per-endpoint
+// file union for /form_detection_runs (URL and ID inputs only).
+func BuildFormDetectionFile(ref FileRef) (*extend.FormDetectionRunsCreateRequestFile, error) {
+	fromURL, fromID, _, err := fileFromRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	if fromURL == nil && fromID == nil {
+		return nil, errors.New("form detection runs only accept URL or file-ID inputs")
+	}
+	return &extend.FormDetectionRunsCreateRequestFile{
+		FileFromURL: fromURL,
+		FileFromID:  fromID,
+	}, nil
+}
+
 // BuildWorkflowFile converts a FileRef into the SDK's per-endpoint
 // file union for /workflow_runs.
 func BuildWorkflowFile(ref FileRef) (*extend.WorkflowRunsCreateRequestFile, error) {
