@@ -115,6 +115,7 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
     extract | classify | split  <input> --using <id>
     parse <input>
     edit <input> --schema schema.json
+    detect-form <input>
     workflows run <input> --using <id>
     <action> batch <inputs>... [--files-from list.txt]
 
@@ -122,7 +123,7 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
     parse runs                    get | list | watch | delete
     workflows runs                get | list | watch | cancel | delete | update
     edit runs                     get | watch | delete
-    edit detections               create | get
+    detect-form runs              get | watch
     <action> batches              get | watch
     files   upload | list | get | delete | download
 

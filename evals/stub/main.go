@@ -114,12 +114,8 @@ func main() {
 		// inspection or cleanup call, and the bogus ID would enter the
 		// fabrication grader's legitimate-ID set.
 		emitUnknown(args)
-	case match(args, "edit", "detections", "create"):
-		emitEditDetectionsCreate(args, mode)
-	case match(args, "edit", "detections", "get"):
-		emitEditDetectionsGet(args, mode)
-	case match(args, "edit", "detections"):
-		emitUnknown(args)
+	case match(args, "detect-form"):
+		emitDetectForm(args, mode)
 	case match(args, "extract", "batch"):
 		emitExtractBatch(args, mode)
 	case match(args, "extract"):
@@ -132,8 +128,8 @@ func main() {
 		emitSplit(args, mode)
 	case match(args, "edit", "templates", "get"):
 		emitEditTemplatesGet(args, mode)
-	case match(args, "edit", "schema", "generate"):
-		emitEditSchemaGenerate(args, mode)
+	case match(args, "edit", "schema"), match(args, "edit", "detections"):
+		emitEditRemoved(args)
 	case match(args, "edit"):
 		emitEdit(args, mode)
 	case match(args, "extractors", "list"):
@@ -201,7 +197,7 @@ func match(args []string, verbs ...string) bool {
 
 // runVerbGroups are the command groups that own a typed `runs`
 // subgroup; extract/parse/classify/split also own `batches`.
-var runVerbGroups = []string{"extract", "parse", "classify", "split", "edit", "workflows"}
+var runVerbGroups = []string{"extract", "parse", "classify", "split", "edit", "detect-form", "workflows"}
 
 // matchTypedRuns reports whether argv is `<verb> runs <action> ...` for
 // one of the typed run groups.

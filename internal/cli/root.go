@@ -121,6 +121,7 @@ respective env vars.`,
 			newClassifyDoc(app),
 			newSplitDoc(app),
 			newEditDoc(app),
+			newDetectFormDoc(app),
 			// Inspection
 			newFilesDoc(app),
 			newDownloadDoc(app),

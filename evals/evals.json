@@ -1723,18 +1723,15 @@
       "id": "H-6",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "I'm hand-editing the schema produced by `extend edit schema generate`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
+      "prompt": "I'm hand-editing the schema produced by `extend detect-form`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
       "files": [],
-      "expected_output": "Agent consults `extend edit schema generate --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
+      "expected_output": "Agent consults `extend detect-form --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent consulted edit help rather than answering from memory",
+          "text": "agent consulted help rather than answering from memory",
           "must_contain": [
             {
-              "argv_prefix": [
-                "edit"
-              ],
               "flag": "help"
             }
           ]
@@ -1750,19 +1747,17 @@
       "id": "H-7",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "I'm mapping our existing edit schema onto a vendor PDF. If I run `extend edit schema generate` with an input schema, what response fields should I inspect to see the final schema and mapping details?",
+      "prompt": "I'm mapping our existing edit schema onto a vendor PDF. If I run `extend detect-form` with an input schema, what response fields should I inspect on the finished run to see the final schema and mapping details?",
       "files": [],
-      "expected_output": "Agent consults edit schema generation help and names schema, annotatedSchema, and mappingResult, including mappingResult's unmatchedInputPaths or unusedFormFieldKeys details.",
+      "expected_output": "Agent consults detect-form help and names output.schema, output.annotatedSchema, and output.mappingResult, including mappingResult's unmatchedInputPaths or unusedFormFieldKeys details.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent consulted edit schema generate help",
+          "text": "agent consulted detect-form help",
           "must_contain": [
             {
               "argv_prefix": [
-                "edit",
-                "schema",
-                "generate"
+                "detect-form"
               ],
               "flag": "help"
             }

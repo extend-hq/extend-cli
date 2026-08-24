@@ -14,8 +14,8 @@ import (
 // edit help text. Earlier copy claimed values lived in a "default" field
 // on each schema entry; agent feedback (recorded in the May 2026 team
 // transcript) confirmed that wording sent agents to the wrong API
-// shape. The neutral phrasing pointing at `extend edit schema generate`
-// is intentional — if a future edit needs to name a specific field,
+// shape. The neutral phrasing pointing at `extend detect-form` is
+// intentional — if a future edit needs to name a specific field,
 // confirm it against the server schema first and update this test.
 func TestEditHelpDoesNotPrescribeDefaultField(t *testing.T) {
 	app := &App{}
@@ -288,36 +288,6 @@ func TestEdit_OutputFileStdoutDoesNotAppendRunJSON(t *testing.T) {
 	}
 	if got := ta.out.String(); got != "filled-pdf-bytes" {
 		t.Errorf("stdout should contain only downloaded bytes, got %q", got)
-	}
-}
-
-func TestEditSchemaGenerate_HitsSyncEndpoint(t *testing.T) {
-	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/edit_schemas/generate" || r.Method != http.MethodPost {
-			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-		writeJSON(w, 200, map[string]any{
-			"schema":          map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}},
-			"annotatedSchema": map[string]any{"type": "object", "properties": map[string]any{}},
-			"mappingResult":   nil,
-		})
-	})
-	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "edit", "schema", "generate")
-	cmd.SetArgs([]string{"file_xK9"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("schema generate: %v", err)
-	}
-	body := string(srv.lastRequest().Body)
-	if !strings.Contains(body, `"file":{"id":"file_xK9"}`) {
-		t.Errorf("body missing file ref: %s", body)
-	}
-	out := ta.out.String()
-	if !strings.Contains(out, `"type":"object"`) || !strings.Contains(out, `"name"`) {
-		t.Errorf("output should contain inner schema: %s", out)
-	}
-	if strings.Contains(out, "annotatedSchema") || strings.Contains(out, "mappingResult") {
-		t.Errorf("schema generate should output directly reusable schema, got envelope: %s", out)
 	}
 }
 

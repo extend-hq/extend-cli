@@ -29,11 +29,18 @@ import (
 type runsGroupSpec struct {
 	kind      extendx.RunKind
 	exampleID string
-	// cancellable: extract/classify/split/workflow. Parse and edit
-	// runs have no cancel endpoint.
+	// proseName overrides the kind string in generated help prose
+	// ("form detection run" instead of "detect-form run"). Empty means
+	// the kind string reads fine as prose.
+	proseName string
+	// cancellable: extract/classify/split/workflow. Parse, edit, and
+	// detect-form runs have no cancel endpoint.
 	cancellable bool
-	// listable: everything except edit (the API has no LIST /edit_runs).
+	// listable: everything except edit and detect-form (no LIST
+	// endpoint for either).
 	listable bool
+	// deletable: everything except detect-form (no DELETE endpoint).
+	deletable bool
 	// updatable: workflow runs only (rename + metadata patch).
 	updatable bool
 	// responseType: parse runs only (--response-type json|url on get).
@@ -62,6 +69,7 @@ func extractRunsSpec() runsGroupSpec {
 		exampleID:     "exr_xK9mLPq",
 		cancellable:   true,
 		listable:      true,
+		deletable:     true,
 		usingFlag:     "extractor",
 		usingExample:  "ex_abc",
 		sourceFilters: true,
@@ -75,6 +83,7 @@ func parseRunsSpec() runsGroupSpec {
 		kind:          extendx.KindParse,
 		exampleID:     "pr_pJDa8iX",
 		listable:      true,
+		deletable:     true,
 		responseType:  true,
 		sourceFilters: true,
 		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
@@ -90,6 +99,7 @@ func classifyRunsSpec() runsGroupSpec {
 		exampleID:     "clr_kMXkR",
 		cancellable:   true,
 		listable:      true,
+		deletable:     true,
 		usingFlag:     "classifier",
 		usingExample:  "cl_abc",
 		sourceFilters: true,
@@ -104,6 +114,7 @@ func splitRunsSpec() runsGroupSpec {
 		exampleID:     "splr_s8Yqw",
 		cancellable:   true,
 		listable:      true,
+		deletable:     true,
 		usingFlag:     "splitter",
 		usingExample:  "spl_abc",
 		sourceFilters: true,
@@ -116,9 +127,22 @@ func editRunsSpec() runsGroupSpec {
 	return runsGroupSpec{
 		kind:          extendx.KindEdit,
 		exampleID:     "edr_aB3xY",
+		deletable:     true,
 		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
 		watchGotchas: []string{
 			"Edit runs cannot be cancelled; a watched edit run only ends in PROCESSED or FAILED.",
+		},
+	}
+}
+
+func detectFormRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindDetectForm,
+		exampleID:     "sgr_aB3xY",
+		proseName:     "form detection",
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
+		watchGotchas: []string{
+			"Form detection runs cannot be cancelled; a watched run only ends in PROCESSED or FAILED.",
 		},
 	}
 }
@@ -129,6 +153,7 @@ func workflowRunsSpec() runsGroupSpec {
 		exampleID:     "workflow_run_abc",
 		cancellable:   true,
 		listable:      true,
+		deletable:     true,
 		updatable:     true,
 		usingFlag:     "workflow",
 		usingExample:  "workflow_abc",
@@ -141,7 +166,12 @@ func workflowRunsSpec() runsGroupSpec {
 }
 
 // name returns the kind as prose ("extract", "workflow", ...).
-func (s runsGroupSpec) name() string { return string(s.kind) }
+func (s runsGroupSpec) name() string {
+	if s.proseName != "" {
+		return s.proseName
+	}
+	return string(s.kind)
+}
 
 // verb returns the owning command group ("extract", ..., "workflows").
 func (s runsGroupSpec) verb() string { return s.kind.Verb() }
@@ -160,16 +190,22 @@ func (s runsGroupSpec) doc(app *App) *CommandDoc {
 	if s.cancellable {
 		subs = append(subs, s.cancelDoc(app))
 	}
-	subs = append(subs, s.deleteDoc(app))
+	if s.deletable {
+		subs = append(subs, s.deleteDoc(app))
+	}
 	if s.updatable {
 		subs = append(subs, s.updateDoc(app))
+	}
+	closing := "or poll to a terminal state."
+	if s.deletable {
+		closing = fmt.Sprintf("poll to a terminal state, %sor delete the record.", s.optionalVerbsProse())
 	}
 	return &CommandDoc{
 		Use:     "runs",
 		Summary: fmt.Sprintf("Inspect and follow %s runs", s.name()),
 		WhenToUse: fmt.Sprintf(`Use these commands to operate on %s runs (%s...) by ID: fetch current
-state, poll to a terminal state, %sor delete the record.`,
-			s.name(), extendx.RunIDPrefix(s.kind), s.optionalVerbsProse()),
+state, %s`,
+			s.name(), extendx.RunIDPrefix(s.kind), closing),
 		Details: fmt.Sprintf(`Operations on %s runs identified by their %s ID. Each run type has its
 own runs group; an ID with a different prefix is rejected with a
 pointer to the owning command.`, s.name(), extendx.RunIDPrefix(s.kind)),
@@ -478,7 +514,9 @@ func (s runsGroupSpec) seeAlso(self string) []string {
 	if s.cancellable {
 		add("cancel")
 	}
-	add("delete")
+	if s.deletable {
+		add("delete")
+	}
 	return out
 }
 
@@ -556,6 +594,12 @@ func runTypedRunsGet(ctx context.Context, app *App, kind extendx.RunKind, id, re
 			return err
 		}
 		return renderEditResult(app, run)
+	case extendx.KindDetectForm:
+		run, err := cli.FormDetectionRuns.Retrieve(ctx, id, &extend.FormDetectionRunsRetrieveRequest{})
+		if err != nil {
+			return err
+		}
+		return renderWithDefault(app, run, output.FormatJSON)
 	default:
 		return fmt.Errorf("unsupported run kind %s", kind)
 	}
@@ -640,6 +684,16 @@ func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderEditResult(app, final)
+	case extendx.KindDetectForm:
+		final, err := waitForFormDetectionRun(ctx, cli, id, opts, func(r *extend.FormDetectionRun) {
+			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
+		})
+		sp.Stop("")
+		if err != nil {
+			return formatWatchWaitError(err, id, watchCmd)
+		}
+		status = extendx.RunStatus(final.Status)
+		renderErr = renderWithDefault(app, final, output.FormatJSON)
 	default:
 		sp.Stop("")
 		return fmt.Errorf("unsupported run kind %s", s.kind)

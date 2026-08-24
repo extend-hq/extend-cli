@@ -43,12 +43,13 @@ func TestRunKindFromID(t *testing.T) {
 func TestValidateRunID(t *testing.T) {
 	// Matching kind and prefix passes for every kind.
 	matching := map[RunKind]string{
-		KindExtract:  "exr_x",
-		KindParse:    "pr_x",
-		KindClassify: "clr_x",
-		KindSplit:    "splr_x",
-		KindWorkflow: "workflow_run_x",
-		KindEdit:     "edr_x",
+		KindExtract:    "exr_x",
+		KindParse:      "pr_x",
+		KindClassify:   "clr_x",
+		KindSplit:      "splr_x",
+		KindWorkflow:   "workflow_run_x",
+		KindEdit:       "edr_x",
+		KindDetectForm: "sgr_x",
 	}
 	for kind, id := range matching {
 		if err := ValidateRunID(kind, id, "get"); err != nil {
@@ -90,6 +91,22 @@ func TestValidateRunID(t *testing.T) {
 	if want := "extract runs do not support update"; !strings.Contains(err.Error(), want) {
 		t.Errorf("mismatch error %q does not mention %q", err, want)
 	}
+	// A form-detection ID pasted into another group redirects to
+	// detect-form for supported actions and explains for unsupported.
+	err = ValidateRunID(KindEdit, "sgr_x", "get")
+	if err == nil {
+		t.Fatal("ValidateRunID(edit, sgr_x, get) = nil; want mismatch error")
+	}
+	if want := "extend detect-form runs get sgr_x"; !strings.Contains(err.Error(), want) {
+		t.Errorf("mismatch error %q does not mention %q", err, want)
+	}
+	err = ValidateRunID(KindExtract, "sgr_x", "delete")
+	if err == nil {
+		t.Fatal("ValidateRunID(extract, sgr_x, delete) = nil; want mismatch error")
+	}
+	if want := "detect-form runs do not support delete"; !strings.Contains(err.Error(), want) {
+		t.Errorf("mismatch error %q does not mention %q", err, want)
+	}
 	// Unknown prefixes fail.
 	if err := ValidateRunID(KindExtract, "file_x", "get"); err == nil {
 		t.Error("ValidateRunID(extract, file_x) = nil; want non-nil")
@@ -116,6 +133,12 @@ func TestSupportsRunAction(t *testing.T) {
 		{KindEdit, "get", true},
 		{KindEdit, "watch", true},
 		{KindEdit, "delete", true},
+		{KindDetectForm, "get", true},
+		{KindDetectForm, "watch", true},
+		{KindDetectForm, "list", false},
+		{KindDetectForm, "cancel", false},
+		{KindDetectForm, "delete", false},
+		{KindDetectForm, "update", false},
 	}
 	for _, tc := range cases {
 		if got := SupportsRunAction(tc.kind, tc.action); got != tc.want {

@@ -69,12 +69,13 @@ func (s RunStatus) IsTerminal() bool {
 type RunKind string
 
 const (
-	KindExtract  RunKind = "extract"
-	KindParse    RunKind = "parse"
-	KindClassify RunKind = "classify"
-	KindSplit    RunKind = "split"
-	KindWorkflow RunKind = "workflow"
-	KindEdit     RunKind = "edit"
+	KindExtract    RunKind = "extract"
+	KindParse      RunKind = "parse"
+	KindClassify   RunKind = "classify"
+	KindSplit      RunKind = "split"
+	KindWorkflow   RunKind = "workflow"
+	KindEdit       RunKind = "edit"
+	KindDetectForm RunKind = "detect-form"
 )
 
 // Verb returns the CLI command group that owns this kind's typed runs
@@ -102,6 +103,8 @@ func RunIDPrefix(k RunKind) string {
 		return "workflow_run_"
 	case KindEdit:
 		return "edr_"
+	case KindDetectForm:
+		return "sgr_"
 	}
 	return ""
 }
@@ -123,22 +126,27 @@ func RunKindFromID(id string) (RunKind, bool) {
 		return KindWorkflow, true
 	case strings.HasPrefix(id, "edr_"):
 		return KindEdit, true
+	case strings.HasPrefix(id, "sgr_"):
+		return KindDetectForm, true
 	}
 	return "", false
 }
 
 // SupportsRunAction reports whether a run kind has the given typed
 // runs subcommand. Mirrors the capability flags in the CLI's
-// runsGroupSpec table: parse and edit runs have no cancel endpoint,
-// edit runs have no list endpoint, and only workflow runs support
-// update. Used so mismatch errors never redirect to a command that
-// doesn't exist for the ID's actual kind.
+// runsGroupSpec table: parse, edit, and detect-form runs have no
+// cancel endpoint, edit and detect-form runs have no list endpoint,
+// detect-form runs have no delete endpoint, and only workflow runs
+// support update. Used so mismatch errors never redirect to a command
+// that doesn't exist for the ID's actual kind.
 func SupportsRunAction(k RunKind, action string) bool {
 	switch action {
 	case "cancel":
-		return k != KindParse && k != KindEdit
+		return k != KindParse && k != KindEdit && k != KindDetectForm
 	case "list":
-		return k != KindEdit
+		return k != KindEdit && k != KindDetectForm
+	case "delete":
+		return k != KindDetectForm
 	case "update":
 		return k == KindWorkflow
 	}

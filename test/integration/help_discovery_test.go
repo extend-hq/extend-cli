@@ -81,13 +81,13 @@ func TestEditTemplatesGet_ExposedInBinary(t *testing.T) {
 }
 
 // TestEditSchemaProps_ExposedInBinary asserts the extend_edit:* key
-// reference is documented in the edit schema generate help.
+// reference is documented in the detect-form help.
 func TestEditSchemaProps_ExposedInBinary(t *testing.T) {
-	res := runExtend(t, envSetup{}, "edit", "schema", "generate", "--help")
-	res.requireOK(t, "edit", "schema", "generate", "--help")
+	res := runExtend(t, envSetup{}, "detect-form", "--help")
+	res.requireOK(t, "detect-form", "--help")
 	for _, want := range []string{"extend_edit:value", "extend_edit:field_type", "extend_edit:bbox"} {
 		if !strings.Contains(string(res.Stdout), want) {
-			t.Errorf("edit schema generate --help missing %q; got:\n%s", want, res.Stdout)
+			t.Errorf("detect-form --help missing %q; got:\n%s", want, res.Stdout)
 		}
 	}
 }

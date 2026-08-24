@@ -183,13 +183,11 @@ func emitEdit(args []string, mode string) {
 	emitJSON(r)
 }
 
-func emitEditSchemaGenerate(args []string, mode string) {
-	emitJSON(map[string]any{
-		"fields": []map[string]any{
-			{"name": "name", "type": "string", "default": ""},
-			{"name": "date", "type": "string", "default": ""},
-		},
-	})
+// emitEditRemoved mirrors the real CLI's migration hint for the retired
+// `edit schema` and `edit detections` subgroups.
+func emitEditRemoved(args []string) {
+	fmt.Fprintf(stderr, "Error: unknown command %q for \"extend edit\": schema scaffolding moved; use 'extend detect-form'\n", positional(args)[1])
+	exitCode = 1
 }
 
 func emitWorkflowRun(args []string, mode string) {
@@ -204,9 +202,8 @@ func emitWorkflowRun(args []string, mode string) {
 // API has no list-edit-runs endpoint). Agents are expected to
 // recognize this and use `edit runs get edr_xxx` per ID instead.
 func emitRunsList(args []string, mode string) {
-	if positional(args)[0] == "edit" {
-		fmt.Fprintln(stderr,
-			`Error: unknown command "list" for "extend edit runs" (edit runs are not listable; use 'extend edit runs get edr_...' for individual edit runs)`)
+	if verb := positional(args)[0]; verb == "edit" || verb == "detect-form" {
+		fmt.Fprintf(stderr, "Error: unknown command \"list\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
@@ -293,6 +290,10 @@ func typedRunID(args []string) string {
 
 func emitRunsWatch(args []string, mode string) {
 	id := typedRunID(args)
+	if positional(args)[0] == "detect-form" {
+		emitDetectionRun(id)
+		return
+	}
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
 		return
@@ -303,6 +304,10 @@ func emitRunsWatch(args []string, mode string) {
 
 func emitRunsGet(args []string, mode string) {
 	id := typedRunID(args)
+	if positional(args)[0] == "detect-form" {
+		emitDetectionRun(id)
+		return
+	}
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
 		return
@@ -311,11 +316,11 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	// Parse and edit runs have no cancel command in the real CLI;
-	// the dispatch reaches here for them too, so mirror cobra's
-	// unknown-command failure verbatim.
+	// Parse, edit, and detect-form runs have no cancel command in the
+	// real CLI; the dispatch reaches here for them too, so mirror
+	// cobra's unknown-command failure verbatim.
 	verb := positional(args)[0]
-	if verb == "parse" || verb == "edit" {
+	if verb == "parse" || verb == "edit" || verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
@@ -327,6 +332,11 @@ func emitRunsCancel(args []string, mode string) {
 // a TTY, so like the real CLI it refuses without --yes/-y and reports
 // the deletion to stderr on success.
 func emitRunsDelete(args []string, mode string) {
+	if verb := positional(args)[0]; verb == "detect-form" {
+		fmt.Fprintf(stderr, "Error: unknown command \"delete\" for \"extend %s runs\"\n", verb)
+		exitCode = 1
+		return
+	}
 	confirmed := hasFlag(args, "yes")
 	for _, a := range args {
 		if a == "-y" {
@@ -354,18 +364,19 @@ func emitRunsDelete(args []string, mode string) {
 	fmt.Fprintf(stderr, "✓ Deleted run %s\n", id)
 }
 
-// emitEditDetectionsCreate mirrors `edit detections create`, which
-// waits by default and prints the PROCESSED form detection run;
-// output.schema carries the generated edit schema.
-func emitEditDetectionsCreate(args []string, mode string) {
-	emitDetectionRun(nowID("sgr_"))
-}
-
-func emitEditDetectionsGet(args []string, mode string) {
-	pos := positional(args)
-	id := ""
-	if len(pos) >= 4 {
-		id = pos[3]
+// emitDetectForm mirrors `extend detect-form <input>`, which waits by
+// default and prints the PROCESSED form detection run; output.schema
+// carries the generated edit schema. With --wait=false it returns the
+// fresh PROCESSING run for later polling via `detect-form runs`.
+func emitDetectForm(args []string, mode string) {
+	id := nowID("sgr_")
+	if equalsFalse(flagValue(args, "wait")) {
+		emitJSON(map[string]any{
+			"object": "form_detection_run",
+			"id":     id,
+			"status": "PROCESSING",
+		})
+		return
 	}
 	emitDetectionRun(id)
 }

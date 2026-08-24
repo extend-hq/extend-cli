@@ -413,6 +413,9 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 		{[]string{"edit", "runs", "list"}, `unknown command "list" for "extend edit runs"`},
 		{[]string{"extract", "runs", "update", "exr_x"}, `unknown command "update" for "extend extract runs"`},
 		{[]string{"workflows", "batches", "get", "b_x"}, `unknown command "batches" for "extend workflows"`},
+		{[]string{"detect-form", "runs", "cancel", "sgr_x"}, `unknown command "cancel" for "extend detect-form runs"`},
+		{[]string{"edit", "schema", "generate", "form.pdf"}, "extend detect-form"},
+		{[]string{"edit", "detections", "get", "sgr_x"}, "extend detect-form"},
 		{[]string{"bogus"}, `unknown command "bogus" for "extend"`},
 	}
 	for _, tc := range cases {

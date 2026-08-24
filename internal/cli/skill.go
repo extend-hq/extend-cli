@@ -62,10 +62,11 @@ var descriptionVerbs = []descriptionVerb{
 	{"classifying or identifying the type of a document (e.g. telling MSA from SOW from NDA)", "classify"},
 	{"splitting multi-document bundles into segments", "split"},
 	{"filling PDF forms via a values schema", "edit"},
+	{"detecting form fields to scaffold an edit schema", "detect-form"},
 	{"running multi-step document AI workflows", "workflows"},
 	// Run inspection is typed per verb (extract runs, workflows runs, ...);
 	// the guard maps to the primary verb whose runs subgroup carries the shape.
-	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, workflow_run_)", "extract"},
+	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, sgr_, workflow_run_)", "extract"},
 	{"uploading documents to an Extend workspace and managing the resulting file_xxx IDs", "files"},
 }
 
@@ -281,14 +282,14 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 	}
 
 	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch` or `workflows run batch`.\n\n")
-	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` runs alone (no processor); `edit` takes `--instructions` (free-form prose). See `extend edit --help` for the full set.\n\n")
+	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` and `detect-form` run alone (no processor); `edit` takes `--instructions` (free-form prose).\n\n")
 }
 
 func writeSkillWait(b *strings.Builder) {
 	b.WriteString("## Wait, async, watch\n\n")
 	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`) **wait by default** for terminal state and print the result. Pass `--wait=false` to return the run ID immediately.\n\n")
 	b.WriteString("`extend workflows run` is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
-	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `workflow_run_` workflows):\n\n")
+	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `sgr_` detect-form, `workflow_run_` workflows):\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx\n\n")
 	b.WriteString("A wrong-type ID fails fast, naming the right command. Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
@@ -296,6 +297,7 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
 	b.WriteString("- **Edit runs** (`edr_*`) are not listable; the API has no `LIST /edit_runs`.\n")
 	b.WriteString("- **Parse and edit runs** have no cancel command; other run types support best-effort cancel.\n")
+	b.WriteString("- **Form detection runs** (`sgr_*`) support only get and watch.\n")
 	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
@@ -429,7 +431,7 @@ field per the generated shape (` + "`extend_edit:value`" + ` for explicit values
 ` + "`extend_edit:image`" + ` for PNG/JPEG signature images), and then run
 ` + "`edit --schema`" + `:
 
-    extend edit schema generate form.pdf > schema.json
+    extend detect-form form.pdf --jq '.output.schema' -o json > schema.json
     # populate values on each field per the generated shape, then:
     extend edit form.pdf --schema schema.json --output-file filled.pdf
 
@@ -494,7 +496,7 @@ When the values live in a source document (e.g. fill a 1040 from a W-2):
 // disclosure principle.
 func writeSkillCatalog(b *strings.Builder, root *CommandDoc) {
 	b.WriteString("## Command reference\n\n")
-	b.WriteString("One line per command — invocation plus a summary. **Run `extend <command> --help` for flags, examples, and per-command gotchas.** The processor-resource block is parametric (the four families share an identical seven-command shape).\n\n")
+	b.WriteString("One line per command — invocation plus a summary. **Run `extend <command> --help` for flags, examples, and per-command gotchas.**\n\n")
 	writeCatalogSection(b, root, "Action verbs", "Actions", nil)
 	writeCatalogSection(b, root, "Inspection", "Inspection", nil)
 	writeCatalogProcessorFamilies(b)
@@ -656,14 +658,14 @@ func topGroupForName(root *CommandDoc, name string) string {
 func writeSkillTopics(b *strings.Builder, root *CommandDoc) {
 	b.WriteString("## When this skill isn't enough\n\n")
 	b.WriteString("The body above shows the CLI's *shape*. For depth, use the help system before guessing:\n\n")
-	b.WriteString("- `extend <command> --help` — every flag, multiple worked examples, and the full per-command gotcha list. Reach for this whenever a flag isn't obvious or the catalog example doesn't cover your case.\n")
+	b.WriteString("- `extend <command> --help` — every flag, multiple worked examples, and the full per-command gotcha list.\n")
 	for _, sub := range root.Subcommands {
 		if !sub.IsTopic() {
 			continue
 		}
 		fmt.Fprintf(b, "- `extend help %s` — %s. %s\n", sub.Name(), sub.Summary, topicLoadHint(sub.Name()))
 	}
-	b.WriteString("\nThese commands run offline and never contact the Extend API.\n")
+	b.WriteString("\nThese commands run offline.\n")
 }
 
 // topicLoadHint returns a short directive sentence explaining when an

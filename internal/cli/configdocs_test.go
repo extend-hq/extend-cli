@@ -303,24 +303,24 @@ func TestParseHelpDocumentsOptions(t *testing.T) {
 	}
 }
 
-// TestEditSchemaGenerateHelpDocumentsProps asserts the extend_edit:* key
-// reference reaches `extend edit schema generate --help`.
-func TestEditSchemaGenerateHelpDocumentsProps(t *testing.T) {
+// TestDetectFormHelpDocumentsProps asserts the extend_edit:* key
+// reference reaches `extend detect-form --help`.
+func TestDetectFormHelpDocumentsProps(t *testing.T) {
 	ta := newTestApp(t, newFakeServer(t, nil))
-	cmd := findCmd(t, ta.app, "edit", "schema", "generate")
+	cmd := findCmd(t, ta.app, "detect-form")
 	for _, want := range []string{
 		"extend_edit:value",
 		"extend_edit:field_type",
 		"extend_edit:bbox",
-		"mappingResult",
-		"annotatedSchema",
+		"output.mappingResult",
+		"output.annotatedSchema",
 		"radioEnumsEnabled",
 		"nativeFieldsOnly",
 		"dependentRequired",
 		"if/then/else",
 	} {
 		if !strings.Contains(cmd.Long, want) {
-			t.Errorf("edit schema generate --help missing %q", want)
+			t.Errorf("detect-form --help missing %q", want)
 		}
 	}
 }

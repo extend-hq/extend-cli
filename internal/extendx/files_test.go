@@ -241,13 +241,6 @@ func TestBuildEditFile_RejectsText(t *testing.T) {
 	}
 }
 
-func TestBuildEditSchemaFile_RejectsText(t *testing.T) {
-	_, err := BuildEditSchemaFile(FileRef{Text: "raw"})
-	if err == nil {
-		t.Error("BuildEditSchemaFile(text) = nil; want non-nil")
-	}
-}
-
 func TestBuildFormDetectionFile_RejectsText(t *testing.T) {
 	_, err := BuildFormDetectionFile(FileRef{Text: "raw"})
 	if err == nil {

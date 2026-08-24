@@ -338,8 +338,8 @@ func parseOptionsDoc() string {
 
 // editSchemaPropertyDoc documents the Extend-specific extend_edit:* keys
 // the schema generator annotates each field with (EditJSON in the SDK). It
-// is surfaced in `extend edit schema generate` --help so an agent knows
-// which keys to populate and which to leave as generated.
+// is surfaced in `extend detect-form` --help so an agent knows which keys
+// to populate and which to leave as generated.
 const editSchemaPropertyDoc = `A generated schema is JSON Schema with Extend-specific extend_edit:* annotations on
 each field. Populate the value keys; leave detected structural keys as generated
 (inspect the schema — do not invent field names or bounding boxes):
@@ -390,24 +390,12 @@ const editOutputDoc = `Edit output:
 Use --output-file to auto-download output.editedFile. Without --output-file, the
 filled PDF remains on Extend; use the returned file ID with ` + "`extend files download`" + `.`
 
-const editSchemaGenerationDoc = `Generate Edit Schema detects PDF form fields and returns a schema you can pass to
-` + "`extend edit --schema`" + `. The endpoint is synchronous: it returns the schema directly,
-with no schema-generation run to poll or delete.
+const formDetectionOutputDoc = `A PROCESSED run carries the detection result under output:
 
-Response fields:
-  - schema — final generated schema after optional mapping; pass this to edit.
-  - annotatedSchema — original detected schema with field locations.
-  - mappingResult — present when --input-schema is provided; includes matches,
+  - output.schema — final generated schema after optional mapping; pass this to edit.
+  - output.annotatedSchema — original detected schema with field locations.
+  - output.mappingResult — present when --input-schema is provided; includes matches,
     unmatchedInputPaths, and unusedFormFieldKeys.
 
-Generation config:
-  - instructions — guide field detection and naming.
-  - inputSchema — existing edit schema to map onto detected fields.
-  - advancedOptions.tableParsingEnabled — parse table regions as arrays of objects.
-  - advancedOptions.radioEnumsEnabled — model radio groups as enums so only one
-    widget in a group is selected.
-  - advancedOptions.nativeFieldsOnly — only use native AcroForm fields and skip
-    object detection.
-
-A common production workflow is: generate a base schema, add values and any
+A common production workflow is: detect a base schema, add values and any
 root-level conditional requirements, then run ` + "`extend edit --schema`" + `.`
