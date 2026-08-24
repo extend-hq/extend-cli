@@ -55,8 +55,8 @@ const (
 	// ProfileShort: 1s -> 10s. Used by extract, classify, split, parse,
 	// edit, and `runs watch` on those run kinds.
 	ProfileShort WaitProfile = "short"
-	// ProfileLong: 2s -> 30s. Used by workflow runs (`extend run`) and
-	// batch watching (`extend <verb> batches watch`).
+	// ProfileLong: 2s -> 30s. Used by workflow runs (`extend workflows
+	// run`) and batch watching (`extend <verb> batches watch`).
 	ProfileLong WaitProfile = "long"
 )
 

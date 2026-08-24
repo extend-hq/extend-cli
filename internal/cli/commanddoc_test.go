@@ -393,6 +393,62 @@ func TestValidateRejectsUnresolvedSeeAlso(t *testing.T) {
 // in the tree to run, so no client is ever needed.
 func testAppForDocs() *App { return &App{} }
 
+// TestGroupsRejectUnknownSubcommands pins the exit contract for argv
+// shapes that don't resolve to a runnable leaf: removed top-level
+// groups (runs/run/batches), typed subcommands a kind doesn't have
+// (parse runs cancel, edit runs list, workflows batches), and any
+// other unknown subcommand of a group. Each must surface an error
+// (non-zero exit) rather than printing help and exiting 0 — scripts
+// gate on exit status, and a silent success here means a watch or
+// cancel that never happened.
+func TestGroupsRejectUnknownSubcommands(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string // substring of the error message
+	}{
+		{[]string{"runs", "watch", "exr_x"}, "extend <extract|parse|classify|split|edit|workflows> runs"},
+		{[]string{"run", "in.pdf"}, "extend workflows run"},
+		{[]string{"batches", "get", "bpr_x"}, "extend <extract|parse|classify|split> batches"},
+		{[]string{"parse", "runs", "cancel", "pr_x"}, `unknown command "cancel" for "extend parse runs"`},
+		{[]string{"edit", "runs", "list"}, `unknown command "list" for "extend edit runs"`},
+		{[]string{"extract", "runs", "update", "exr_x"}, `unknown command "update" for "extend extract runs"`},
+		{[]string{"workflows", "batches", "get", "b_x"}, `unknown command "batches" for "extend workflows"`},
+		{[]string{"bogus"}, `unknown command "bogus" for "extend"`},
+	}
+	for _, tc := range cases {
+		ta := newTestApp(t, nil)
+		root := RootDoc(ta.app).Build()
+		root.SilenceUsage = true
+		root.SilenceErrors = true
+		root.SetOut(ta.out)
+		root.SetErr(ta.errOut)
+		root.SetArgs(tc.args)
+		err := root.Execute()
+		if err == nil {
+			t.Errorf("extend %s: err = nil; want unknown-command error", strings.Join(tc.args, " "))
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("extend %s: error %q does not contain %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+	}
+
+	// A bare group still shows help and exits 0.
+	ta := newTestApp(t, nil)
+	root := RootDoc(ta.app).Build()
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	root.SetOut(ta.out)
+	root.SetErr(ta.errOut)
+	root.SetArgs([]string{"extract", "runs"})
+	if err := root.Execute(); err != nil {
+		t.Errorf("bare group 'extend extract runs': err = %v; want nil (help)", err)
+	}
+	if !strings.Contains(ta.out.String(), "Available Commands") {
+		t.Error("bare group 'extend extract runs' did not print help")
+	}
+}
+
 func noopRun(*cobra.Command, []string) error { return nil }
 
 var jsonJSON = OutputSpec{TTY: OutputJSON, Pipe: OutputJSON}

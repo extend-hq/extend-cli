@@ -103,8 +103,23 @@ func main() {
 		emitRunsGet(args, mode)
 	case matchTypedRuns(args, "cancel"):
 		emitRunsCancel(args, mode)
+	case matchTypedRuns(args, "delete"):
+		emitRunsDelete(args, mode)
 	case matchTypedBatches(args, "get"), matchTypedBatches(args, "watch"):
 		emitBatchesStatus(args, mode)
+	case matchTypedGroup(args):
+		// Any other `<verb> runs|batches ...` shape is unmodeled. Stop
+		// it here: falling through to the action-verb emitters below
+		// would fabricate a fresh successful run out of what was an
+		// inspection or cleanup call, and the bogus ID would enter the
+		// fabrication grader's legitimate-ID set.
+		emitUnknown(args)
+	case match(args, "edit", "detections", "create"):
+		emitEditDetectionsCreate(args, mode)
+	case match(args, "edit", "detections", "get"):
+		emitEditDetectionsGet(args, mode)
+	case match(args, "edit", "detections"):
+		emitUnknown(args)
 	case match(args, "extract", "batch"):
 		emitExtractBatch(args, mode)
 	case match(args, "extract"):
@@ -210,6 +225,23 @@ func matchTypedBatches(args []string, action string) bool {
 		return false
 	}
 	for _, v := range []string{"extract", "parse", "classify", "split"} {
+		if pos[0] == v {
+			return true
+		}
+	}
+	return false
+}
+
+// matchTypedGroup reports whether argv addresses a typed runs/batches
+// subgroup at all, regardless of action. Used as a catch-all guard
+// after the specific matchers so unmodeled shapes never reach the
+// action-verb emitters.
+func matchTypedGroup(args []string) bool {
+	pos := positional(args)
+	if len(pos) < 2 || (pos[1] != "runs" && pos[1] != "batches") {
+		return false
+	}
+	for _, v := range runVerbGroups {
 		if pos[0] == v {
 			return true
 		}

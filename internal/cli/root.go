@@ -96,6 +96,24 @@ Environment variables:
 
 The --workspace, --region, and --http-timeout flags override their
 respective env vars.`,
+		// The named cases are top-level groups this CLI used to ship
+		// before run/batch inspection became typed per verb; callers
+		// with stale scripts or skills still invoke them, so the error
+		// names the replacement instead of a bare "unknown command".
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			switch args[0] {
+			case "run":
+				return errors.New(`unknown command "run" for "extend": workflow runs moved; use 'extend workflows run'`)
+			case "runs":
+				return errors.New(`unknown command "runs" for "extend": run inspection is typed per verb; use 'extend <extract|parse|classify|split|edit|workflows> runs ...'`)
+			case "batches":
+				return errors.New(`unknown command "batches" for "extend": batch status is typed per verb; use 'extend <extract|parse|classify|split> batches ...'`)
+			}
+			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+		},
 		Subcommands: []*CommandDoc{
 			// Actions
 			newExtractDoc(app),

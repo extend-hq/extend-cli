@@ -474,6 +474,18 @@ func (d *CommandDoc) build(root *CommandDoc) *cobra.Command {
 		})
 	case d.RunE != nil:
 		cmd.RunE = d.RunE
+	case d.IsGroup():
+		// Groups must be runnable: cobra returns flag.ErrHelp for a
+		// non-runnable command BEFORE Args validation, so an unknown
+		// subcommand ('extend parse runs cancel ...') would print help
+		// and exit 0 — silently succeeding for scripts that gate on
+		// exit status. With a RunE attached, the group's Args
+		// validator (cobra.NoArgs by default) rejects unknown
+		// subcommands with a non-zero exit, and a bare invocation
+		// still shows help.
+		cmd.RunE = func(cobraCmd *cobra.Command, _ []string) error {
+			return cobraCmd.Help()
+		}
 	}
 
 	applyAnnotations(cmd, d)

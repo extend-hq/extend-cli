@@ -170,7 +170,8 @@ func renderOutputTopicBody(root *CommandDoc) string {
 		if e.Doc.Output.TTY == "" && e.Doc.Output.Pipe == "" {
 			continue
 		}
-		// Convert dotted path "extend.runs.watch" into "extend runs watch".
+		// Convert dotted path "extend.extract.runs.watch" into
+		// "extend extract runs watch".
 		spaced := strings.ReplaceAll(e.Path, ".", " ")
 		if len(spaced) > pathLen {
 			pathLen = len(spaced)

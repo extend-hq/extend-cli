@@ -132,7 +132,10 @@ func emitExtract(args []string, mode string) {
 }
 
 func emitExtractBatch(args []string, mode string) {
-	id := nowID("batch_")
+	// Processor batches carry the bpr_ prefix; the real CLI's
+	// ValidateBatchID rejects anything else on `extract batches
+	// get|watch`, so the fixture ID must be followable.
+	id := nowID("bpr_")
 	emitJSON(map[string]any{
 		"id":     id,
 		"status": "PROCESSING",
@@ -310,14 +313,78 @@ func emitRunsGet(args []string, mode string) {
 func emitRunsCancel(args []string, mode string) {
 	// Parse and edit runs have no cancel command in the real CLI;
 	// the dispatch reaches here for them too, so mirror cobra's
-	// unknown-command failure.
+	// unknown-command failure verbatim.
 	verb := positional(args)[0]
 	if verb == "parse" || verb == "edit" {
-		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\" (%s runs cannot be cancelled)\n", verb, verb)
+		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
 	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+}
+
+// emitRunsDelete mirrors `<verb> runs delete <id>`: the stub is never
+// a TTY, so like the real CLI it refuses without --yes/-y and reports
+// the deletion to stderr on success.
+func emitRunsDelete(args []string, mode string) {
+	confirmed := hasFlag(args, "yes")
+	for _, a := range args {
+		if a == "-y" {
+			confirmed = true
+		}
+	}
+	if !confirmed {
+		fmt.Fprintln(stderr, "Error: refusing to delete run without confirmation; pass --yes")
+		exitCode = 1
+		return
+	}
+	// positional() treats `-y <id>` as a flag/value pair, so fall back
+	// to scanning for a run-prefixed token when the ID lands adjacent
+	// to the short flag.
+	id := typedRunID(args)
+	if id == "" {
+		for _, a := range args {
+			for _, p := range []string{"exr_", "pr_", "clr_", "splr_", "edr_", "workflow_run_"} {
+				if strings.HasPrefix(a, p) {
+					id = a
+				}
+			}
+		}
+	}
+	fmt.Fprintf(stderr, "✓ Deleted run %s\n", id)
+}
+
+// emitEditDetectionsCreate mirrors `edit detections create`, which
+// waits by default and prints the PROCESSED form detection run;
+// output.schema carries the generated edit schema.
+func emitEditDetectionsCreate(args []string, mode string) {
+	emitDetectionRun(nowID("sgr_"))
+}
+
+func emitEditDetectionsGet(args []string, mode string) {
+	pos := positional(args)
+	id := ""
+	if len(pos) >= 4 {
+		id = pos[3]
+	}
+	emitDetectionRun(id)
+}
+
+func emitDetectionRun(id string) {
+	emitJSON(map[string]any{
+		"object": "form_detection_run",
+		"id":     id,
+		"status": "PROCESSED",
+		"output": map[string]any{
+			"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "extend_edit:value": nil},
+					"date": map[string]any{"type": "string", "extend_edit:value": nil},
+				},
+			},
+		},
+	})
 }
 
 // emitBatchesStatus serves `<verb> batches get|watch` with a terminal
