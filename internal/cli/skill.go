@@ -159,7 +159,7 @@ func renderDescription() string {
 		examples[i] = `"` + e + `"`
 	}
 	return fmt.Sprintf(
-		`Use when %s — even if the user describes the task without naming Extend (e.g. %s).`,
+		"Use when driving Extend from a shell with the `extend` CLI — %s — even if the user describes the task without naming Extend (e.g. %s). For terminal, script, and CI work on local files; if Extend MCP tools are connected in this session, prefer them unless the user asks for the CLI.",
 		joinSerial(verbs, "or"),
 		joinSerial(examples, "or"),
 	)
