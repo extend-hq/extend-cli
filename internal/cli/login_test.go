@@ -95,11 +95,11 @@ func TestResolveAuthServer_ClientIDOverrideKeepsBakedIssuer(t *testing.T) {
 // TestResolveAuthServer_UnknownBaseRequiresEnv: a non-region base with
 // no env override fails and names the env var to set.
 func TestResolveAuthServer_UnknownBaseRequiresEnv(t *testing.T) {
-	_, _, err := resolveAuthServer(mapGetenv(nil), "https://api.staging.extend.ai")
+	_, _, err := resolveAuthServer(mapGetenv(nil), "https://api.rig.example.com")
 	if err == nil {
 		t.Fatal("resolveAuthServer = nil error; want instructions")
 	}
-	for _, want := range []string{envOAuthIssuer, "api.staging.extend.ai"} {
+	for _, want := range []string{envOAuthIssuer, "api.rig.example.com"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q missing %q", err, want)
 		}
