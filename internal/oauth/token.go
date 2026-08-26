@@ -13,10 +13,11 @@ import (
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 )
 
-// DefaultClientID is the static first-party public client the Extend
-// API registers for the CLI. Public client: PKCE required, no secret,
-// loopback redirects only. Migration-seeded identically in every
-// environment, so it is never overridden.
+// DefaultClientID is the fallback public client id used when neither
+// the region table (extendx.Region.LoginClientID) nor
+// EXTEND_OAUTH_CLIENT_ID supplies one — custom issuers and test rigs
+// that register their own "extend-cli" client. Public client: PKCE
+// required, no secret, loopback redirects only.
 const DefaultClientID = "extend-cli"
 
 // TokenResponse is the token endpoint's success payload for both the

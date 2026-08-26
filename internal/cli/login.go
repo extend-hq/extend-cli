@@ -67,6 +67,7 @@ which source is in effect.`,
 			"Each login targets exactly one workspace and one environment, chosen on the consent screen; log in again to switch.",
 			"Logins are keyed by API base URL: switching --region or EXTEND_BASE_URL selects a different stored session (or none).",
 			"With --env <label> set, commands read EXTEND_<LABEL>_API_KEY only and never fall back to the stored login.",
+			"Logins to the Extend regions need no configuration; a custom EXTEND_BASE_URL (staging, rigs) needs EXTEND_OAUTH_ISSUER and usually EXTEND_OAUTH_CLIENT_ID.",
 		},
 		SeeAlso: []string{"logout", "whoami", "setup", "auth"},
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
@@ -193,7 +194,7 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	// discovery, the browser authorize URL, and the token endpoint all
 	// live on the issuer domain, while the RFC 8707 resource parameter
 	// and every bearer-authenticated API call point at the API base.
-	issuer, clientID, err := resolveAuthServer(os.Getenv)
+	issuer, clientID, err := resolveAuthServer(os.Getenv, base)
 	if err != nil {
 		return err
 	}
@@ -382,22 +383,46 @@ func revokeRecord(ctx context.Context, base string, rec *oauth.Record) error {
 }
 
 // resolveAuthServer returns the authorization-server issuer (the WorkOS
-// AuthKit domain) and OAuth client id for 'extend login'. The issuer has
-// no default: it differs per Extend environment and a login attempt
-// without it cannot succeed, so fail with instructions instead.
-func resolveAuthServer(getenv func(string) string) (issuer, clientID string, err error) {
+// AuthKit domain) and OAuth client id for 'extend login'. Each region
+// carries a built-in issuer and CLI client id, matched by the resolved
+// API base URL, so logins to the regional deployments need no
+// configuration. EXTEND_OAUTH_ISSUER overrides the issuer — and disables
+// the baked client id with it, because client ids are per-issuer —
+// while EXTEND_OAUTH_CLIENT_ID overrides the client id alone. Non-region
+// bases (staging, rigs) have no built-in issuer and fail with
+// instructions instead.
+func resolveAuthServer(getenv func(string) string, base string) (issuer, clientID string, err error) {
 	issuer = oauth.NormalizeBase(getenv(envOAuthIssuer))
+	clientID = getenv(envOAuthClientID)
 	if issuer == "" {
-		return "", "", fmt.Errorf("%s is not set; set it to this environment's sign-in domain (e.g. https://id.extend.ai) to use 'extend login'", envOAuthIssuer)
+		if r, ok := regionForBase(base); ok && r.LoginIssuer != "" {
+			issuer = oauth.NormalizeBase(r.LoginIssuer)
+			if clientID == "" {
+				clientID = r.LoginClientID
+			}
+		}
+	}
+	if issuer == "" {
+		return "", "", fmt.Errorf("no sign-in domain is known for %s; set %s to this environment's sign-in domain (e.g. https://id.extend.ai) to use 'extend login'", base, envOAuthIssuer)
 	}
 	if err := oauth.ValidateBaseURL(issuer); err != nil {
 		return "", "", err
 	}
-	clientID = getenv(envOAuthClientID)
 	if clientID == "" {
 		clientID = oauth.DefaultClientID
 	}
 	return issuer, clientID, nil
+}
+
+// regionForBase returns the region whose API base URL matches the
+// resolved base, if any. base must already be normalized.
+func regionForBase(base string) (extendx.Region, bool) {
+	for _, r := range extendx.Regions() {
+		if oauth.NormalizeBase(r.APIURL) == base {
+			return r, true
+		}
+	}
+	return extendx.Region{}, false
 }
 
 // effectiveBaseURL resolves the API base URL the CLI is pointed at:
@@ -525,15 +550,11 @@ func loginSuccessLine(base string, id *loginIdentity) string {
 	return line + "."
 }
 
-// isKnownRegionBase reports whether base is one of the advertised
-// regions' API URLs (as opposed to a custom EXTEND_BASE_URL target).
+// isKnownRegionBase reports whether base is one of the known regions'
+// API URLs (as opposed to a custom EXTEND_BASE_URL target).
 func isKnownRegionBase(base string) bool {
-	for _, region := range extendx.KnownRegions() {
-		if u, ok := extendx.RegionBaseURL(region); ok && oauth.NormalizeBase(u) == base {
-			return true
-		}
-	}
-	return false
+	_, ok := regionForBase(base)
+	return ok
 }
 
 // openBrowser launches the platform's URL opener. Errors are surfaced
