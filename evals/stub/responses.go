@@ -132,7 +132,10 @@ func emitExtract(args []string, mode string) {
 }
 
 func emitExtractBatch(args []string, mode string) {
-	id := nowID("batch_")
+	// Processor batches carry the bpr_ prefix; the real CLI's
+	// ValidateBatchID rejects anything else on `extract batches
+	// get|watch`, so the fixture ID must be followable.
+	id := nowID("bpr_")
 	emitJSON(map[string]any{
 		"id":     id,
 		"status": "PROCESSING",
@@ -180,13 +183,11 @@ func emitEdit(args []string, mode string) {
 	emitJSON(r)
 }
 
-func emitEditSchemaGenerate(args []string, mode string) {
-	emitJSON(map[string]any{
-		"fields": []map[string]any{
-			{"name": "name", "type": "string", "default": ""},
-			{"name": "date", "type": "string", "default": ""},
-		},
-	})
+// emitEditRemoved mirrors the real CLI's migration hint for the retired
+// `edit schema` and `edit detections` subgroups.
+func emitEditRemoved(args []string) {
+	fmt.Fprintf(stderr, "Error: unknown command %q for \"extend edit\": schema scaffolding moved; use 'extend detect-form'\n", positional(args)[1])
+	exitCode = 1
 }
 
 func emitWorkflowRun(args []string, mode string) {
@@ -197,13 +198,12 @@ func emitWorkflowRun(args []string, mode string) {
 // emitRunsList is the centerpiece for pagination tests. In paginated
 // mode we split fixtureFailedRuns across pages keyed by --page-token.
 //
-// Mirrors a real-CLI behaviour: --type edit is rejected (the API has
-// no list-edit-runs endpoint). Agents are expected to recognize this
-// and use `runs get edr_xxx` per ID instead.
+// Mirrors a real-CLI behaviour: `edit runs list` does not exist (the
+// API has no list-edit-runs endpoint). Agents are expected to
+// recognize this and use `edit runs get edr_xxx` per ID instead.
 func emitRunsList(args []string, mode string) {
-	if flagValue(args, "type") == "edit" {
-		fmt.Fprintln(stderr,
-			"Error: --type edit is not supported (edit runs are not listable; use 'extend runs get edr_...' for individual edit runs)")
+	if verb := positional(args)[0]; verb == "edit" || verb == "detect-form" {
+		fmt.Fprintf(stderr, "Error: unknown command \"list\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
@@ -247,14 +247,19 @@ func emitRunsList(args []string, mode string) {
 
 func filterRuns(args []string, in []Run) []Run {
 	status := flagValue(args, "status")
-	if status == "" {
-		return in
+	kind := positional(args)[0]
+	if kind == "workflows" {
+		kind = "workflow"
 	}
 	out := make([]Run, 0, len(in))
 	for _, r := range in {
-		if r.Status == status {
-			out = append(out, r)
+		if r.Type != kind {
+			continue
 		}
+		if status != "" && r.Status != status {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }
@@ -274,11 +279,20 @@ func chunk(in []Run, size int) [][]Run {
 	return out
 }
 
-func emitRunsWatch(args []string, mode string) {
+// typedRunID pulls the run ID from `<verb> runs <action> <id>` argv.
+func typedRunID(args []string) string {
 	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
+	if len(pos) >= 4 {
+		return pos[3]
+	}
+	return ""
+}
+
+func emitRunsWatch(args []string, mode string) {
+	id := typedRunID(args)
+	if positional(args)[0] == "detect-form" {
+		emitDetectionRun(id)
+		return
 	}
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
@@ -289,10 +303,10 @@ func emitRunsWatch(args []string, mode string) {
 }
 
 func emitRunsGet(args []string, mode string) {
-	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
+	id := typedRunID(args)
+	if positional(args)[0] == "detect-form" {
+		emitDetectionRun(id)
+		return
 	}
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
@@ -302,18 +316,107 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	pos := positional(args)
-	id := ""
-	if len(pos) >= 3 {
-		id = pos[2]
-	}
-	// Parse runs cannot be cancelled in real life. Mirror that.
-	if strings.HasPrefix(id, "pr_") {
-		fmt.Fprintln(stderr, "Error: parse runs cannot be cancelled (use 'runs delete' to remove the record)")
+	// Parse, edit, and detect-form runs have no cancel command in the
+	// real CLI; the dispatch reaches here for them too, so mirror
+	// cobra's unknown-command failure verbatim.
+	verb := positional(args)[0]
+	if verb == "parse" || verb == "edit" || verb == "detect-form" {
+		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
-	emitJSON(synthesizeRun(id, "CANCELLED"))
+	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+}
+
+// emitRunsDelete mirrors `<verb> runs delete <id>`: the stub is never
+// a TTY, so like the real CLI it refuses without --yes/-y and reports
+// the deletion to stderr on success.
+func emitRunsDelete(args []string, mode string) {
+	if verb := positional(args)[0]; verb == "detect-form" {
+		fmt.Fprintf(stderr, "Error: unknown command \"delete\" for \"extend %s runs\"\n", verb)
+		exitCode = 1
+		return
+	}
+	confirmed := hasFlag(args, "yes")
+	for _, a := range args {
+		if a == "-y" {
+			confirmed = true
+		}
+	}
+	if !confirmed {
+		fmt.Fprintln(stderr, "Error: refusing to delete run without confirmation; pass --yes")
+		exitCode = 1
+		return
+	}
+	// positional() treats `-y <id>` as a flag/value pair, so fall back
+	// to scanning for a run-prefixed token when the ID lands adjacent
+	// to the short flag.
+	id := typedRunID(args)
+	if id == "" {
+		for _, a := range args {
+			for _, p := range []string{"exr_", "pr_", "clr_", "splr_", "edr_", "workflow_run_"} {
+				if strings.HasPrefix(a, p) {
+					id = a
+				}
+			}
+		}
+	}
+	fmt.Fprintf(stderr, "✓ Deleted run %s\n", id)
+}
+
+// emitDetectForm mirrors `extend detect-form <input>`, which waits by
+// default and prints the PROCESSED form detection run; output.schema
+// carries the generated edit schema. With --wait=false it returns the
+// fresh PROCESSING run for later polling via `detect-form runs`.
+func emitDetectForm(args []string, mode string) {
+	id := nowID("sgr_")
+	if equalsFalse(flagValue(args, "wait")) {
+		emitJSON(map[string]any{
+			"object": "form_detection_run",
+			"id":     id,
+			"status": "PROCESSING",
+		})
+		return
+	}
+	emitDetectionRun(id)
+}
+
+func emitDetectionRun(id string) {
+	emitJSON(map[string]any{
+		"object": "form_detection_run",
+		"id":     id,
+		"status": "PROCESSED",
+		"output": map[string]any{
+			"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "extend_edit:value": nil},
+					"date": map[string]any{"type": "string", "extend_edit:value": nil},
+				},
+			},
+		},
+	})
+}
+
+// emitBatchesStatus serves `<verb> batches get|watch` with a terminal
+// processor batch.
+func emitBatchesStatus(args []string, mode string) {
+	pos := positional(args)
+	id := ""
+	if len(pos) >= 4 {
+		id = pos[3]
+	}
+	emitJSON(map[string]any{
+		"id":     id,
+		"status": "PROCESSED",
+		"counts": map[string]any{"submitted": 1, "processed": 1, "failed": 0},
+	})
+}
+
+// emitWorkflowRunBatch mirrors the real workflow batch response, which
+// is just {batchId} — there is no status endpoint for workflow batches.
+func emitWorkflowRunBatch(args []string, mode string) {
+	emitJSON(map[string]any{"batchId": nowID("batch_")})
 }
 
 func synthesizeRun(id, status string) Run {

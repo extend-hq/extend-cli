@@ -132,7 +132,7 @@ func renderAuthTopicBody(_ *CommandDoc) string {
 	b.WriteString("  EXTEND_API_KEY, so you can keep separate keys for test/prod side-by-side:\n\n")
 	b.WriteString("    export EXTEND_API_KEY=sk_prod_xxx\n")
 	b.WriteString("    export EXTEND_TEST_API_KEY=sk_test_xxx\n")
-	b.WriteString("    extend --env test runs list --type extract\n\n")
+	b.WriteString("    extend --env test extract runs list\n\n")
 	b.WriteString("  Other env vars (workspace, region) are not split per environment;\n")
 	b.WriteString("  the docs note workflow definitions are shared between environments while\n")
 	b.WriteString("  runs and data are isolated by the key in use.\n")
@@ -170,7 +170,8 @@ func renderOutputTopicBody(root *CommandDoc) string {
 		if e.Doc.Output.TTY == "" && e.Doc.Output.Pipe == "" {
 			continue
 		}
-		// Convert dotted path "extend.runs.watch" into "extend runs watch".
+		// Convert dotted path "extend.extract.runs.watch" into
+		// "extend extract runs watch".
 		spaced := strings.ReplaceAll(e.Path, ".", " ")
 		if len(spaced) > pathLen {
 			pathLen = len(spaced)
@@ -191,13 +192,13 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	b.WriteString("  TTYs). Pass that value to the next call's --page-token to advance.\n\n")
 	b.WriteString("  Page tokens are bound to the originating query on the server, so\n")
 	b.WriteString("  every follow-up call must repeat the same filter flags as the\n")
-	b.WriteString("  first one (--type, --using, --status, --batch, --sort, etc.).\n")
+	b.WriteString("  first one (--using, --status, --batch, --sort, etc.).\n")
 	b.WriteString("  Changing filters between pages yields incorrect results.\n\n")
 	b.WriteString("  Recommended pattern (agents and scripts) — note FILTERS reused:\n\n")
-	b.WriteString("      FILTERS=(--type extract --using ex_abc --status PROCESSED)\n")
+	b.WriteString("      FILTERS=(--using ex_abc --status PROCESSED)\n")
 	b.WriteString("      tok=\"\"\n")
 	b.WriteString("      while :; do\n")
-	b.WriteString("        page=$(extend runs list \"${FILTERS[@]}\" \\\n")
+	b.WriteString("        page=$(extend extract runs list \"${FILTERS[@]}\" \\\n")
 	b.WriteString("                 --page-token \"$tok\" -o json)\n")
 	b.WriteString("        echo \"$page\" | jq '.data[]'    # do work on this page\n")
 	b.WriteString("        tok=$(echo \"$page\" | jq -r '.nextPageToken')\n")
@@ -219,8 +220,8 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	b.WriteString("Most action commands (extract, classify, split, parse, edit) wait by\n")
 	b.WriteString("default for the run to reach a terminal state, then print the result.\n")
 	b.WriteString("Pass --async to return the run ID immediately. Workflow runs (extend\n")
-	b.WriteString("run) are different: they return immediately by default; pass --wait to\n")
-	b.WriteString("block.\n\n")
+	b.WriteString("workflows run) are different: they return immediately by default; pass\n")
+	b.WriteString("--wait to block.\n\n")
 	b.WriteString("Polling profiles:\n\n")
 	for _, spec := range extendx.WaitProfileSpecs() {
 		fmt.Fprintf(&b, "  %-6s  %v -> %v\n", spec.Profile, spec.Interval, spec.MaxInterval)
@@ -288,10 +289,12 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	}
 
 	b.WriteString("\nWatching:\n\n")
-	b.WriteString("  Use `extend runs watch <id>` for any run, or `extend batches watch`\n")
-	b.WriteString("  for batch runs. Both accept --exit-status, which propagates the\n")
-	b.WriteString("  terminal status to the exit code:\n\n")
-	b.WriteString("      extend runs watch <id> --exit-status && downstream-script.sh\n\n")
+	b.WriteString("  Use the typed watch commands: `extend <verb> runs watch <id>` for a\n")
+	b.WriteString("  run (extract, parse, classify, split, edit, workflows) and\n")
+	b.WriteString("  `extend <verb> batches watch <id>` for a processor or parse batch.\n")
+	b.WriteString("  Both accept --exit-status, which propagates the terminal status to\n")
+	b.WriteString("  the exit code:\n\n")
+	b.WriteString("      extend extract runs watch <id> --exit-status && downstream-script.sh\n\n")
 	b.WriteString("  Without --exit-status, watch commands exit 0 on any successful\n")
 	b.WriteString("  poll regardless of run status. That is useful when you want the\n")
 	b.WriteString("  JSON output and plan to inspect the status field yourself.\n\n")

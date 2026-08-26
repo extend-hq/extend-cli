@@ -118,7 +118,7 @@ func readBody(app *App, path string) ([]byte, error) {
 
 // deleteWithConfirm is shared between webhook endpoint and webhook
 // subscription delete commands. The TTY-aware confirmation matches the
-// pattern used elsewhere (extend files delete, extend runs delete).
+// pattern used elsewhere (extend files delete, extend extract runs delete).
 func deleteWithConfirm(ctx context.Context, app *App, label, id string, yes bool, fn func(context.Context, string) error) error {
 	if !yes {
 		if !app.IO.IsStdinTTY() {

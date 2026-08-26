@@ -108,7 +108,7 @@ func TestClassifyRun_InlineConfig(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "clr_") {
 		t.Fatalf("expected clr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete classify run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete classify run", "classify", "runs", "delete", submitted.ID, "-y")
 }
 
 // TestSplitRun_InlineConfig is the split analog of the classify test above.
@@ -134,5 +134,5 @@ func TestSplitRun_InlineConfig(t *testing.T) {
 	if !strings.HasPrefix(submitted.ID, "splr_") {
 		t.Fatalf("expected splr_ prefix on run id, got %q", submitted.ID)
 	}
-	rememberCleanup(t, env, "delete split run", "runs", "delete", submitted.ID, "-y")
+	rememberCleanup(t, env, "delete split run", "split", "runs", "delete", submitted.ID, "-y")
 }

@@ -38,19 +38,19 @@ func runFailureError(id string, reason, message *string) error {
 //
 // For *extendx.WaitTimeoutError we render an actionable message that
 // names the elapsed --timeout and the two recovery paths: raise
-// --timeout, or detach with --wait=false and follow up with
-// `extend runs watch <id>`. Without this guidance, agents tend to
-// silently retry the same blocking command (as observed in the
-// agent-experience transcripts) instead of switching to the cheap
-// async path.
-func formatActionWaitError(err error, runID string) error {
+// --timeout, or detach with --wait=false and follow up with the typed
+// watch command (watchCmd, e.g. "extend extract runs watch"). Without
+// this guidance, agents tend to silently retry the same blocking
+// command (as observed in the agent-experience transcripts) instead
+// of switching to the cheap async path.
+func formatActionWaitError(err error, runID, watchCmd string) error {
 	if err == nil {
 		return nil
 	}
 	var wt *extendx.WaitTimeoutError
 	if errors.As(err, &wt) {
-		return fmt.Errorf("run %s did not finish within --timeout %s; rerun with a larger --timeout, or detach with --wait=false and poll using 'extend runs watch %s'",
-			runID, wt.Timeout, runID)
+		return fmt.Errorf("run %s did not finish within --timeout %s; rerun with a larger --timeout, or detach with --wait=false and poll using '%s %s'",
+			runID, wt.Timeout, watchCmd, runID)
 	}
 	return fmt.Errorf("wait: %w", err)
 }
@@ -58,15 +58,15 @@ func formatActionWaitError(err error, runID string) error {
 // formatWatchWaitError is the runs-watch / batches-watch specialization.
 // There is no --wait=false alternative here (the command itself is the
 // polling loop), so the actionable hint just nudges the user toward a
-// larger --timeout on retry.
-func formatWatchWaitError(err error, id string) error {
+// larger --timeout on retry of watchCmd (e.g. "extend parse runs watch").
+func formatWatchWaitError(err error, id, watchCmd string) error {
 	if err == nil {
 		return nil
 	}
 	var wt *extendx.WaitTimeoutError
 	if errors.As(err, &wt) {
-		return fmt.Errorf("run %s still not in a terminal state after --timeout %s; rerun 'extend runs watch %s --timeout <larger>'",
-			id, wt.Timeout, id)
+		return fmt.Errorf("run %s still not in a terminal state after --timeout %s; rerun '%s %s --timeout <larger>'",
+			id, wt.Timeout, watchCmd, id)
 	}
 	return fmt.Errorf("wait: %w", err)
 }

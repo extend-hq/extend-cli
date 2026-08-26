@@ -96,24 +96,40 @@ Environment variables:
 
 The --workspace, --region, and --http-timeout flags override their
 respective env vars.`,
+		// The named cases are top-level groups this CLI used to ship
+		// before run/batch inspection became typed per verb; callers
+		// with stale scripts or skills still invoke them, so the error
+		// names the replacement instead of a bare "unknown command".
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			switch args[0] {
+			case "run":
+				return errors.New(`unknown command "run" for "extend": workflow runs moved; use 'extend workflows run'`)
+			case "runs":
+				return errors.New(`unknown command "runs" for "extend": run inspection is typed per verb; use 'extend <extract|parse|classify|split|edit|workflows> runs ...'`)
+			case "batches":
+				return errors.New(`unknown command "batches" for "extend": batch status is typed per verb; use 'extend <extract|parse|classify|split> batches ...'`)
+			}
+			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+		},
 		Subcommands: []*CommandDoc{
 			// Actions
 			newExtractDoc(app),
 			newParseDoc(app),
 			newClassifyDoc(app),
 			newSplitDoc(app),
-			newRunDoc(app),
 			newEditDoc(app),
+			newDetectFormDoc(app),
 			// Inspection
-			newRunsDoc(app),
-			newBatchesDoc(app),
 			newFilesDoc(app),
 			newDownloadDoc(app),
 			// Resources
 			extractorAccessor().doc(app),
 			classifierAccessor().doc(app),
 			splitterAccessor().doc(app),
-			workflowAccessor().doc(app),
+			newWorkflowsDoc(app),
 			newWebhooksDoc(app),
 			newEvaluationsDoc(app),
 			// Agent surface
@@ -532,7 +548,7 @@ func formatError(w io.Writer, pal palette, err error) {
 	if errors.As(err, &urlErr) {
 		if urlErr.Timeout() {
 			fmt.Fprintf(w, "%s request timed out\n", pal.Red("Error:"))
-			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend runs watch'"))
+			fmt.Fprintf(w, "       %s\n", pal.Dim("raise --http-timeout or EXTEND_HTTP_TIMEOUT; for long runs use --wait=false and poll with 'extend <verb> runs watch'"))
 		} else {
 			fmt.Fprintf(w, "%s could not reach the Extend API\n", pal.Red("Error:"))
 			fmt.Fprintf(w, "       %s\n", pal.Dim("check connectivity, --region/--base-url, and that the API is reachable"))

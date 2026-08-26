@@ -8,20 +8,23 @@ import (
 	"time"
 
 	extend "github.com/extend-hq/extend-go-sdk"
+
+	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
-func TestRunsGet_DispatchesByPrefix(t *testing.T) {
+func TestTypedRunsGet_RoutesToKindEndpoint(t *testing.T) {
 	tests := []struct {
 		name     string
+		kind     extendx.RunKind
 		runID    string
 		wantPath string
 	}{
-		{"extract", "exr_abc", "/extract_runs/exr_abc"},
-		{"parse", "pr_abc", "/parse_runs/pr_abc"},
-		{"classify", "clr_abc", "/classify_runs/clr_abc"},
-		{"split", "splr_abc", "/split_runs/splr_abc"},
-		{"workflow", "workflow_run_abc", "/workflow_runs/workflow_run_abc"},
-		{"edit", "edr_abc", "/edit_runs/edr_abc"},
+		{"extract", extendx.KindExtract, "exr_abc", "/extract_runs/exr_abc"},
+		{"parse", extendx.KindParse, "pr_abc", "/parse_runs/pr_abc"},
+		{"classify", extendx.KindClassify, "clr_abc", "/classify_runs/clr_abc"},
+		{"split", extendx.KindSplit, "splr_abc", "/split_runs/splr_abc"},
+		{"workflow", extendx.KindWorkflow, "workflow_run_abc", "/workflow_runs/workflow_run_abc"},
+		{"edit", extendx.KindEdit, "edr_abc", "/edit_runs/edr_abc"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,8 +38,8 @@ func TestRunsGet_DispatchesByPrefix(t *testing.T) {
 			ta := newTestApp(t, srv)
 			ta.app.Format = "json"
 
-			if err := runRunsGet(context.Background(), ta.app, tc.runID, ""); err != nil {
-				t.Fatalf("runRunsGet: %v", err)
+			if err := runTypedRunsGet(context.Background(), ta.app, tc.kind, tc.runID, ""); err != nil {
+				t.Fatalf("runTypedRunsGet: %v", err)
 			}
 			if got := srv.lastRequest().Path; got != tc.wantPath {
 				t.Errorf("hit %q, want %q", got, tc.wantPath)
@@ -45,25 +48,39 @@ func TestRunsGet_DispatchesByPrefix(t *testing.T) {
 	}
 }
 
-func TestRunsGet_UnknownPrefixErrors(t *testing.T) {
+func TestTypedRunsGet_UnknownPrefixErrors(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("server should not be called for unknown prefix")
 	})
 	ta := newTestApp(t, srv)
-	err := runRunsGet(context.Background(), ta.app, "nope_xxx", "")
-	if err == nil || !strings.Contains(err.Error(), "cannot determine run type") {
-		t.Errorf("expected 'cannot determine run type' error, got %v", err)
+	err := runTypedRunsGet(context.Background(), ta.app, extendx.KindExtract, "nope_xxx", "")
+	if err == nil || !strings.Contains(err.Error(), "not a recognized extract run ID") {
+		t.Errorf("expected unrecognized-ID error, got %v", err)
 	}
 }
 
-func TestRunsGet_ParseResponseTypeQuery(t *testing.T) {
+// TestTypedRunsGet_MismatchedKindRedirects is the core no-prefix-
+// inference contract: a valid run ID passed to the wrong typed group
+// must fail fast (no API call) and name the owning command.
+func TestTypedRunsGet_MismatchedKindRedirects(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called for a mismatched ID")
+	})
+	ta := newTestApp(t, srv)
+	err := runTypedRunsGet(context.Background(), ta.app, extendx.KindParse, "exr_abc", "")
+	if err == nil || !strings.Contains(err.Error(), "extend extract runs get exr_abc") {
+		t.Errorf("expected redirect to 'extend extract runs get', got %v", err)
+	}
+}
+
+func TestTypedRunsGet_ParseResponseTypeQuery(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"id": "pr_abc", "status": "PROCESSED"})
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
-	if err := runRunsGet(context.Background(), ta.app, "pr_abc", "url"); err != nil {
-		t.Fatalf("runRunsGet: %v", err)
+	if err := runTypedRunsGet(context.Background(), ta.app, extendx.KindParse, "pr_abc", "url"); err != nil {
+		t.Fatalf("runTypedRunsGet: %v", err)
 	}
 	req := srv.lastRequest()
 	if req.Path != "/parse_runs/pr_abc" || req.Query != "responseType=url" {
@@ -71,35 +88,45 @@ func TestRunsGet_ParseResponseTypeQuery(t *testing.T) {
 	}
 }
 
-func TestRunsGet_ResponseTypeRejectedForNonParse(t *testing.T) {
+func TestTypedRunsGet_InvalidResponseTypeRejected(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("server should not be called")
 	})
 	ta := newTestApp(t, srv)
-	err := runRunsGet(context.Background(), ta.app, "exr_abc", "url")
-	if err == nil || !strings.Contains(err.Error(), "only supported for parse runs") {
-		t.Fatalf("expected parse-only response-type error, got %v", err)
+	err := runTypedRunsGet(context.Background(), ta.app, extendx.KindParse, "pr_abc", "yaml")
+	if err == nil || !strings.Contains(err.Error(), "json|url") {
+		t.Fatalf("expected response-type validation error, got %v", err)
 	}
 }
 
-func TestRunsCancel_RejectsParseRuns(t *testing.T) {
+func TestTypedRunsCancel_MismatchedKindRedirects(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called when refusing parse cancel")
+		t.Fatal("server should not be called for a mismatched ID")
 	})
 	ta := newTestApp(t, srv)
-	err := runRunsCancel(context.Background(), ta.app, "pr_abc", true)
-	if err == nil || !strings.Contains(err.Error(), "parse runs cannot be cancelled") {
-		t.Errorf("expected parse-rejection error, got %v", err)
+	// A workflow-run ID handed to extract's cancel must redirect to
+	// the workflows group.
+	err := runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "workflow_run_abc", true)
+	if err == nil || !strings.Contains(err.Error(), "extend workflows runs cancel") {
+		t.Errorf("expected redirect naming the workflows runs group, got %v", err)
+	}
+	// Parse runs have no cancel command at all; a parse ID handed to
+	// another kind's cancel must not suggest a nonexistent command.
+	err = runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "pr_abc", true)
+	if err == nil || !strings.Contains(err.Error(), "parse runs do not support cancel") {
+		t.Errorf("expected parse-cannot-cancel error, got %v", err)
 	}
 }
 
-func TestRunsDelete_DispatchesByPrefix(t *testing.T) {
+func TestTypedRunsDelete_HitsKindEndpoint(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"id": "clr_abc"})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsDelete(context.Background(), ta.app, "clr_abc", true); err != nil {
-		t.Fatalf("runRunsDelete: %v", err)
+	cmd := findCmd(t, ta.app, "classify", "runs", "delete")
+	cmd.SetArgs([]string{"clr_abc", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
 	}
 	req := srv.lastRequest()
 	if req.Method != http.MethodDelete || req.Path != "/classify_runs/clr_abc" {
@@ -129,13 +156,20 @@ func TestRunsList_AllAutoPaginates(t *testing.T) {
 		}
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
-		runType: "extract",
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	rows, _, err := collectListRows(context.Background(), cli, extendx.KindExtract, runsListParams{
 		limit:   5,
 		all:     true,
 		sortDir: "desc",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Errorf("expected 3 rows across pages, got %d", len(rows))
 	}
 	if page != 2 {
 		t.Errorf("expected 2 pages fetched, got %d", page)
@@ -199,14 +233,17 @@ func TestRunsList_TypeRoutesToCorrectEndpoint(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
-		runType: "extract",
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	if _, _, err := collectListRows(context.Background(), cli, extendx.KindExtract, runsListParams{
 		status:  "PROCESSED",
 		batchID: "bpr_xyz",
 		limit:   5,
 		sortDir: "desc",
 	}); err != nil {
-		t.Fatalf("runRunsList: %v", err)
+		t.Fatalf("collectListRows: %v", err)
 	}
 	req := srv.lastRequest()
 	if req.Path != "/extract_runs" {
@@ -226,8 +263,11 @@ func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
-		runType:  "extract",
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	if _, _, err := collectListRows(context.Background(), cli, extendx.KindExtract, runsListParams{
 		using:    "ex_abc",
 		source:   "WORKFLOW_RUN",
 		sourceID: "workflow_run_x",
@@ -236,7 +276,7 @@ func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 		sortDir:  "asc",
 		limit:    20,
 	}); err != nil {
-		t.Fatalf("runRunsList: %v", err)
+		t.Fatalf("collectListRows: %v", err)
 	}
 	q := srv.lastRequest().Query
 	for _, expected := range []string{
@@ -263,14 +303,17 @@ func TestRunsList_ParseDropsSort(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 	})
 	ta := newTestApp(t, srv)
-	if err := runRunsList(stubCmdWithCtx(context.Background(), "list"), ta.app, runsListParams{
-		runType: "parse",
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	if _, _, err := collectListRows(context.Background(), cli, extendx.KindParse, runsListParams{
 		using:   "ex_abc", // ignored — parse has no processor
 		sortBy:  "createdAt",
 		sortDir: "asc",
 		limit:   3,
 	}); err != nil {
-		t.Fatalf("runRunsList: %v", err)
+		t.Fatalf("collectListRows: %v", err)
 	}
 	q := srv.lastRequest().Query
 	if !strings.Contains(q, "maxPageSize=3") {
@@ -289,7 +332,7 @@ func TestRunsWatch_ExitStatusOnFailedRun(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
-	err := runRunsWatch(context.Background(), ta.app, "exr_fail", 5*time.Second, true)
+	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, true)
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Errorf("expected --exit-status to surface FAILED as error, got %v", err)
 	}
@@ -301,7 +344,7 @@ func TestRunsWatch_ExitStatusFalseHidesFailure(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
-	if err := runRunsWatch(context.Background(), ta.app, "exr_fail", 5*time.Second, false); err != nil {
+	if err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, false); err != nil {
 		t.Errorf("without --exit-status, FAILED should not error; got %v", err)
 	}
 }
@@ -313,7 +356,7 @@ func TestRunsWatch_TimeoutCancelsPolling(t *testing.T) {
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
 	start := time.Now()
-	err := runRunsWatch(context.Background(), ta.app, "exr_slow", 200*time.Millisecond, false)
+	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_slow", 200*time.Millisecond, false)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -376,7 +419,7 @@ func TestRunsUpdate_NameFlag(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "workflow_run_abc", "object": "workflow_run", "status": "PROCESSED"})
 	})
 	ta := newTestApp(t, srv)
-	cmd := findCmd(t, ta.app, "runs", "update")
+	cmd := findCmd(t, ta.app, "workflows", "runs", "update")
 	cmd.SetArgs([]string{"workflow_run_abc", "--name", "Q3 reprocess"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)

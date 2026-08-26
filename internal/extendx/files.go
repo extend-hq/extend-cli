@@ -308,18 +308,17 @@ func BuildEditFile(ref FileRef) (*extend.EditRunsCreateRequestFile, error) {
 	}, nil
 }
 
-// BuildEditSchemaFile converts a FileRef into the SDK's per-endpoint
-// file union for /edit_schemas/generate. Like /edit_runs, this
-// endpoint accepts URL and ID inputs only.
-func BuildEditSchemaFile(ref FileRef) (*extend.EditSchemasGenerateRequestFile, error) {
+// BuildFormDetectionFile converts a FileRef into the SDK's per-endpoint
+// file union for /form_detection_runs (URL and ID inputs only).
+func BuildFormDetectionFile(ref FileRef) (*extend.FormDetectionRunsCreateRequestFile, error) {
 	fromURL, fromID, _, err := fileFromRef(ref)
 	if err != nil {
 		return nil, err
 	}
 	if fromURL == nil && fromID == nil {
-		return nil, errors.New("edit schema generation only accepts URL or file-ID inputs")
+		return nil, errors.New("form detection runs only accept URL or file-ID inputs")
 	}
-	return &extend.EditSchemasGenerateRequestFile{
+	return &extend.FormDetectionRunsCreateRequestFile{
 		FileFromURL: fromURL,
 		FileFromID:  fromID,
 	}, nil

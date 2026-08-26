@@ -24,6 +24,10 @@ func loginTestEnv(t *testing.T, baseURL string) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv(oauth.EnvNoKeyring, "1")
 	t.Setenv("EXTEND_BASE_URL", baseURL)
+	// The fake server plays both the authorization server (issuer) and
+	// the API; in production these are different origins.
+	t.Setenv("EXTEND_OAUTH_ISSUER", baseURL)
+	t.Setenv("EXTEND_OAUTH_CLIENT_ID", "")
 	t.Setenv("EXTEND_API_KEY", "")
 	t.Setenv("EXTEND_REGION", "")
 	t.Setenv("EXTEND_WORKSPACE_ID", "")
@@ -41,7 +45,9 @@ type fakeAuthServer struct {
 	redirectURI string
 	// exchanged records the code redeemed at the token endpoint.
 	exchanged string
-	// revoked records tokens sent to the revoke endpoint.
+	// accessToken overrides the token endpoint's access_token when set.
+	accessToken string
+	// revoked records the bearer tokens presented to /oauth/revoke-current.
 	revoked []string
 	// meHandler, when set, serves GET /me; unset answers 404 so tests
 	// exercise the generic-success fallback by default.
@@ -70,11 +76,14 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 			t.Errorf("code_verifier does not match the challenge sent to authorize")
 		}
 		f.exchanged = r.PostForm.Get("code")
-		fmt.Fprint(w, `{"access_token":"eoat_test","refresh_token":"eort_test","token_type":"Bearer","expires_in":3600}`)
+		accessToken := f.accessToken
+		if accessToken == "" {
+			accessToken = "eoat_test"
+		}
+		fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"eort_test","token_type":"Bearer","expires_in":3600}`, accessToken)
 	})
-	mux.HandleFunc("/oauth2/revoke", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		f.revoked = append(f.revoked, r.PostForm.Get("token"))
+	mux.HandleFunc("/oauth/revoke-current", func(w http.ResponseWriter, r *http.Request) {
+		f.revoked = append(f.revoked, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
@@ -405,19 +414,22 @@ func TestRunLoginNoBrowserPrintsURL(t *testing.T) {
 	}
 }
 
-func TestRunLoginRevokesReplacedGrant(t *testing.T) {
+// Re-login must never revoke the grant it replaces: /oauth/revoke-current
+// deletes the CLI client's whole WorkOS authorization, which the new
+// login shares, so revoking the old grant would kill the new session's
+// refresh ability too.
+func TestRunLoginDoesNotRevokeReplacedGrant(t *testing.T) {
 	f := newFakeAuthServer(t)
 	loginTestEnv(t, f.srv.URL)
 	app, _ := testAppForLogin()
 
 	store := oauth.DefaultStore()
 	if err := store.Set(f.srv.URL, oauth.Record{
-		AccessToken:        "eoat_old",
-		RefreshToken:       "eort_old",
-		ExpiresAt:          time.Now().Add(time.Hour),
-		RevocationEndpoint: f.srv.URL + "/oauth2/revoke",
-		ClientID:           oauth.DefaultClientID,
-		Resource:           f.srv.URL,
+		AccessToken:  "eoat_old",
+		RefreshToken: "eort_old",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		ClientID:     oauth.DefaultClientID,
+		Resource:     f.srv.URL,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -429,8 +441,8 @@ func TestRunLoginRevokesReplacedGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runLogin: %v", err)
 	}
-	if len(f.revoked) != 1 || f.revoked[0] != "eort_old" {
-		t.Errorf("revoked = %v, want the replaced grant's refresh token", f.revoked)
+	if len(f.revoked) != 0 {
+		t.Errorf("revoked = %v, want none: revoking a replaced grant would delete the shared authorization", f.revoked)
 	}
 	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.RefreshToken != "eort_test" {
 		t.Errorf("stored record = %+v, want the new login", rec)
@@ -503,12 +515,11 @@ func TestRunLogoutRevokesAndClears(t *testing.T) {
 
 	store := oauth.DefaultStore()
 	if err := store.Set(f.srv.URL, oauth.Record{
-		AccessToken:        "eoat_x",
-		RefreshToken:       "eort_x",
-		ExpiresAt:          time.Now().Add(time.Hour),
-		RevocationEndpoint: f.srv.URL + "/oauth2/revoke",
-		ClientID:           oauth.DefaultClientID,
-		Resource:           f.srv.URL,
+		AccessToken:  "eoat_x",
+		RefreshToken: "eort_x",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		ClientID:     oauth.DefaultClientID,
+		Resource:     f.srv.URL,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -516,8 +527,8 @@ func TestRunLogoutRevokesAndClears(t *testing.T) {
 	if err := runLogout(context.Background(), app, store); err != nil {
 		t.Fatalf("runLogout: %v", err)
 	}
-	if len(f.revoked) != 1 || f.revoked[0] != "eort_x" {
-		t.Errorf("revoked = %v, want the refresh token", f.revoked)
+	if len(f.revoked) != 1 || f.revoked[0] != "eoat_x" {
+		t.Errorf("revoked = %v, want the login's access token", f.revoked)
 	}
 	if rec, _ := store.Get(f.srv.URL); rec != nil {
 		t.Errorf("record should be cleared, got %+v", rec)
@@ -550,8 +561,9 @@ func TestRunLogoutClearsLocallyWhenRevokeFails(t *testing.T) {
 
 	store := oauth.DefaultStore()
 	if err := store.Set(srv.URL, oauth.Record{
-		RefreshToken:       "eort_x",
-		RevocationEndpoint: srv.URL + "/oauth2/revoke",
+		AccessToken:  "eoat_x",
+		RefreshToken: "eort_x",
+		ExpiresAt:    time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
