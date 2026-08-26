@@ -59,6 +59,32 @@ func TestKnownRegions(t *testing.T) {
 	}
 }
 
+// TestRegionLoginConfig asserts every region — advertised or legacy —
+// carries a complete 'extend login' pair: users on us2 must be able to
+// sign in without configuration even though the region is no longer
+// onboarded.
+func TestRegionLoginConfig(t *testing.T) {
+	for _, r := range Regions() {
+		if !strings.HasPrefix(r.LoginIssuer, "https://") {
+			t.Errorf("region %q LoginIssuer = %q; expected https:// URL", r.ID, r.LoginIssuer)
+		}
+		if !strings.HasPrefix(r.LoginClientID, "client_") {
+			t.Errorf("region %q LoginClientID = %q; expected client_ prefix", r.ID, r.LoginClientID)
+		}
+	}
+}
+
+func TestRegionsReturnsCopy(t *testing.T) {
+	got := Regions()
+	if len(got) == 0 {
+		t.Fatal("Regions() is empty")
+	}
+	got[0].LoginIssuer = "https://tampered.example"
+	if Regions()[0].LoginIssuer == "https://tampered.example" {
+		t.Error("mutating Regions() result leaked into the package table")
+	}
+}
+
 func TestAdvertisedRegionsAreKnownAndComplete(t *testing.T) {
 	known := map[string]bool{}
 	for _, id := range KnownRegions() {

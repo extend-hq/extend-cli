@@ -31,7 +31,11 @@ func TestLoginFlowAgainstFakeOAuthServer(t *testing.T) {
 	confDir := t.TempDir()
 	env := map[string]string{
 		"EXTEND_BASE_URL": fake.srv.URL,
-		"XDG_CONFIG_HOME": confDir,
+		// The fake server plays both the authorization server and the
+		// API; a non-region base has no built-in issuer, so point the
+		// login at it explicitly.
+		"EXTEND_OAUTH_ISSUER": fake.srv.URL,
+		"XDG_CONFIG_HOME":     confDir,
 		// Force the file token store: the OS keychain must never be
 		// touched by tests.
 		"EXTEND_OAUTH_NO_KEYRING": "1",
@@ -63,11 +67,12 @@ func TestLoginFlowAgainstFakeOAuthServer(t *testing.T) {
 		t.Errorf("extend config should report OAuth login, got: %s", res.Stdout)
 	}
 
-	// Step 4: logout revokes server-side and clears local state.
+	// Step 4: logout revokes server-side (POST /oauth/revoke-current,
+	// authenticated by the access token) and clears local state.
 	res = runExtendBare(t, env, "logout")
 	res.requireOK(t, "logout")
-	if got := fake.revokedTokens(); len(got) != 1 || got[0] != "eort_itest_1" {
-		t.Errorf("revoked tokens = %v, want the refresh token", got)
+	if got := fake.revokedTokens(); len(got) != 1 || got[0] != "Bearer eoat_itest_1" {
+		t.Errorf("revoked bearers = %v, want the stored access token", got)
 	}
 	if raw, err := os.ReadFile(tokensFile); err == nil && strings.Contains(string(raw), "eoat_") {
 		t.Errorf("tokens file still holds a token after logout: %s", raw)
@@ -216,10 +221,11 @@ func newFakeOAuthAPI(t *testing.T) *fakeOAuthAPI {
 		fmt.Fprintf(w, `{"access_token":"eoat_itest_%[1]d","refresh_token":"eort_itest_%[1]d","token_type":"Bearer","expires_in":3600}`, n)
 	})
 
-	mux.HandleFunc("/oauth2/revoke", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
+	// Logout revokes via the API's /oauth/revoke-current (WorkOS Connect
+	// has no RFC 7009 endpoint), authenticated by the access token.
+	mux.HandleFunc("/oauth/revoke-current", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.revoked = append(f.revoked, r.PostForm.Get("token"))
+		f.revoked = append(f.revoked, r.Header.Get("Authorization"))
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})

@@ -34,6 +34,78 @@ func loginTestEnv(t *testing.T, baseURL string) {
 	t.Setenv("EXTEND_ENV", "")
 }
 
+// mapGetenv builds a getenv func from a fixed map, so resolveAuthServer
+// tests need no process-environment mutation.
+func mapGetenv(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+// TestResolveAuthServer_RegionDefaults: with no env overrides, each
+// region's API base URL resolves to that region's baked issuer and
+// client id.
+func TestResolveAuthServer_RegionDefaults(t *testing.T) {
+	for _, r := range extendx.Regions() {
+		issuer, clientID, err := resolveAuthServer(mapGetenv(nil), oauth.NormalizeBase(r.APIURL))
+		if err != nil {
+			t.Fatalf("region %q: resolveAuthServer error: %v", r.ID, err)
+		}
+		if issuer != oauth.NormalizeBase(r.LoginIssuer) {
+			t.Errorf("region %q issuer = %q; want %q", r.ID, issuer, r.LoginIssuer)
+		}
+		if clientID != r.LoginClientID {
+			t.Errorf("region %q clientID = %q; want %q", r.ID, clientID, r.LoginClientID)
+		}
+	}
+}
+
+// TestResolveAuthServer_IssuerOverrideDropsBakedClientID: an explicit
+// issuer must not inherit a region's client id — client ids are
+// per-issuer — so the fallback is the static default.
+func TestResolveAuthServer_IssuerOverrideDropsBakedClientID(t *testing.T) {
+	base, _ := extendx.RegionBaseURL("us")
+	issuer, clientID, err := resolveAuthServer(mapGetenv(map[string]string{
+		envOAuthIssuer: "https://rig.example.com",
+	}), oauth.NormalizeBase(base))
+	if err != nil {
+		t.Fatalf("resolveAuthServer error: %v", err)
+	}
+	if issuer != "https://rig.example.com" {
+		t.Errorf("issuer = %q; want the env override", issuer)
+	}
+	if clientID != oauth.DefaultClientID {
+		t.Errorf("clientID = %q; want DefaultClientID, not the region's", clientID)
+	}
+}
+
+// TestResolveAuthServer_ClientIDOverrideKeepsBakedIssuer: overriding
+// only the client id keeps the region's issuer.
+func TestResolveAuthServer_ClientIDOverrideKeepsBakedIssuer(t *testing.T) {
+	base, _ := extendx.RegionBaseURL("eu")
+	issuer, clientID, err := resolveAuthServer(mapGetenv(map[string]string{
+		envOAuthClientID: "client_custom",
+	}), oauth.NormalizeBase(base))
+	if err != nil {
+		t.Fatalf("resolveAuthServer error: %v", err)
+	}
+	if issuer == "" || clientID != "client_custom" {
+		t.Errorf("(issuer, clientID) = (%q, %q); want baked issuer with the override", issuer, clientID)
+	}
+}
+
+// TestResolveAuthServer_UnknownBaseRequiresEnv: a non-region base with
+// no env override fails and names the env var to set.
+func TestResolveAuthServer_UnknownBaseRequiresEnv(t *testing.T) {
+	_, _, err := resolveAuthServer(mapGetenv(nil), "https://api.staging.extend.ai")
+	if err == nil {
+		t.Fatal("resolveAuthServer = nil error; want instructions")
+	}
+	for _, want := range []string{envOAuthIssuer, "api.staging.extend.ai"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+}
+
 // fakeAuthServer implements the token endpoint side of the contract:
 // it verifies the PKCE verifier against the challenge captured from
 // the authorize URL and returns eoat_/eort_ tokens.

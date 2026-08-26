@@ -55,8 +55,8 @@ const defaultAPIVersion = "2026-02-09"
 var envVars = []envVarSpec{
 	{Name: envAPIKey, Required: true, Description: "API key (sk_...). Required for API commands unless signed in via 'extend login'."},
 	{Name: envBaseURL, Description: "Override base URL. Wins over EXTEND_REGION."},
-	{Name: envOAuthIssuer, Description: "Authorization server (WorkOS AuthKit domain) for 'extend login', e.g. https://id.extend.ai."},
-	{Name: envOAuthClientID, Description: "OAuth client id for 'extend login'. Defaults to the built-in first-party client."},
+	{Name: envOAuthIssuer, Description: "Authorization server (WorkOS AuthKit domain) for 'extend login'. Built in for every Extend region; set it for other targets (e.g. staging), like https://id.extend.ai."},
+	{Name: envOAuthClientID, Description: "OAuth client id for 'extend login'. Built in per region; set it alongside EXTEND_OAUTH_ISSUER for other targets."},
 	{Name: envRegion, Description: "Region: us|eu. Selects the regional API endpoint."},
 	{Name: envWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
 	{Name: envAPIVersion, Description: "Pin the API version sent with each request. Defaults to " + defaultAPIVersion + "."},

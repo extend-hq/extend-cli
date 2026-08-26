@@ -9,18 +9,36 @@ import extend "github.com/extend-hq/extend-go-sdk"
 // fields the wizard renders; keeping them here makes this the single
 // source of truth so adding a region is a one-line change.
 type Region struct {
-	ID         string
-	Title      string
-	APIURL     string
-	Dashboard  string
-	Advertised bool
+	ID        string
+	Title     string
+	APIURL    string
+	Dashboard string
+	// LoginIssuer is the authorization server (WorkOS AuthKit domain)
+	// 'extend login' authenticates against for this region, and
+	// LoginClientID is the CLI's OAuth app registered in that WorkOS
+	// environment. Client ids are per-environment, so each region pins
+	// its own pair. EXTEND_OAUTH_ISSUER / EXTEND_OAUTH_CLIENT_ID
+	// override them; non-region targets (staging, rigs) have no
+	// built-in issuer and always need the env vars.
+	LoginIssuer   string
+	LoginClientID string
+	Advertised    bool
 }
 
 // regions is the single source of truth; every accessor derives from it.
 var regions = []Region{
-	{ID: "us", Title: "United States", APIURL: extend.Environments.Production, Dashboard: "https://dashboard.extend.ai", Advertised: true},
-	{ID: "us2", Title: "United States (US2)", APIURL: extend.Environments.ProductionUs2, Dashboard: "https://dashboard.us2.extend.app", Advertised: false},
-	{ID: "eu", Title: "European Union", APIURL: extend.Environments.ProductionEu1, Dashboard: "https://dashboard.eu1.extend.ai", Advertised: true},
+	{ID: "us", Title: "United States", APIURL: extend.Environments.Production, Dashboard: "https://dashboard.extend.ai", LoginIssuer: "https://id.extend.ai", LoginClientID: "client_01M0ZPG7YRYXSG6MBQ1G0QRNAE", Advertised: true},
+	{ID: "us2", Title: "United States (US2)", APIURL: extend.Environments.ProductionUs2, Dashboard: "https://dashboard.us2.extend.app", LoginIssuer: "https://id.us2.extend.ai", LoginClientID: "client_01M0ZPG8FBWDDZ231W7P393AJJ", Advertised: false},
+	{ID: "eu", Title: "European Union", APIURL: extend.Environments.ProductionEu1, Dashboard: "https://dashboard.eu1.extend.ai", LoginIssuer: "https://id.eu1.extend.ai", LoginClientID: "client_01M0ZPG8PHZ74S5WDEF1F4K0SW", Advertised: true},
+}
+
+// Regions returns every region (advertised or not), in display order.
+// Callers that need more than one field (e.g. matching a base URL to its
+// login issuer) iterate this instead of stitching per-field accessors.
+func Regions() []Region {
+	out := make([]Region, len(regions))
+	copy(out, regions)
+	return out
 }
 
 // RegionBaseURL returns the API base URL for a region id.
