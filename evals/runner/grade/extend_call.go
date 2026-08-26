@@ -60,7 +60,7 @@ func anyCallMatches(calls []CallRecord, p spec.ExtendCallPredicate) bool {
 }
 
 // countCalls counts recorded calls whose positional verb path begins
-// with the given dotted path (e.g. "extract" or "runs.list").
+// with the given dotted path (e.g. "extract" or "extract.runs.list").
 func countCalls(calls []CallRecord, verbPath string) int {
 	want := strings.Split(verbPath, ".")
 	if verbPath == "" {

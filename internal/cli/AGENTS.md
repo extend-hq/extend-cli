@@ -69,8 +69,8 @@ must contain "extend " somewhere — this allows pipeline forms like
 a complete sentence ending in a period. The corrections an agent needs to
 hear *once* to avoid a class of error. Examples: "Page tokens are bound
 to the originating query; repeat the same filter flags on every paginated
-call." or "Workflow batches do not have a get endpoint; use 'extend runs
-list --type workflow --batch <id>' instead."
+call." or "Workflow batches do not have a get endpoint; use 'extend
+workflows runs list --batch <id>' instead."
 
 **`SeeAlso`** — related command paths in space-separated form
 ("runs watch", "extract"), validated cross-doc. Optional.

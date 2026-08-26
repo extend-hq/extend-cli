@@ -28,8 +28,9 @@ import (
 //	workflow_run_*   every file output across the run's step runs
 //
 // Runs whose output is JSON (parse, extract, classify) deliberately
-// error out with a pointer to `extend runs get` — there is nothing to
-// "download" in those cases, only structured data to render.
+// error out with a pointer to the typed `extend <type> runs get` —
+// there is nothing to "download" in those cases, only structured data
+// to render.
 func newDownloadDoc(app *App) *CommandDoc {
 	var (
 		outputDir  string
@@ -51,8 +52,8 @@ workflow) or referenced by file ID. The ID prefix selects the source;
 the command auto-walks the run record for downloadable files.
 
 For runs whose output is structured JSON (parse, extract, classify),
-use 'extend runs get <id>' instead — there is no file to download in
-those cases.`,
+use the typed 'extend <type> runs get <id>' instead — there is no file
+to download in those cases.`,
 		Details: `Resolves <id> based on its prefix:
 
   file_*           the file itself
@@ -76,12 +77,12 @@ caller has no way to disambiguate concatenated outputs.`,
 			{Label: "Workflow run, write all file outputs to ./out", Cmd: "extend download workflow_run_xK9 --output-dir ./out"},
 		},
 		Gotchas: []string{
-			"Parse, extract, and classify runs have no file artifact; use 'extend runs get <id>' for their JSON output.",
+			"Parse, extract, and classify runs have no file artifact; use the typed 'extend <type> runs get <id>' for their JSON output.",
 			"--output-file is rejected for multi-file sources (split or workflow runs); use --output-dir instead.",
 			"Presigned URLs expire after one hour; downloading long after the run completed may fail with a 'no presigned URL' error.",
 			"Identically-named files in a multi-file download get '-2', '-3', etc. appended before the extension.",
 		},
-		SeeAlso: []string{"files download", "files get", "runs get"},
+		SeeAlso: []string{"files download", "files get", "extract runs get", "parse runs get"},
 		Output:  OutputSpec{TTY: OutputBinary, Pipe: OutputBinary},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -155,7 +156,7 @@ func resolveDownloadTargets(ctx context.Context, cli *sdkclient.Client, id strin
 	case strings.HasPrefix(id, "exr_"),
 		strings.HasPrefix(id, "pr_"),
 		strings.HasPrefix(id, "clr_"):
-		return nil, fmt.Errorf("%s runs produce JSON, not files; use 'extend runs get %s'", runTypeNameFromID(id), id)
+		return nil, fmt.Errorf("%s runs produce JSON, not files; use 'extend %s runs get %s'", runTypeNameFromID(id), runTypeNameFromID(id), id)
 	default:
 		return nil, fmt.Errorf("unrecognized ID prefix for download: %s (expected file_, edr_, splr_, or workflow_run_)", id)
 	}

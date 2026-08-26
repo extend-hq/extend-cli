@@ -80,7 +80,7 @@ path, a file:// URI, or '-' to read from stdin.
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
 			"--patch requires --using; for a standalone config use --config instead.",
 		},
-		SeeAlso:  []string{"parse", "split batch", "runs watch", "runs get"},
+		SeeAlso:  []string{"parse", "split batch", "split runs watch", "split runs get"},
 		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
@@ -120,7 +120,7 @@ path, a file:// URI, or '-' to read from stdin.
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
-		Subcommands: []*CommandDoc{newSplitBatchDoc(app)},
+		Subcommands: []*CommandDoc{newSplitBatchDoc(app), splitRunsSpec().doc(app), splitBatchesSpec().doc(app)},
 	}
 }
 
@@ -210,7 +210,7 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend split runs watch")
 	}
 
 	if err := renderSplitResult(app, final); err != nil {

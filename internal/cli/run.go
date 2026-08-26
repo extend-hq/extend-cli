@@ -15,9 +15,10 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-// newRunDoc returns the typed documentation for `extend run` (the
-// workflow-run launcher) and its `extend run batch` subcommand.
-func newRunDoc(app *App) *CommandDoc {
+// newWorkflowsRunDoc returns the typed documentation for `extend
+// workflows run` (the workflow-run launcher) and its `extend workflows
+// run batch` subcommand.
+func newWorkflowsRunDoc(app *App) *CommandDoc {
 	var (
 		workflowID  string
 		version     string
@@ -35,7 +36,6 @@ func newRunDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "run <input>",
 		Summary: "Start a workflow run on a document",
-		Group:   "Actions",
 		Triggers: []string{
 			"start a workflow run on a document",
 			"trigger an extend workflow on a pdf",
@@ -71,12 +71,12 @@ output}; output is the same shape that processor would normally return
 --secret key=value provides per-run secrets that step actions can reference.
 Repeatable.`,
 		Examples: []Example{
-			{Label: "Basic", Cmd: "extend run invoice.pdf --using workflow_abc"},
-			{Label: "Block until terminal", Cmd: "extend run invoice.pdf --using workflow_abc --wait"},
-			{Label: "Pin version with priority", Cmd: "extend run invoice.pdf --using workflow_abc --version v2-with-review --priority 10"},
-			{Label: "Seed processor outputs", Cmd: "extend run invoice.pdf --using workflow_abc --outputs seeded.json"},
-			{Label: "Inline seeded outputs", Cmd: `extend run invoice.pdf --using workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
-			{Label: "Pass a secret", Cmd: "extend run invoice.pdf --using workflow_abc --secret API_KEY=$KEY"},
+			{Label: "Basic", Cmd: "extend workflows run invoice.pdf --using workflow_abc"},
+			{Label: "Block until terminal", Cmd: "extend workflows run invoice.pdf --using workflow_abc --wait"},
+			{Label: "Pin version with priority", Cmd: "extend workflows run invoice.pdf --using workflow_abc --version v2-with-review --priority 10"},
+			{Label: "Seed processor outputs", Cmd: "extend workflows run invoice.pdf --using workflow_abc --outputs seeded.json"},
+			{Label: "Inline seeded outputs", Cmd: `extend workflows run invoice.pdf --using workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
+			{Label: "Pass a secret", Cmd: "extend workflows run invoice.pdf --using workflow_abc --secret API_KEY=$KEY"},
 		},
 		Gotchas: []string{
 			"Workflow runs are async by default (unlike extract/classify/split). Pass --wait to block.",
@@ -84,7 +84,7 @@ Repeatable.`,
 			"--outputs entries must match the shape of the processor they replace (extract/classify/split).",
 			"--secret values are not echoed back; use them for per-run API keys, not as run metadata.",
 		},
-		SeeAlso:  []string{"extract", "run batch", "runs watch", "runs get", "webhooks subscriptions create"},
+		SeeAlso:  []string{"extract", "workflows run batch", "workflows runs watch", "workflows runs get", "webhooks subscriptions create"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: false},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled, extendx.StatusRejected},
@@ -218,7 +218,7 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend workflows runs watch")
 	}
 
 	if err := renderWorkflowResult(app, final); err != nil {

@@ -17,8 +17,9 @@ import (
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-// newEditDoc returns the typed documentation for `extend edit`, its
-// `extend edit schema` group, and the `extend edit schema generate` leaf.
+// newEditDoc returns the typed documentation for `extend edit` and its
+// templates/runs subgroups. Schema scaffolding lives at the top-level
+// `extend detect-form` verb (detectform.go).
 func newEditDoc(app *App) *CommandDoc {
 	var (
 		schemaPath            string
@@ -45,7 +46,7 @@ func newEditDoc(app *App) *CommandDoc {
 		WhenToUse: `Use to fill the form fields of a PDF and emit a filled PDF. Two
 ways to provide values: pass --instructions for simple natural-language
 fills, or pass --schema with a scaffolded schema for structured fills.
-For schema scaffolding only, use 'extend edit schema generate'.`,
+For schema scaffolding only, use 'extend detect-form'.`,
 		Details: `Fill PDF form fields and produce a filled PDF.
 
 There are two ways to provide values:
@@ -60,7 +61,7 @@ There are two ways to provide values:
 
   2. Schema + values (recommended for repeatable, structured fills):
 
-         extend edit schema generate form.pdf > schema.json
+         extend detect-form form.pdf --jq '.output.schema' -o json > schema.json
          # populate values on each field per the generated shape, then:
          extend edit form.pdf --schema schema.json
 
@@ -70,8 +71,8 @@ There are two ways to provide values:
      between similarly-named fields the schema cannot express.
 
      Each field in a --schema carries the extend_edit:* keys emitted by
-     'extend edit schema generate' (set extend_edit:value to force a value);
-     run that command's --help for the full key reference.
+     'extend detect-form' (set extend_edit:value to force a value); run
+     that command's --help for the full key reference.
 
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
@@ -105,7 +106,7 @@ the output must remain editable.
 ` + editOutputDoc,
 		Examples: []Example{
 			{Label: "Inline instructions", Cmd: `extend edit form.pdf --instructions "name is Acme Corp; date is 2026-04-15" --output-file filled.pdf`},
-			{Label: "Two-step: scaffold then fill", Cmd: "extend edit schema generate form.pdf > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
+			{Label: "Two-step: scaffold then fill", Cmd: "extend detect-form form.pdf --jq '.output.schema' -o json > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
 			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
 			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
 			{Label: "Tune detection", Cmd: `extend edit form.pdf --advanced-options '{"tableParsingEnabled":true,"radioEnumsEnabled":true}'`},
@@ -113,16 +114,24 @@ the output must remain editable.
 		},
 		Gotchas: []string{
 			"--schema and --instructions can be combined; for simple fills, --instructions alone is enough.",
-			"Populate values per the shape emitted by 'extend edit schema generate' — do not invent field names; inspect the generated schema first.",
+			"Populate values per the shape emitted by 'extend detect-form' — do not invent field names; inspect the generated schema first.",
 			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
 			"Detection toggles (flattenPdf/nativeFieldsOnly/tableParsingEnabled/radioEnumsEnabled) go in --advanced-options JSON; omitted fields use the server default.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
 		},
-		SeeAlso:  []string{"edit schema generate", "runs watch", "runs get", "files download"},
+		SeeAlso:  []string{"detect-form", "edit runs watch", "edit runs get", "files download"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
-		Args:     cobra.ExactArgs(1),
+		// Schema scaffolding used to live under this verb ('edit schema
+		// generate'); stale scripts and skills still invoke it, so name
+		// the replacement instead of failing with an arg-count error.
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && (args[0] == "schema" || args[0] == "detections") {
+				return fmt.Errorf("unknown command %q for \"extend edit\": schema scaffolding moved; use 'extend detect-form'", args[0])
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEdit(cmd.Context(), app, editParams{
 				input:                 args[0],
@@ -137,7 +146,7 @@ the output must remain editable.
 			})
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend edit schema generate'. Omit to let the server auto-detect form fields.")
+			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend detect-form'. Omit to let the server auto-detect form fields.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
 			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
@@ -146,7 +155,7 @@ the output must remain editable.
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
-		Subcommands: []*CommandDoc{newEditSchemaDoc(app), newEditTemplatesDoc(app)},
+		Subcommands: []*CommandDoc{newEditTemplatesDoc(app), editRunsSpec().doc(app)},
 	}
 }
 
@@ -228,7 +237,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend edit runs watch")
 	}
 
 	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
@@ -338,11 +347,9 @@ func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
 	pal := paletteFor(app.IO)
 	fmt.Fprintf(app.IO.ErrOut, "%s edit run %s reported PROCESSED but produced no filled PDF (output.editedFile is missing).\n",
 		pal.Yellow("warning:"), run.ID)
-	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("  This usually means the server detected no fields to fill — double-check your --schema or --instructions. Inspect the full run with: extend runs get %s -o json", run.ID))
+	fmt.Fprintln(app.IO.ErrOut, pal.Dimf("  This usually means the server detected no fields to fill — double-check your --schema or --instructions. Inspect the full run with: extend edit runs get %s -o json", run.ID))
 }
 
-// newEditSchemaDoc returns the typed documentation for the
-// `extend edit schema` group (a pure umbrella; only generate is meaningful).
 // newEditTemplatesDoc is the `extend edit templates` group: read-only
 // access to saved edit templates (EditTemplates.Retrieve in the SDK).
 func newEditTemplatesDoc(app *App) *CommandDoc {
@@ -351,7 +358,7 @@ func newEditTemplatesDoc(app *App) *CommandDoc {
 		Summary: "Inspect saved edit templates",
 		WhenToUse: `Use this group to fetch a saved edit template's source file, default
 edit config, and schema-generation config so you can reuse them with
-'extend edit' and 'extend edit schema generate'.`,
+'extend edit' and 'extend detect-form'.`,
 		Details: `Edit templates are authored in the dashboard; the CLI exposes read-only
 retrieval. Only 'get <template-id>' is available.`,
 		Subcommands: []*CommandDoc{
@@ -372,7 +379,7 @@ func newEditTemplatesGetDoc(app *App) *CommandDoc {
 		},
 		WhenToUse: `Use to retrieve a saved edit template (edt_...) — its source file, default
 edit 'config', and optional 'schemaConfig'. Reuse the returned config with
-'extend edit' and the schemaConfig with 'extend edit schema generate'.`,
+'extend edit' and the schemaConfig with 'extend detect-form'.`,
 		Details: `Returns the full edit template object as JSON.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend edit templates get edt_abc"},
@@ -381,7 +388,7 @@ edit 'config', and optional 'schemaConfig'. Reuse the returned config with
 		Gotchas: []string{
 			"Edit templates are authored in the dashboard; the CLI is read-only on them.",
 		},
-		SeeAlso: []string{"edit", "edit schema generate"},
+		SeeAlso: []string{"edit", "detect-form"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -394,142 +401,6 @@ edit 'config', and optional 'schemaConfig'. Reuse the returned config with
 				return err
 			}
 			return renderWithDefault(app, tmpl, output.FormatJSON)
-		},
-	}
-}
-
-func newEditSchemaDoc(app *App) *CommandDoc {
-	return &CommandDoc{
-		Use:       "schema",
-		Summary:   "Generate or operate on edit schemas",
-		WhenToUse: `Use this group's 'generate' subcommand to scaffold a schema from a fillable PDF. There is currently only one operation in the group.`,
-		Details:   `Schema operations are synchronous; there is no async variant.`,
-		Subcommands: []*CommandDoc{
-			newEditSchemaGenerateDoc(app),
-		},
-	}
-}
-
-// newEditSchemaGenerateDoc returns the typed documentation for
-// `extend edit schema generate`.
-func newEditSchemaGenerateDoc(app *App) *CommandDoc {
-	var (
-		advancedOptionsPath string
-		instructions        string
-		inputSchemaPath     string
-		password            string
-	)
-	return &CommandDoc{
-		Use:     "generate <input>",
-		Summary: "Detect form fields and scaffold an edit schema (sync)",
-		Triggers: []string{
-			"detect form fields in a pdf",
-			"scaffold a schema for an extend edit run",
-			"generate the json schema for a fillable pdf",
-			"derive an edit schema from a form",
-		},
-		WhenToUse: `Use to scaffold a schema you can hand-edit (populate extend_edit:value fields)
-and pass to 'extend edit --schema'. This is the one synchronous endpoint
-in the edit family; there is no async variant.`,
-		Details: `Detect form fields in a PDF and emit a starting-point schema that can be
-passed directly to 'extend edit --schema'.
-
-Use --instructions to guide the schema generator about which fields to
-include or how to interpret ambiguous form layouts. Use --input-schema to
-seed the generator with an existing schema, in which case detected fields
-are overlaid onto your starting point.
-
-Detection options ride in --advanced-options as a JSON object (omitted
-fields use the server default):
-
-  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
-  tableParsingEnabled  bool  Parse table regions as arrays of objects.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.
-
-` + editSchemaGenerationDoc + `
-
-` + editSchemaPropertyDoc,
-		Examples: []Example{
-			{Label: "Basic", Cmd: "extend edit schema generate form.pdf > schema.json"},
-			{Label: "With instructions", Cmd: `extend edit schema generate form.pdf --instructions "skip the signature block"`},
-			{Label: "Seed from existing", Cmd: "extend edit schema generate form.pdf --input-schema base.json > merged.json"},
-		},
-		Gotchas: []string{
-			"This is the only synchronous endpoint in the edit family; do not pass --wait flags.",
-			"--input-schema entries are merged with detection; detected fields can override seeded ones.",
-		},
-		SeeAlso: []string{"edit"},
-		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cli, err := app.NewClient()
-			if err != nil {
-				return err
-			}
-			ref, err := uploadOrResolveWith(cmd.Context(), app, cli, args[0], password)
-			if err != nil {
-				return err
-			}
-			file, err := extendx.BuildEditSchemaFile(ref)
-			if err != nil {
-				return err
-			}
-			cfg := &extend.EditSchemaGenerationConfig{}
-			if advancedOptionsPath != "" {
-				raw, err := readJSONFile(advancedOptionsPath, "--advanced-options")
-				if err != nil {
-					return err
-				}
-				var ao extend.EditSchemaGenerationConfigAdvancedOptions
-				if err := json.Unmarshal(raw, &ao); err != nil {
-					return fmt.Errorf("--advanced-options: %w", err)
-				}
-				cfg.AdvancedOptions = &ao
-			}
-			if instructions != "" {
-				cfg.Instructions = extend.String(instructions)
-			}
-			if inputSchemaPath != "" {
-				raw, err := readJSONFile(inputSchemaPath, "--input-schema")
-				if err != nil {
-					return err
-				}
-				var schema extend.EditRootJSON
-				if err := json.Unmarshal(raw, &schema); err != nil {
-					return fmt.Errorf("--input-schema: %w", err)
-				}
-				cfg.InputSchema = &schema
-			}
-			resp, err := cli.EditSchemas.Generate(cmd.Context(), &extend.EditSchemasGenerateRequest{
-				File:   file,
-				Config: cfg,
-			})
-			if err != nil {
-				return err
-			}
-			if resp.Schema == nil {
-				return fmt.Errorf("generated edit schema response missing 'schema' field")
-			}
-			// Re-marshal the typed schema so output is consistent with
-			// the JSON shape the server would have returned. This keeps
-			// downstream `extend edit --schema schema.json` flows
-			// working unchanged.
-			body, err := json.Marshal(resp.Schema)
-			if err != nil {
-				return fmt.Errorf("encode schema: %w", err)
-			}
-			var pretty any
-			if err := json.Unmarshal(body, &pretty); err != nil {
-				_, werr := app.IO.Out.Write(body)
-				return werr
-			}
-			return renderWithDefault(app, pretty, output.FormatJSON)
-		},
-		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
-			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
-			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")
-			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 		},
 	}
 }

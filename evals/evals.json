@@ -74,7 +74,7 @@
         },
         {
           "type": "extend_call",
-          "text": "agent ran `extend extract` (not parse \u2014 totals are typed fields)",
+          "text": "agent ran `extend extract` (not parse — totals are typed fields)",
           "must_contain": [
             {
               "argv_prefix": [
@@ -171,7 +171,7 @@
         "contract.pdf"
       ],
       "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one. The prompt deliberately omits the file path; the agent should glance at the working directory.",
-      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone \u2014 needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
+      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone — needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
       "expectations": [
         {
           "type": "skill_activates",
@@ -282,10 +282,11 @@
         },
         {
           "type": "extend_call",
-          "text": "agent ran `extend run` with --using",
+          "text": "agent ran `extend workflows run` with --using",
           "must_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "run"
               ],
               "flag": "using"
@@ -401,7 +402,7 @@
       "id": "S-2",
       "category": "single-command",
       "path": "B",
-      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 \u2014 but don't block. Just give me the run ID so I can check on it later.",
+      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 — but don't block. Just give me the run ID so I can check on it later.",
       "files": [
         "invoice.pdf"
       ],
@@ -439,14 +440,15 @@
       "path": "B",
       "prompt": "Watch run exr_demo_processed until it finishes and tell me the result.",
       "files": [],
-      "expected_output": "Agent runs `extend runs watch exr_demo_processed`.",
+      "expected_output": "Agent runs `extend extract runs watch exr_demo_processed`.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent ran `extend runs watch exr_demo_processed`",
+          "text": "agent ran `extend extract runs watch exr_demo_processed`",
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "watch"
               ],
@@ -469,14 +471,15 @@
       "path": "B",
       "prompt": "What's the result of run exr_demo_processed?",
       "files": [],
-      "expected_output": "Agent runs `extend runs get exr_demo_processed`.",
+      "expected_output": "Agent runs `extend extract runs get exr_demo_processed`.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent ran `extend runs get exr_demo_processed`",
+          "text": "agent ran `extend extract runs get exr_demo_processed`",
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "get"
               ],
@@ -598,7 +601,7 @@
       "path": "B",
       "prompt": "Get me JSON for run exr_demo_processed with just the status and processedAt fields.",
       "files": [],
-      "expected_output": "Agent runs `extend runs get exr_demo_processed -o json --jq '{status, processedAt}'`. Does NOT combine -o markdown with --jq.",
+      "expected_output": "Agent runs `extend extract runs get exr_demo_processed -o json --jq '{status, processedAt}'` (or equivalent jq filter). Does NOT combine -o markdown with --jq.",
       "expectations": [
         {
           "type": "extend_call",
@@ -606,6 +609,7 @@
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "get"
               ],
@@ -622,6 +626,7 @@
           "must_not_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "get"
               ],
@@ -646,7 +651,7 @@
       "path": "B",
       "prompt": "Print run exr_demo_processed as plain markdown so I can paste it into our Slack thread.",
       "files": [],
-      "expected_output": "Agent runs `extend runs get exr_demo_processed -o markdown`. Does NOT pass --jq.",
+      "expected_output": "Agent runs `extend extract runs get exr_demo_processed -o markdown`. Does NOT pass --jq.",
       "expectations": [
         {
           "type": "extend_call",
@@ -654,6 +659,7 @@
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "get"
               ],
@@ -669,6 +675,7 @@
           "must_not_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "get"
               ],
@@ -730,10 +737,11 @@
         },
         {
           "type": "extend_call",
-          "text": "agent queried failures with runs list",
+          "text": "agent queried failures with extract runs list",
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "list"
               ],
@@ -755,7 +763,7 @@
         "invoice.pdf",
         "extractor.json"
       ],
-      "expected_output": "Agent issues create \u2192 versions create \u2192 extract in roughly that order.",
+      "expected_output": "Agent issues create → versions create → extract in roughly that order.",
       "expectations": [
         {
           "type": "extend_call",
@@ -1027,6 +1035,7 @@
           "must_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "run"
               ],
               "args": [
@@ -1041,6 +1050,7 @@
           "must_not_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "run"
               ],
               "flag_value": {
@@ -1114,6 +1124,7 @@
           "must_not_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "run"
               ]
             }
@@ -1209,6 +1220,7 @@
           "must_not_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "run"
               ]
             }
@@ -1237,7 +1249,7 @@
       "path": "B",
       "prompt": "List all my edit runs from this week.",
       "files": [],
-      "expected_output": "Agent recognizes edit runs are not listable (CLI rejects --type edit). Suggests `extend runs get edr_xxx` for individual edit runs.",
+      "expected_output": "Agent recognizes edit runs are not listable (there is no `edit runs list` command). Suggests `extend edit runs get edr_xxx` for individual edit runs.",
       "expectations": [
         {
           "type": "stable_answer",
@@ -1248,7 +1260,7 @@
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command (max 2 attempts)",
           "count_under": {
-            "runs.list": 3
+            "edit.runs.list": 3
           }
         }
       ]
@@ -1259,7 +1271,7 @@
       "path": "B",
       "prompt": "Cancel parse run pr_demo_processed for me.",
       "files": [],
-      "expected_output": "Agent recognizes parse runs cannot be cancelled \u2014 explains rather than retrying indefinitely.",
+      "expected_output": "Agent recognizes parse runs cannot be cancelled — explains rather than retrying indefinitely.",
       "expectations": [
         {
           "type": "stable_answer",
@@ -1279,32 +1291,54 @@
       "id": "Q-3",
       "category": "run-type-quirk",
       "path": "B",
-      "prompt": "Show me workflow batch wfb_xxx \u2014 I want to know what's in it.",
+      "prompt": "Show me workflow batch wfb_xxx — I want to know what's in it.",
       "files": [],
-      "expected_output": "Agent uses `extend runs list --type workflow --batch wfb_xxx`. Does NOT use `extend batches get`.",
+      "expected_output": "Agent uses `extend workflows runs list --batch wfb_xxx`. Does NOT use a typed `batches get` (workflow batches have no GET endpoint).",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent used `extend runs list --type workflow --batch`",
+          "text": "agent used `extend workflows runs list --batch`",
           "must_contain": [
             {
               "argv_prefix": [
+                "workflows",
                 "runs",
                 "list"
               ],
               "args": [
-                "--type",
-                "workflow"
+                "--batch"
               ]
             }
           ]
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT use `extend batches get`",
+          "text": "agent did NOT use a typed `batches get` on a workflow batch",
           "must_not_contain": [
             {
               "argv_prefix": [
+                "extract",
+                "batches",
+                "get"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "parse",
+                "batches",
+                "get"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "classify",
+                "batches",
+                "get"
+              ]
+            },
+            {
+              "argv_prefix": [
+                "split",
                 "batches",
                 "get"
               ]
@@ -1319,7 +1353,7 @@
       "path": "B",
       "prompt": "Show me every FAILED extract run from the last 30 days. List them with their failure reason.",
       "files": [],
-      "expected_output": "Agent uses `extend runs list --type extract --status FAILED` and iterates pages with --page-token (NOT --all).",
+      "expected_output": "Agent uses `extend extract runs list --status FAILED` and iterates pages with --page-token (NOT --all).",
       "stub_config": {
         "default_mode": "paginated",
         "pages": 2
@@ -1327,16 +1361,15 @@
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent issued `extend runs list --type extract --status FAILED`",
+          "text": "agent issued `extend extract runs list --status FAILED`",
           "must_contain": [
             {
               "argv_prefix": [
+                "extract",
                 "runs",
                 "list"
               ],
               "args": [
-                "--type",
-                "extract",
                 "--status",
                 "FAILED"
               ]
@@ -1354,9 +1387,9 @@
         },
         {
           "type": "extend_call",
-          "text": "agent paginated (2+ runs list calls)",
+          "text": "agent paginated (2+ extract runs list calls)",
           "count_at_least": {
-            "runs.list": 2
+            "extract.runs.list": 2
           }
         },
         {
@@ -1690,18 +1723,15 @@
       "id": "H-6",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "I'm hand-editing the schema produced by `extend edit schema generate`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
+      "prompt": "I'm hand-editing the schema produced by `extend detect-form`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
       "files": [],
-      "expected_output": "Agent consults `extend edit schema generate --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
+      "expected_output": "Agent consults `extend detect-form --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent consulted edit help rather than answering from memory",
+          "text": "agent consulted help rather than answering from memory",
           "must_contain": [
             {
-              "argv_prefix": [
-                "edit"
-              ],
               "flag": "help"
             }
           ]
@@ -1717,19 +1747,17 @@
       "id": "H-7",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "I'm mapping our existing edit schema onto a vendor PDF. If I run `extend edit schema generate` with an input schema, what response fields should I inspect to see the final schema and mapping details?",
+      "prompt": "I'm mapping our existing edit schema onto a vendor PDF. If I run `extend detect-form` with an input schema, what response fields should I inspect on the finished run to see the final schema and mapping details?",
       "files": [],
-      "expected_output": "Agent consults edit schema generation help and names schema, annotatedSchema, and mappingResult, including mappingResult's unmatchedInputPaths or unusedFormFieldKeys details.",
+      "expected_output": "Agent consults detect-form help and names output.schema, output.annotatedSchema, and output.mappingResult, including mappingResult's unmatchedInputPaths or unusedFormFieldKeys details.",
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent consulted edit schema generate help",
+          "text": "agent consulted detect-form help",
           "must_contain": [
             {
               "argv_prefix": [
-                "edit",
-                "schema",
-                "generate"
+                "detect-form"
               ],
               "flag": "help"
             }

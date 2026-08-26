@@ -14,14 +14,14 @@ import (
 	"github.com/extend-hq/extend-cli/internal/extendx"
 )
 
-// newRunsListDoc returns the typed documentation for `extend runs list`.
-// Pulled out of runs.go because the listing path (per-kind page funcs,
-// the cross-kind common-options parser, and the summary-row formatters)
-// is half of the file by line count and stands alone from the rest of
-// the runs subcommand surface.
-func newRunsListDoc(app *App) *CommandDoc {
+// listDoc returns the typed documentation for `extend <verb> runs list`.
+// Lives in runs_list.go with the per-kind page funcs, the cross-kind
+// common-options parser, and the summary-row formatters that implement
+// it. Only listable kinds attach this leaf (edit runs have no list
+// endpoint), and each kind registers exactly the filter flags its
+// endpoint supports.
+func (s runsGroupSpec) listDoc(app *App) *CommandDoc {
 	var (
-		runType   string
 		status    string
 		using     string
 		batchID   string
@@ -35,44 +35,60 @@ func newRunsListDoc(app *App) *CommandDoc {
 		sortBy    string
 		sortDir   string
 	)
+	batchExample := "bpr_xK9mLPq"
+	if s.kind == extendx.KindParse {
+		batchExample = "bpar_xK9mLPq"
+	} else if s.kind == extendx.KindWorkflow {
+		batchExample = "batch_xK9mLPq"
+	}
+	examples := []Example{
+		{Label: "First page", Cmd: fmt.Sprintf("extend %s", s.path("runs list"))},
+		{Label: "Filter by status", Cmd: fmt.Sprintf("extend %s --status PROCESSED", s.path("runs list"))},
+		{Label: "Runs in a batch", Cmd: fmt.Sprintf("extend %s --batch %s", s.path("runs list"), batchExample)},
+		{Label: "Next page", Cmd: fmt.Sprintf("extend %s --page-token <token-from-previous-response>", s.path("runs list"))},
+	}
+	if s.usingFlag != "" {
+		examples = append(examples, Example{
+			Label: "Filter by " + s.usingFlag,
+			Cmd:   fmt.Sprintf("extend %s --using %s", s.path("runs list"), s.usingExample),
+		})
+	}
+	if s.sourceFilters {
+		examples = append(examples, Example{
+			Label: "Runs spawned by a workflow",
+			Cmd:   fmt.Sprintf("extend %s --source WORKFLOW_RUN --source-id workflow_run_x", s.path("runs list")),
+		})
+	}
+	if s.sortable {
+		examples = append(examples, Example{
+			Label: "Custom sort",
+			Cmd:   fmt.Sprintf("extend %s --sort-by updatedAt --sort asc", s.path("runs list")),
+		})
+	}
 	return &CommandDoc{
 		Use:     "list",
-		Summary: "List runs of a given processor type",
+		Summary: fmt.Sprintf("List %s runs with filters", s.name()),
 		Triggers: []string{
-			"list runs by processor type",
-			"find recent runs of a workflow",
-			"page through extract runs",
-			"see runs in a batch",
-			"filter runs by status or processor",
+			fmt.Sprintf("list %s runs in the workspace", s.name()),
+			fmt.Sprintf("page through %s runs", s.name()),
+			fmt.Sprintf("filter %s runs by status", s.name()),
+			fmt.Sprintf("see %s runs in a batch", s.name()),
 		},
-		WhenToUse: `Use to enumerate runs of a single type with rich filtering. Pass
---type extract|parse|classify|split|workflow (edit is not listable; use
-'extend runs get' for individual edit runs).`,
-		Details: `Most filter flags map directly to documented query parameters on the
-run-list endpoints; the wire shape varies slightly by type (e.g. parse
-runs ignore --using, --sort-by, and --sort; workflow runs ignore
---source and --source-id).
+		WhenToUse: fmt.Sprintf(`Use to enumerate %s runs with filtering by status, batch, and file
+name. The ID column feeds 'extend %s <id>'.`, s.name(), s.path("runs get")),
+		Details: `Filter flags map directly to documented query parameters on the
+run-list endpoint.
 
 ` + paginationGuidance,
-		Examples: []Example{
-			{Label: "All extract runs", Cmd: "extend runs list --type extract"},
-			{Label: "Filter by status + processor", Cmd: "extend runs list --type extract --using ex_abc --status PROCESSED"},
-			{Label: "Workflow runs by file name", Cmd: "extend runs list --type workflow --using workflow_abc --file-name invoice"},
-			{Label: "Runs spawned by a workflow", Cmd: "extend runs list --type extract --source WORKFLOW_RUN --source-id workflow_run_x"},
-			{Label: "Runs in a batch", Cmd: "extend runs list --type extract --batch bpr_xK9mLPq"},
-			{Label: "Next page", Cmd: "extend runs list --type extract --page-token <token-from-previous-response>"},
-			{Label: "Custom sort", Cmd: "extend runs list --type extract --sort-by updatedAt --sort asc"},
-		},
-		Gotchas: []string{
-			"--type is required.",
-			"Edit runs are not listable; use 'extend runs get edr_...' for individual edit runs.",
-			"Parse runs ignore --using, --sort-by, and --sort; workflow runs ignore --source and --source-id.",
-		},
-		SeeAlso: []string{"runs get", "runs watch", "batches get"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Examples: examples,
+		SeeAlso:  s.seeAlso("list"),
+		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRunsList(cmd, app, runsListParams{
-				runType:   runType,
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			rows, pages, err := collectListRows(cmd.Context(), cli, s.kind, runsListParams{
 				status:    status,
 				using:     using,
 				batchID:   batchID,
@@ -86,28 +102,43 @@ runs ignore --using, --sort-by, and --sort; workflow runs ignore
 				sortBy:    sortBy,
 				sortDir:   sortDir,
 			})
+			if err != nil {
+				return err
+			}
+			return renderListForCmd(cmd, app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&runType, "type", "", "Run type: extract|parse|classify|split|workflow (edit is not listable; use 'extend runs get')")
-			cmd.Flags().StringVar(&status, "status", "", "Filter by status (varies by type; workflow also supports NEEDS_REVIEW|REJECTED|CANCELLING; parse excludes CANCELLED)")
-			cmd.Flags().StringVar(&using, "using", "", "Filter by processor ID (ex_/cl_/spl_/workflow_; ignored for parse)")
-			cmd.Flags().StringVar(&batchID, "batch", "", "Filter by batch run ID (bpr_..., or bpar_... for parse)")
-			cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|... (ignored for workflow)")
-			cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx (ignored for workflow)")
+			statusHelp := "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED"
+			switch s.kind {
+			case extendx.KindParse:
+				statusHelp = "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED"
+			case extendx.KindWorkflow:
+				statusHelp = "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED|NEEDS_REVIEW|REJECTED|CANCELLING"
+			}
+			cmd.Flags().StringVar(&status, "status", "", statusHelp)
+			if s.usingFlag != "" {
+				cmd.Flags().StringVar(&using, "using", "", fmt.Sprintf("Filter by %s ID (%s...)", s.usingFlag, s.usingExample[:strings.Index(s.usingExample, "_")+1]))
+			}
+			batchHelp := "Filter by batch run ID (" + batchExample[:strings.Index(batchExample, "_")+1] + "...)"
+			cmd.Flags().StringVar(&batchID, "batch", "", batchHelp)
+			if s.sourceFilters {
+				cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|...")
+				cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx")
+			}
 			cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
 			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
 			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page, the default)")
 			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
 			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
-			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt; ignored for parse)")
-			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc (ignored for parse)")
-			_ = cmd.MarkFlagRequired("type")
+			if s.sortable {
+				cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+				cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
+			}
 		},
 	}
 }
 
 type runsListParams struct {
-	runType   string
 	status    string
 	using     string
 	batchID   string
@@ -120,43 +151,6 @@ type runsListParams struct {
 	pageToken string
 	sortBy    string
 	sortDir   string
-}
-
-func runRunsList(cmd *cobra.Command, app *App, p runsListParams) error {
-	ctx := cmd.Context()
-	cli, err := app.NewClient()
-	if err != nil {
-		return err
-	}
-	kind, err := parseRunKind(p.runType)
-	if err != nil {
-		return err
-	}
-
-	rows, pages, err := collectListRows(ctx, cli, kind, p)
-	if err != nil {
-		return err
-	}
-
-	return renderListForCmd(cmd, app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
-}
-
-func parseRunKind(s string) (extendx.RunKind, error) {
-	switch strings.ToLower(s) {
-	case "extract":
-		return extendx.KindExtract, nil
-	case "parse":
-		return extendx.KindParse, nil
-	case "classify":
-		return extendx.KindClassify, nil
-	case "split":
-		return extendx.KindSplit, nil
-	case "workflow":
-		return extendx.KindWorkflow, nil
-	case "edit":
-		return extendx.KindEdit, nil
-	}
-	return "", fmt.Errorf("unknown run type %q (want extract|parse|classify|split|workflow|edit)", s)
 }
 
 func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.RunKind, p runsListParams) ([][]string, []any, error) {
@@ -182,7 +176,7 @@ func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.Ru
 		case extendx.KindWorkflow:
 			pageRows, page, nextToken, err = listWorkflowPage(ctx, cli, p, pageToken)
 		case extendx.KindEdit:
-			return nil, nil, fmt.Errorf("listing edit runs is not supported by the API; use 'extend runs get edr_...' for individual edit runs")
+			return nil, nil, fmt.Errorf("listing edit runs is not supported by the API; use 'extend edit runs get edr_...' for individual edit runs")
 		}
 		if err != nil {
 			return nil, nil, err
@@ -388,8 +382,8 @@ func listSplitPage(ctx context.Context, cli *sdkclient.Client, p runsListParams,
 
 func listWorkflowPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
 	// Workflow runs have no source/sourceId filters at the server;
-	// common.SourceID is ignored here (silently — the CLI flag is
-	// documented as ignored for --type workflow).
+	// the workflows list command doesn't register those flags, so
+	// common.SourceID is always nil here.
 	common, err := parseRunsListCommon(p, pageToken)
 	if err != nil {
 		return nil, nil, "", err

@@ -260,7 +260,7 @@ func sanitized(e *APIError) *APIError {
 }
 
 // IsNotFound reports whether err is a 404 from the API. Used by
-// commands like `extend runs get` to surface "no such run" hints.
+// commands like `extend extract runs get` to surface "no such run" hints.
 func IsNotFound(err error) bool {
 	if apiErr, ok := AsAPIError(err); ok {
 		return apiErr.StatusCode == http.StatusNotFound

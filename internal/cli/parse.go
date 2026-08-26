@@ -82,7 +82,7 @@ knobs in the same forms.
 			"--jq cannot be combined with -o markdown; use -o json --jq and select the markdown chunk paths.",
 			"Parse runs cannot be cancelled once submitted (unlike extract/classify/split).",
 		},
-		SeeAlso:  []string{"extract", "classify", "parse batch", "runs watch", "runs get"},
+		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get"},
 		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
@@ -122,7 +122,7 @@ knobs in the same forms.
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
 		},
-		Subcommands: []*CommandDoc{newParseBatchDoc(app)},
+		Subcommands: []*CommandDoc{newParseBatchDoc(app), parseRunsSpec().doc(app), parseBatchesSpec().doc(app)},
 	}
 }
 
@@ -187,7 +187,7 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
-		return formatActionWaitError(err, run.ID)
+		return formatActionWaitError(err, run.ID, "extend parse runs watch")
 	}
 
 	if err := renderParseResult(app, final, p.target); err != nil {
