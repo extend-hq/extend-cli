@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -196,29 +195,5 @@ func TestRevoke(t *testing.T) {
 	}
 	if got.Get("token") != "eort_bye" || got.Get("token_type_hint") != "refresh_token" {
 		t.Errorf("revoke form = %v", got)
-	}
-}
-
-func TestTokenSID(t *testing.T) {
-	jwt := func(payload string) string {
-		enc := base64.RawURLEncoding.EncodeToString
-		return enc([]byte(`{"alg":"RS256"}`)) + "." + enc([]byte(payload)) + ".sig"
-	}
-	cases := []struct {
-		name  string
-		token string
-		want  string
-	}{
-		{"workos token", jwt(`{"sub":"user_1","sid":"app_consent_01ABC"}`), "app_consent_01ABC"},
-		{"no sid claim", jwt(`{"sub":"user_1"}`), ""},
-		{"opaque token", "eoat_abc123", ""},
-		{"empty", "", ""},
-		{"bad base64 payload", "a.!!!.c", ""},
-		{"non-json payload", "a." + base64.RawURLEncoding.EncodeToString([]byte("not json")) + ".c", ""},
-	}
-	for _, tc := range cases {
-		if got := TokenSID(tc.token); got != tc.want {
-			t.Errorf("%s: TokenSID = %q, want %q", tc.name, got, tc.want)
-		}
 	}
 }

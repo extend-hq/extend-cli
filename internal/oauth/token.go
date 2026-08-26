@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,29 +39,6 @@ func (tr *TokenResponse) Expiry(now time.Time) time.Time {
 		return now.Add(fallbackTokenLifetime)
 	}
 	return now.Add(time.Duration(tr.ExpiresIn) * time.Second)
-}
-
-// TokenSID extracts the sid claim from a JWT access token without
-// verifying the signature (fine here: the token is the CLI's own, and
-// the value is only used to compare two stored tokens). WorkOS Connect
-// sets sid to the consent id, which every login sharing that consent
-// inherits. Returns "" for opaque or malformed tokens.
-func TokenSID(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		SID string `json:"sid"`
-	}
-	if json.Unmarshal(payload, &claims) != nil {
-		return ""
-	}
-	return claims.SID
 }
 
 // TokenError is the token endpoint's RFC 6749 error payload, carried

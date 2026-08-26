@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -415,7 +414,11 @@ func TestRunLoginNoBrowserPrintsURL(t *testing.T) {
 	}
 }
 
-func TestRunLoginRevokesReplacedGrant(t *testing.T) {
+// Re-login must never revoke the grant it replaces: /oauth/revoke-current
+// deletes the CLI client's whole WorkOS authorization, which the new
+// login shares, so revoking the old grant would kill the new session's
+// refresh ability too.
+func TestRunLoginDoesNotRevokeReplacedGrant(t *testing.T) {
 	f := newFakeAuthServer(t)
 	loginTestEnv(t, f.srv.URL)
 	app, _ := testAppForLogin()
@@ -438,87 +441,11 @@ func TestRunLoginRevokesReplacedGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runLogin: %v", err)
 	}
-	if len(f.revoked) != 1 || f.revoked[0] != "eoat_old" {
-		t.Errorf("revoked = %v, want the replaced login's access token", f.revoked)
-	}
-	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.RefreshToken != "eort_test" {
-		t.Errorf("stored record = %+v, want the new login", rec)
-	}
-}
-
-// jwtWithSID builds an unsigned JWT-shaped token whose payload carries
-// the given sid claim, mimicking a WorkOS Connect access token.
-func jwtWithSID(sid string) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sid":%q}`, sid)))
-	return header + "." + payload + ".sig"
-}
-
-// A re-login while the WorkOS consent is still on file issues tokens
-// with the SAME sid as the replaced grant. Revocation is sid-keyed, so
-// revoking the replaced grant would kill the new session too; the login
-// must skip it.
-func TestRunLoginSkipsRevokingSameConsentGrant(t *testing.T) {
-	f := newFakeAuthServer(t)
-	f.accessToken = jwtWithSID("app_consent_shared")
-	loginTestEnv(t, f.srv.URL)
-	app, _ := testAppForLogin()
-
-	store := oauth.DefaultStore()
-	if err := store.Set(f.srv.URL, oauth.Record{
-		AccessToken:  jwtWithSID("app_consent_shared"),
-		RefreshToken: "eort_old",
-		ExpiresAt:    time.Now().Add(time.Hour),
-		ClientID:     oauth.DefaultClientID,
-		Resource:     f.srv.URL,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runLogin(context.Background(), app, loginOptions{
-		openBrowser: f.browserFor(t, "code-xyz", ""),
-		store:       store,
-	})
-	if err != nil {
-		t.Fatalf("runLogin: %v", err)
-	}
 	if len(f.revoked) != 0 {
-		t.Errorf("revoked = %v, want none: revoking a same-sid grant would invalidate the new login", f.revoked)
+		t.Errorf("revoked = %v, want none: revoking a replaced grant would delete the shared authorization", f.revoked)
 	}
 	if rec, _ := store.Get(f.srv.URL); rec == nil || rec.RefreshToken != "eort_test" {
 		t.Errorf("stored record = %+v, want the new login", rec)
-	}
-}
-
-// A replaced grant from a different consent (different sid) must still
-// be revoked so it does not linger server-side.
-func TestRunLoginRevokesDifferentConsentGrant(t *testing.T) {
-	f := newFakeAuthServer(t)
-	f.accessToken = jwtWithSID("app_consent_new")
-	loginTestEnv(t, f.srv.URL)
-	app, _ := testAppForLogin()
-
-	oldToken := jwtWithSID("app_consent_old")
-	store := oauth.DefaultStore()
-	if err := store.Set(f.srv.URL, oauth.Record{
-		AccessToken:  oldToken,
-		RefreshToken: "eort_old",
-		ExpiresAt:    time.Now().Add(time.Hour),
-		ClientID:     oauth.DefaultClientID,
-		Resource:     f.srv.URL,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runLogin(context.Background(), app, loginOptions{
-		openBrowser: f.browserFor(t, "code-xyz", ""),
-		store:       store,
-	})
-	if err != nil {
-		t.Fatalf("runLogin: %v", err)
-	}
-	if len(f.revoked) != 1 || f.revoked[0] != oldToken {
-		t.Errorf("revoked = %v, want the replaced login's access token", f.revoked)
 	}
 }
 

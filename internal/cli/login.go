@@ -266,11 +266,6 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		return fmt.Errorf("exchange authorization code: %w", err)
 	}
 
-	// Captured before the new record lands so the replaced grant can be
-	// revoked server-side; without this every re-login leaves a live
-	// orphaned grant family behind until it expires.
-	prev, _ := opts.store.Get(base)
-
 	rec := oauth.Record{
 		AccessToken:   tr.AccessToken,
 		RefreshToken:  tr.RefreshToken,
@@ -281,21 +276,15 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 		ClientID: clientID,
 		Resource: base,
 	}
+	// The replaced record (if any) is simply overwritten, never revoked:
+	// /oauth/revoke-current deletes the CLI client's whole WorkOS
+	// authorization, which the new login shares, so revoking the old
+	// grant would cut off the new session's refresh ability too. The
+	// superseded tokens leave the keychain here and the authorization
+	// itself dies at logout.
 	if err := opts.store.Set(base, rec); err != nil {
 		sp.Stop("")
 		return fmt.Errorf("store login: %w", err)
-	}
-	if prev != nil && prev.RefreshToken != rec.RefreshToken {
-		// Revocation is sid-keyed and the sid is the WorkOS consent id:
-		// while the consent stays on file, a re-login issues tokens with
-		// the SAME sid, so revoking the replaced grant would instantly
-		// invalidate the new one too. Only revoke when the sids differ;
-		// a superseded same-sid token dies with the consent at logout.
-		// Best-effort either way: the new login already works.
-		prevSID := oauth.TokenSID(prev.AccessToken)
-		if prevSID == "" || prevSID != oauth.TokenSID(rec.AccessToken) {
-			_ = revokeRecord(ctx, base, prev)
-		}
 	}
 
 	// Personalize the success line from GET /me. Best-effort: the
@@ -328,12 +317,15 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 		return nil
 	}
 
-	// Revoking the refresh token kills the whole grant family
-	// server-side. Best-effort: local tokens are cleared even when the
-	// server is unreachable, so the CLI is signed out either way.
+	// Best-effort: local tokens are cleared even when the server-side
+	// revoke fails (the API returns a retryable 503 when it cannot reach
+	// WorkOS), so the CLI is signed out either way; the user can finish
+	// the revocation from their account settings.
 	if revErr := revokeRecord(ctx, base, rec); revErr != nil {
 		fmt.Fprintf(app.IO.ErrOut, "%s Could not revoke the session server-side (%v); clearing local tokens anyway.\n",
 			pal.Yellow("!"), revErr)
+		fmt.Fprintf(app.IO.ErrOut, "%s The CLI may still appear under your connected apps; disconnect it from your Extend user settings if needed.\n",
+			pal.Yellow("!"))
 	}
 
 	if err := store.Delete(base); err != nil {
@@ -345,10 +337,11 @@ func runLogout(ctx context.Context, app *App, store oauth.Store) error {
 
 // revokeRecord kills a stored login server-side. WorkOS Connect has no
 // RFC 7009 revocation endpoint; instead POST /oauth/revoke-current on
-// the API denylists the session id inside the presented access token,
-// which invalidates every token of the login instantly (including any
-// still mintable via the refresh token). An expired access token is
-// refreshed first so the revoke call can authenticate.
+// the API deletes the CLI client's WorkOS authorization, which stops
+// new tokens from being minted (refresh tokens die with it). Already
+// issued access tokens stay valid until they expire — up to an hour —
+// but this CLI discards its copy right after. An expired access token
+// is refreshed first so the revoke call can authenticate.
 func revokeRecord(ctx context.Context, base string, rec *oauth.Record) error {
 	if rec == nil || rec.AccessToken == "" {
 		return nil
