@@ -45,6 +45,27 @@ func TestDetectForm_HitsFormDetectionEndpoint(t *testing.T) {
 	if !strings.Contains(out, "sgr_x") || !strings.Contains(out, `"schema"`) {
 		t.Errorf("output should contain the run with output.schema: %s", out)
 	}
+	if strings.Contains(body, "engineVersion") {
+		t.Errorf("with no --engine-version the body must omit engineVersion; got %s", body)
+	}
+}
+
+// TestDetectForm_EngineVersionRoundTrip pins that --engine-version
+// reaches the request body under config.engineVersion.
+func TestDetectForm_EngineVersionRoundTrip(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"object": "form_detection_run", "id": "sgr_x", "status": "PROCESSING"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "detect-form")
+	cmd.SetArgs([]string{"file_xK9", "--engine-version", "1.0.0-beta", "--wait=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("detect-form: %v", err)
+	}
+	body := string(srv.requests[0].Body)
+	if !strings.Contains(body, `"config":{`) || !strings.Contains(body, `"engineVersion":"1.0.0-beta"`) {
+		t.Errorf("engineVersion must nest under config; got %s", body)
+	}
 }
 
 // TestDetectFormRunsGet_ValidatesPrefix pins the typed-ID contract on

@@ -23,6 +23,7 @@ import (
 func newDetectFormDoc(app *App) *CommandDoc {
 	var (
 		advancedOptionsPath string
+		engineVersion       string
 		instructions        string
 		inputSchemaPath     string
 		password            string
@@ -54,6 +55,11 @@ include or how to interpret ambiguous form layouts. Use --input-schema
 to seed the generator with an existing schema, in which case detected
 fields are overlaid onto your starting point.
 
+Use --engine-version to pin the Edit engine used for detection (an
+exact version like 1.0.0-beta for reproducible results, or latest for
+the latest stable version). Omitted runs use the server default; the
+run object reports the resolved exact version under config.
+
 Detection options ride in --advanced-options as a JSON object (omitted
 fields use the server default):
 
@@ -68,6 +74,7 @@ fields use the server default):
 			{Label: "Basic", Cmd: "extend detect-form form.pdf"},
 			{Label: "Just the schema", Cmd: "extend detect-form form.pdf --jq '.output.schema' -o json > schema.json"},
 			{Label: "With instructions", Cmd: `extend detect-form form.pdf --instructions "skip the signature block"`},
+			{Label: "Pin the engine version", Cmd: "extend detect-form form.pdf --engine-version 1.0.0-beta"},
 			{Label: "Seed from existing", Cmd: "extend detect-form form.pdf --input-schema base.json"},
 			{Label: "Async (return run ID)", Cmd: "extend detect-form form.pdf --wait=false"},
 		},
@@ -94,6 +101,9 @@ fields use the server default):
 				return err
 			}
 			cfg := &extend.EditSchemaGenerationConfig{}
+			if engineVersion != "" {
+				cfg.EngineVersion = extend.String(engineVersion)
+			}
 			if advancedOptionsPath != "" {
 				raw, err := readJSONFile(advancedOptionsPath, "--advanced-options")
 				if err != nil {
@@ -147,6 +157,7 @@ fields use the server default):
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
 			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")

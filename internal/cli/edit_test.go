@@ -193,6 +193,27 @@ func TestEdit_AdvancedOptionsOmittedByDefault(t *testing.T) {
 	if strings.Contains(body, "advancedOptions") {
 		t.Errorf("with no --advanced-options the body must omit advancedOptions; got %s", body)
 	}
+	if strings.Contains(body, "engineVersion") {
+		t.Errorf("with no --engine-version the body must omit engineVersion; got %s", body)
+	}
+}
+
+// TestEdit_EngineVersionRoundTrip pins that --engine-version reaches
+// the request body under config.engineVersion.
+func TestEdit_EngineVersionRoundTrip(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "edr_x", "status": "PENDING"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "edit")
+	cmd.SetArgs([]string{"file_a", "--instructions", "fill it", "--engine-version", "1.0.0-beta", "--wait=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	body := string(srv.requests[0].Body)
+	if !strings.Contains(body, `"config":{`) || !strings.Contains(body, `"engineVersion":"1.0.0-beta"`) {
+		t.Errorf("engineVersion must nest under config; got %s", body)
+	}
 }
 
 func TestEdit_AutoDownloadsOnSuccess(t *testing.T) {

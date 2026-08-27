@@ -26,6 +26,7 @@ func newEditDoc(app *App) *CommandDoc {
 		instructions          string
 		schemaGenInstructions string
 		advancedOptionsPath   string
+		engineVersion         string
 		outputFile            string
 		password              string
 		wait                  bool
@@ -90,6 +91,10 @@ Config fields:
   - advancedOptions (object) - detection and output options. Pass through
     --advanced-options as inline JSON, a path, a file:// URI, or '-' for stdin.
     Omitted fields use the server default.
+  - engineVersion (string) - the Edit engine version to run (an exact version
+    like 1.0.0-beta for reproducible results, or latest for the latest stable
+    version). Pass through --engine-version; omitted runs use the server
+    default. The run object reports the resolved exact version under config.
 
   flattenPdf           bool  Make the filled form non-editable (server default: true).
   nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
@@ -110,6 +115,7 @@ the output must remain editable.
 			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
 			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
 			{Label: "Tune detection", Cmd: `extend edit form.pdf --advanced-options '{"tableParsingEnabled":true,"radioEnumsEnabled":true}'`},
+			{Label: "Pin the engine version", Cmd: "extend edit form.pdf --schema schema.json --engine-version 1.0.0-beta"},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
 		},
 		Gotchas: []string{
@@ -139,6 +145,7 @@ the output must remain editable.
 				instructions:          instructions,
 				schemaGenInstructions: schemaGenInstructions,
 				advancedOptionsPath:   advancedOptionsPath,
+				engineVersion:         engineVersion,
 				outputFile:            outputFile,
 				password:              password,
 				wait:                  wait,
@@ -150,6 +157,7 @@ the output must remain editable.
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
 			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
@@ -165,6 +173,7 @@ type editParams struct {
 	instructions          string
 	schemaGenInstructions string
 	advancedOptionsPath   string
+	engineVersion         string
 	outputFile            string
 	password              string
 	wait                  bool
@@ -188,6 +197,9 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 	}
 
 	cfg := &extend.EditConfig{}
+	if p.engineVersion != "" {
+		cfg.EngineVersion = extend.String(p.engineVersion)
+	}
 	if p.advancedOptionsPath != "" {
 		raw, err := readJSONFile(p.advancedOptionsPath, "--advanced-options")
 		if err != nil {
