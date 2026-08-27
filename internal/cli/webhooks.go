@@ -152,7 +152,8 @@ const webhookEventsDoc = `Valid --events values:
     extract_run.processed, extract_run.failed,
     classify_run.processed, classify_run.failed,
     split_run.processed, split_run.failed,
-    edit_run.processed, edit_run.failed
+    edit_run.processed, edit_run.failed,
+    form_detection_run.processed, form_detection_run.failed
   Batch completion:
     batch_parse_run.processed, batch_parse_run.failed,
     batch_processor_run.processed, batch_processor_run.failed
