@@ -416,3 +416,51 @@ func TestUploadClientRefusesRedirect(t *testing.T) {
 		t.Errorf("error = %v, want the upload redirect refusal", err)
 	}
 }
+
+// The SDK sets its own User-Agent and x-extend-api-version on every
+// request, so this checks what the server receives, on a regular call
+// and on an upload, for both kinds of credentials.
+func TestNewClient_SendsCLIHeaders(t *testing.T) {
+	const ua = "extend-cli/v1.2.3 (abc1234)"
+	const apiVersion = "2099-01-01"
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"api key", Config{APIKey: "sk_test"}},
+		{"oauth", Config{OAuth: &fakeSource{token: "eoat_live"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("User-Agent"); got != ua {
+					t.Errorf("%s %s User-Agent = %q, want %q", r.Method, r.URL.Path, got, ua)
+				}
+				if got := r.Header.Get("x-extend-api-version"); got != apiVersion {
+					t.Errorf("%s %s x-extend-api-version = %q, want %q", r.Method, r.URL.Path, got, apiVersion)
+				}
+				if r.URL.Path == "/files/upload" {
+					fmt.Fprint(w, `{"object":"file","id":"file_1"}`)
+					return
+				}
+				fmt.Fprint(w, `{"object":"list","data":[]}`)
+			}))
+			defer srv.Close()
+
+			cfg := tc.cfg
+			cfg.BaseURL = srv.URL
+			cfg.UserAgent = ua
+			cfg.APIVersion = apiVersion
+			c, err := NewClient(cfg)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			ctx := context.Background()
+			if _, err := c.Workflows.List(ctx, &extend.WorkflowsListRequest{}); err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if _, err := UploadStream(ctx, c, strings.NewReader("%PDF-1.4"), "doc.pdf", "application/pdf"); err != nil {
+				t.Fatalf("UploadStream: %v", err)
+			}
+		})
+	}
+}
