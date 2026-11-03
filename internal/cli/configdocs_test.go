@@ -74,6 +74,8 @@ func TestConfigCatalogsCoverSDKFields(t *testing.T) {
 		// Parse --advanced-options: top-level plus the returnOcr leaf.
 		{"ParseConfigAdvancedOptions", reflect.TypeOf(extend.ParseConfigAdvancedOptions{}), parseAdvancedOptionsFields},
 		{"ParseConfigAdvancedOptionsReturnOcr", reflect.TypeOf(extend.ParseConfigAdvancedOptionsReturnOcr{}), parseAdvancedOptionsFields},
+		{"EditConfigAdvancedOptions", reflect.TypeOf(extend.EditConfigAdvancedOptions{}), editAdvancedOptionsFields},
+		{"EditSchemaGenerationConfigAdvancedOptions", reflect.TypeOf(extend.EditSchemaGenerationConfigAdvancedOptions{}), formDetectionAdvancedOptionsFields},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

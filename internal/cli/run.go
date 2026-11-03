@@ -10,6 +10,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -203,7 +204,9 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 		req.Secrets = &secrets
 	}
 
-	run, err := cli.WorkflowRuns.Create(ctx, req)
+	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.WorkflowRun, error) {
+		return cli.WorkflowRuns.Create(ctx, req, opts...)
+	})
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}

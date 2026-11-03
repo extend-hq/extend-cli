@@ -13,7 +13,9 @@ package cli
 //
 // Source of truth is the pinned extend-go-sdk structs: SplitConfig,
 // ExtractConfigJSON, ClassifyConfig, WorkflowsCreateRequest.Steps,
-// ParseConfigBlockOptions, ParseConfigAdvancedOptions, and EditJSON. When
+// ParseConfigBlockOptions, ParseConfigAdvancedOptions,
+// EditConfigAdvancedOptions, EditSchemaGenerationConfigAdvancedOptions,
+// and EditJSON. When
 // the SDK is regenerated and a field is added, removed, or renamed, update
 // the matching catalog here in the same change — drift is a defect, not a
 // follow-up. The drift guards in configdocs_test.go enforce this.
@@ -155,7 +157,9 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - CLASSIFY and SPLIT route with classificationId values. These must match
         classification IDs from the classifier/splitter config, not type labels.
       - CONDITIONAL routes with conditionId values matching config.conditions[].id.
-      - RULE_VALIDATION routes with result values: "pass" or "fail".
+      - RULE_VALIDATION and VALIDATION route with result values: "pass" or "fail".
+      - ROUTER routes with branchId values matching config.branches[].id, plus the
+        reserved "otherwise" route taken when no branch matches.
       - Conditional and formula fields can reference prior processor outputs as
         "{{stepName.output.*}}", workflow run metadata as "{{metadata.*}}", and
         external validation responses as
@@ -176,6 +180,11 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       "next": [
         { "step": "webhook", "result": "pass" },
         { "step": "review", "result": "fail" }
+      ]
+
+      "next": [
+        { "step": "extract_invoice", "branchId": "is_invoice" },
+        { "step": "review", "branchId": "otherwise" }
       ]
 
     Processor references and versions:
@@ -220,6 +229,17 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
         the formula must evaluate to a boolean and may reference any earlier step
         output, including data fetched with EXTERNAL_DATA_VALIDATION. A common
         topology routes pass to WEBHOOK_RESPONSE and fail to HUMAN_REVIEW.
+      - VALIDATION - checks workflow data with config.blocks, all of which must pass;
+        route on result "pass" or "fail". A block is code or natural language:
+          { "name": "totals_match", "blockType": "code",
+            "code": { "language": "javascript", "code": "..." } }
+          { "name": "looks_legit", "blockType": "semantic",
+            "semantic": { "promptText": "..." } }
+        Only JavaScript code runs today; python blocks fail when evaluated.
+      - ROUTER - evaluates config.branches in order and takes the first branch whose
+        block returns true, or the "otherwise" route when none does. Each branch is
+        { "id", "name", "block" }, with a code or semantic block as in VALIDATION;
+        code blocks must return a boolean.
       - EXTERNAL_DATA_VALIDATION - posts extraction data to an external HTTP endpoint;
         config.requestOptions sets url, method, headers, and contentType, and
         failureBehavior controls failures. Extend also signs requests with the
@@ -305,7 +325,10 @@ const parseBlockOptionsFields = `  - figures (object) — enabled; figureImageCl
     (carry headers across page breaks); cellBlocksEnabled (emit a block per cell);
     agentic (object: enabled, customInstructions).
   - text (object) — signatureDetectionEnabled; agentic (object: enabled, customInstructions).
-  - keyValue (object) — blankFieldFormattingEnabled (emit detected blank fields).
+  - keyValue (object) — blankFieldFormattingEnabled (emit detected blank fields);
+    structuredOutputEnabled (return each form region as a typed tree of keys, values,
+    checkboxes, signatures, and tables under details.form; needs parse_performance
+    >= 2.0.0, parse_light >= 1.0.0, or parse_auto).
   - barcodes (object) — readingEnabled (decode barcode values); imageClippingEnabled.
   - formulas (object) — enabled (detect formulas and include their LaTeX representation).`
 
@@ -320,7 +343,14 @@ const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-dete
   - excelIncludeCellMetadata (bool) — include cell provenance (source refs/formulas, data-cell/data-formula in HTML); advanced mode only.
   - excelIncludeCellFormatting (bool) — include cell formatting (bold, italic, font/background color, inline HTML styles); advanced mode only.
   - verticalGroupingThreshold (number 0.1–5.0, default 1.0) — line-grouping sensitivity; --target spatial only.
-  - returnOcr (object) — words (bool): include word-level raw OCR data in the response.
+  - returnOcr (object) — words (bool): include word-level raw OCR data in the response;
+    lines (bool): include line-level OCR data at output.ocr.lines. Independent opt-ins.
+  - textExtractionMethod ("auto"|"ocr_only") — how PDF text is read: "auto" uses the PDF's
+    embedded text where it is reliable and OCRs the rest; "ocr_only" OCRs every page.
+    parse_auto and parse_light >= 1.0.0 only (default "auto"); other engines always OCR.
+  - embedOcrInPdf (bool) — add the recognized words to the processed PDF as an invisible
+    text layer, so it can be searched and copied; pages that already have text are
+    skipped. Download the PDF afterwards with ` + "`extend files download <run's file.id>`" + `.
   - alwaysConvertToPdf (bool) — convert images/Office/HTML to PDF first (enables spatial bboxes).
   - enrichmentFormat ("xml"|"bracket") — annotation style, e.g. <page_number>1</page_number> vs [page_number: 1].
   - imageConversionQuality ("high"|"medium"|"low") — quality when converting to PDF.
@@ -366,12 +396,41 @@ each field. Populate the value keys; leave detected structural keys as generated
     fontSize, fontColor (RGB 0-255), font.
   - extend_edit:column_width (number) — column width percentage for table fields.
   - extend_edit:row_heights (array) — row height percentages for array/table fields.
+  - extend_edit:source_acroform (object) — the PDF's own form field behind this property:
+    fieldName, fieldType, and optionMap/optionValue for choice fields. Generated for
+    native fields; keep it unchanged. With advancedOptions.preserveSignatureValidity it
+    names the existing field to fill.
+  - extend:descriptions (array) — human-readable labels for the enum values, in the same
+    order. Generated for choice fields; keep it unchanged.
 
 Standard JSON Schema keys carry through: description, properties, items, enum,
 required, additionalProperties, and maxItems (row cap for array/table fields).
 Root-level conditional form logic is supported with dependentRequired,
 if/then/else, allOf, oneOf, anyOf, and not. Conditional clauses do not accept
 extend_edit:* keys.`
+
+// editAdvancedOptionsFields documents the EditConfigAdvancedOptions object
+// (edit --advanced-options).
+const editAdvancedOptionsFields = `  flattenPdf                       bool  Make the filled form non-editable (server default: true).
+  nativeFieldsOnly                 bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled              bool  Parse table regions as arrays of objects so their cells can be filled.
+  radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum so only one option fills.
+  conditionalGenerationEnabled     bool  When the server generates the schema, add the form's stated requirements
+                                         as conditional rules; values that break them fail the run.
+  advancedSchemaRefinementEnabled  bool  When the server generates the schema, organize field names and descriptions;
+                                         instructions can nest fields or merge options into one choice (adds latency).
+  preserveSignatureValidity        bool  Keep existing digital signatures valid: fill only existing fields, matched by
+                                         extend_edit:source_acroform.fieldName; flattenPdf then defaults to false.`
+
+// formDetectionAdvancedOptionsFields documents the
+// EditSchemaGenerationConfigAdvancedOptions object (detect-form
+// --advanced-options).
+const formDetectionAdvancedOptionsFields = `  nativeFieldsOnly                 bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled              bool  Parse table regions as arrays of objects.
+  radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum.
+  conditionalGenerationEnabled     bool  Add the form's stated requirements as root-level conditional rules.
+  advancedSchemaRefinementEnabled  bool  Organize field names and descriptions; instructions can nest fields or
+                                         merge checkbox/radio options into one choice (adds latency).`
 
 const editOutputDoc = `Edit output:
 

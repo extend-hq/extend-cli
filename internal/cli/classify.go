@@ -11,6 +11,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -208,7 +209,9 @@ func runClassify(ctx context.Context, app *App, p classifyParams) error {
 		req.Priority = &pr
 	}
 
-	run, err := cli.ClassifyRuns.Create(ctx, req)
+	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.ClassifyRun, error) {
+		return cli.ClassifyRuns.Create(ctx, req, opts...)
+	})
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
