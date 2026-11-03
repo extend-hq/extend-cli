@@ -419,8 +419,10 @@ const editAdvancedOptionsFields = `  flattenPdf                       bool  Make
                                          as conditional rules; values that break them fail the run.
   advancedSchemaRefinementEnabled  bool  When the server generates the schema, organize field names and descriptions;
                                          instructions can nest fields or merge options into one choice (adds latency).
-  preserveSignatureValidity        bool  Keep existing digital signatures valid: fill only existing fields, matched by
-                                         extend_edit:source_acroform.fieldName; flattenPdf then defaults to false.`
+                                         Edit 1.0.0 or later; omitted uses the organization's default (off).
+  preserveSignatureValidity        bool  Try to keep existing digital signatures valid: fill only existing fields, matched
+                                         by extend_edit:source_acroform.fieldName; flattenPdf then defaults to false, and
+                                         flattenPdf true fails on signed PDFs. Edit 1.0.0-beta or later.`
 
 // formDetectionAdvancedOptionsFields documents the
 // EditSchemaGenerationConfigAdvancedOptions object (detect-form
@@ -430,7 +432,8 @@ const formDetectionAdvancedOptionsFields = `  nativeFieldsOnly                 b
   radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum.
   conditionalGenerationEnabled     bool  Add the form's stated requirements as root-level conditional rules.
   advancedSchemaRefinementEnabled  bool  Organize field names and descriptions; instructions can nest fields or
-                                         merge checkbox/radio options into one choice (adds latency).`
+                                         merge checkbox/radio options into one choice (adds latency). Edit 1.0.0 or
+                                         later; omitted uses the organization's default (off).`
 
 const editOutputDoc = `Edit output:
 
