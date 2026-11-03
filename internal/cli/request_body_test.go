@@ -80,6 +80,13 @@ func TestJSONFlagsReachTheServerIntact(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "edit signature and schema refinement options",
+			args: []string{"edit", "file_1", "--wait=false", "--advanced-options",
+				`{"preserveSignatureValidity":true,"advancedSchemaRefinementEnabled":true}`},
+			path: []any{"config", "advancedOptions"},
+			want: map[string]any{"preserveSignatureValidity": true, "advancedSchemaRefinementEnabled": true},
+		},
+		{
 			name: "edit schema with native form field details",
 			args: []string{"edit", "file_1", "--wait=false", "--schema",
 				`{"type":"object","properties":{"marital":{"type":["string","null"],"enum":["s","m"],"extend:descriptions":["Single","Married"],"extend_edit:source_acroform":{"fieldName":"Marital1","fieldType":"radio"}}}}`},
