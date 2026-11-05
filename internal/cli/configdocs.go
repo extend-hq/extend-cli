@@ -352,6 +352,11 @@ const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-dete
     text layer, so it can be searched and copied; pages that already have text are
     skipped. Download the PDF afterwards with ` + "`extend files download <run's file.id>`" + `.
   - alwaysConvertToPdf (bool) — convert images/Office/HTML to PDF first (enables spatial bboxes).
+  - htmlSourceAnchors (bool) — HTML input only: give each block a source with the byte range it
+    came from in the file, instead of polygon/boundingBox. The file must be UTF-8 or
+    Windows-1252; can't be combined with alwaysConvertToPdf.
+  - returnSourceNodes (bool) — HTML input only: also return word-level source anchors at
+    output.source.nodes, like returnOcr.words for PDFs. Requires htmlSourceAnchors.
   - enrichmentFormat ("xml"|"bracket") — annotation style, e.g. <page_number>1</page_number> vs [page_number: 1].
   - imageConversionQuality ("high"|"medium"|"low") — quality when converting to PDF.
   - formattingDetection (array) — change-tracking detection; each entry { "type": "change_tracking" }.
