@@ -12,6 +12,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -110,7 +111,7 @@ knobs in the same forms.
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
-			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_auto, parse_performance, or parse_light (default: server default)")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
@@ -172,7 +173,9 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		req.Metadata = &md
 	}
 
-	run, err := cli.ParseRuns.Create(ctx, req)
+	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.ParseRun, error) {
+		return cli.ParseRuns.Create(ctx, req, opts...)
+	})
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
@@ -222,10 +225,9 @@ func buildParseConfig(p parseParams) (*extend.ParseConfig, error) {
 		cfg.Target = &t
 	}
 	if p.engine != "" {
-		e, err := extend.NewParseConfigEngineFromString(p.engine)
-		if err != nil {
-			return nil, fmt.Errorf("--engine: %w", err)
-		}
+		// Passed through unchecked so an engine the API adds works before
+		// the SDK lists it; the API rejects unknown names itself.
+		e := extend.ParseConfigEngine(p.engine)
 		cfg.Engine = &e
 	}
 	if p.engineVersion != "" {

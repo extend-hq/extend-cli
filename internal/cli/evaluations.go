@@ -8,7 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	extend "github.com/extend-hq/extend-go-sdk"
+	"github.com/extend-hq/extend-go-sdk/option"
 
+	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
 )
 
@@ -607,7 +609,9 @@ with 'extend evaluations runs get'.`,
 			if err != nil {
 				return err
 			}
-			run, err := cli.EvaluationSetRuns.Create(cmd.Context(), &req)
+			run, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.EvaluationSetRun, error) {
+				return cli.EvaluationSetRuns.Create(cmd.Context(), &req, opts...)
+			})
 			if err != nil {
 				return err
 			}
