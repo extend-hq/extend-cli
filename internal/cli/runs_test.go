@@ -110,11 +110,11 @@ func TestTypedRunsCancel_MismatchedKindRedirects(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "extend workflows runs cancel") {
 		t.Errorf("expected redirect naming the workflows runs group, got %v", err)
 	}
-	// Parse runs have no cancel command at all; a parse ID handed to
+	// Edit runs have no cancel command at all; an edit ID handed to
 	// another kind's cancel must not suggest a nonexistent command.
-	err = runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "pr_abc", true)
-	if err == nil || !strings.Contains(err.Error(), "parse runs do not support cancel") {
-		t.Errorf("expected parse-cannot-cancel error, got %v", err)
+	err = runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "edr_abc", true)
+	if err == nil || !strings.Contains(err.Error(), "edit runs do not support cancel") {
+		t.Errorf("expected edit-cannot-cancel error, got %v", err)
 	}
 }
 

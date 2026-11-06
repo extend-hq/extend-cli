@@ -316,16 +316,25 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	// Parse, edit, and detect-form runs have no cancel command in the
-	// real CLI; the dispatch reaches here for them too, so mirror
-	// cobra's unknown-command failure verbatim.
+	// Edit and detect-form runs have no cancel command in the real CLI;
+	// the dispatch reaches here for them too, so mirror cobra's
+	// unknown-command failure verbatim.
 	verb := positional(args)[0]
-	if verb == "parse" || verb == "edit" || verb == "detect-form" {
+	if verb == "edit" || verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
-	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+	id := typedRunID(args)
+	// The API cancels only PROCESSING parse runs and rejects the rest.
+	if r, ok := fixtureRuns[id]; ok && verb == "parse" && r.Status != "PROCESSING" {
+		fmt.Fprintln(stderr, "Error: INVALID_REQUEST")
+		fmt.Fprintf(stderr, "       Cannot cancel parse run with status %s. Only PROCESSING runs can be cancelled.\n", r.Status)
+		fmt.Fprintln(stderr, "       request: req_stub")
+		exitCode = 1
+		return
+	}
+	emitJSON(synthesizeRun(id, "CANCELLED"))
 }
 
 // emitRunsDelete mirrors `<verb> runs delete <id>`: the stub is never
