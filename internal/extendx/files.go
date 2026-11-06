@@ -100,11 +100,11 @@ func UploadFileWithOptions(ctx context.Context, c *client.Client, path string, o
 // wrap it with the filename and content-type metadata that the server
 // uses for type inference.
 //
-// We pass UploadOption() so the call uses an untimed *http.Client.
-// The CLI's default --http-timeout (60s) is hostile to large multipart
-// bodies on slow connections — a legitimate 100MB upload would surface
-// as a vague "context deadline exceeded" instead of completing. The
-// caller's context remains the only deadline.
+// The upload runs with a withUpload context so it uses an untimed
+// *http.Client. The CLI's default --http-timeout (60s) is hostile to
+// large multipart bodies on slow connections — a legitimate 100MB
+// upload would surface as a vague "context deadline exceeded" instead
+// of completing. The caller's context remains the only deadline.
 func UploadStream(ctx context.Context, c *client.Client, body io.Reader, filename, contentType string) (*extend.File, error) {
 	return UploadStreamWithOptions(ctx, c, body, filename, contentType, UploadOptions{})
 }
@@ -130,7 +130,7 @@ func UploadStreamWithOptions(ctx context.Context, c *client.Client, body io.Read
 	if filename != "" || contentType != "" {
 		reader = extend.NewFileParam(body, filename, contentType)
 	}
-	return c.Files.Upload(ctx, reader, req, UploadOption())
+	return c.Files.Upload(withUpload(ctx), reader, req)
 }
 
 // DownloadFile fetches a file's contents by ID. It calls the SDK's

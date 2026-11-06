@@ -20,7 +20,7 @@ import (
 )
 
 // DefaultHTTPTimeout is applied to the HTTP client every API call goes
-// through, except uploads (see UploadOption). Tuned for the common
+// through, except uploads (see withUpload). Tuned for the common
 // case of small JSON request/response payloads.
 const DefaultHTTPTimeout = 60 * time.Second
 
@@ -103,23 +103,17 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		}
 	}
 
-	// The SDK sets x-extend-api-version unconditionally in its core
-	// request_option.go (to "2026-02-09"). To override it we attach a
-	// default HTTPHeader; the SDK's header merge calls header.Set on
-	// our values AFTER cloning, so our entry wins. Same trick is used
-	// for X-Extend-Workspace-Id (no SDK option for it) and User-Agent
-	// (the SDK's default identifies the SDK library, not the CLI).
+	// X-Extend-Workspace-Id has no SDK option, so it rides on the
+	// SDK's default headers. User-Agent and x-extend-api-version can't:
+	// the SDK overwrites both on every request, so headerTransport sets
+	// them instead.
+	headers := http.Header{}
+	if cfg.WorkspaceID != "" {
+		headers.Set("X-Extend-Workspace-Id", cfg.WorkspaceID)
+	}
 	ua := cfg.UserAgent
 	if ua == "" {
 		ua = DefaultUserAgent
-	}
-	headers := http.Header{}
-	headers.Set("User-Agent", ua)
-	if cfg.APIVersion != "" {
-		headers.Set("x-extend-api-version", cfg.APIVersion)
-	}
-	if cfg.WorkspaceID != "" {
-		headers.Set("X-Extend-Workspace-Id", cfg.WorkspaceID)
 	}
 
 	// Build the underlying http.Client. Wrap with the debug transport
@@ -140,6 +134,11 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		pinnedBase = extend.Environments.Production
 	}
 	httpClient := &http.Client{
+		Transport: &headerTransport{
+			next:       http.DefaultTransport,
+			userAgent:  ua,
+			apiVersion: cfg.APIVersion,
+		},
 		Timeout:       DefaultHTTPTimeout,
 		CheckRedirect: oauth.CheckSameOriginRedirect(pinnedBase),
 	}
@@ -153,19 +152,13 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		httpClient.Transport = NewDebugTransport(httpClient.Transport, cfg.Debug)
 	}
 
-	opts := []option.RequestOption{
-		option.WithHTTPHeader(headers),
-		option.WithHTTPClient(httpClient),
-	}
+	opts := []option.RequestOption{option.WithHTTPHeader(headers)}
 	if cfg.APIKey != "" {
 		opts = append(opts, option.WithToken(cfg.APIKey))
 	} else {
-		// OAuth auth is attached twice, and both paths matter:
 		// WithTokenFunc makes the SDK stamp a fresh token on every
-		// request, which covers uploads (UploadOption swaps in a bare
-		// http.Client, bypassing our transport). The bearer transport
-		// (outermost, so the debug transport logs both attempts) adds
-		// the 401 refresh-and-retry for everything else.
+		// request; the bearer transport (outermost, so the debug
+		// transport logs both attempts) adds the 401 refresh-and-retry.
 		src := cfg.OAuth
 		tokenCtx := cfg.TokenContext
 		if tokenCtx == nil {
@@ -176,6 +169,9 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		}))
 		httpClient.Transport = newBearerTransport(httpClient.Transport, cfg.OAuth)
 	}
+	uploadClient := uploadHTTPClient()
+	uploadClient.Transport = httpClient.Transport
+	opts = append(opts, option.WithHTTPClient(&routingClient{api: httpClient, upload: uploadClient}))
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -377,30 +373,57 @@ func populateFromBodyString(out *APIError, bodyErr error) {
 	out.Retryable = src.Retryable
 }
 
-// UploadOption returns a per-request option that swaps the SDK's
-// configured *http.Client for an untimed one for the duration of a
-// single call. Use on file uploads: end-to-end http.Client timeouts
-// are counterproductive for large multipart bodies — a legitimate
-// 100MB PDF over a flaky connection will exceed any reasonable
-// per-request budget and surface as a vague "context deadline
-// exceeded" rather than a fixable error. The caller's context is
-// the only deadline that remains in effect.
-//
-// The Authorization, x-extend-api-version, X-Extend-Workspace-Id,
-// and User-Agent headers are still attached by the SDK because they
-// live on RequestOptions, not on the HTTP client; only the timeout
-// knob changes.
-func UploadOption() option.RequestOption {
-	return option.WithHTTPClient(uploadHTTPClient())
+// headerTransport sets the CLI's User-Agent, and the API version when
+// one is configured, on every request.
+type headerTransport struct {
+	next       http.RoundTripper
+	userAgent  string
+	apiVersion string
 }
 
-// uploadHTTPClient is the untimed client UploadOption swaps in. It
+func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("User-Agent", t.userAgent)
+	if t.apiVersion != "" {
+		req.Header.Set("x-extend-api-version", t.apiVersion)
+	}
+	return t.next.RoundTrip(req)
+}
+
+// routingClient sends requests made with a withUpload context through
+// the upload client and everything else through the API client. Both
+// share one transport chain.
+type routingClient struct {
+	api    *http.Client
+	upload *http.Client
+}
+
+func (c *routingClient) Do(req *http.Request) (*http.Response, error) {
+	if req.Context().Value(uploadKey{}) != nil {
+		return c.upload.Do(req)
+	}
+	return c.api.Do(req)
+}
+
+type uploadKey struct{}
+
+// withUpload marks ctx so the request made with it goes through the
+// untimed upload client. Use on file uploads: end-to-end http.Client
+// timeouts are counterproductive for large multipart bodies — a
+// legitimate 100MB PDF over a flaky connection will exceed any
+// reasonable per-request budget and surface as a vague "context
+// deadline exceeded" rather than a fixable error. The caller's context
+// is the only deadline that remains in effect.
+func withUpload(ctx context.Context) context.Context {
+	return context.WithValue(ctx, uploadKey{}, true)
+}
+
+// uploadHTTPClient is the untimed client uploads go through. It
 // refuses redirects outright: upload requests carry the Authorization
 // header, and following a redirect would replay it (and the multipart
 // body) to whatever host the Location header names. The upload
-// endpoint never redirects legitimately, and this client has no view
-// of the configured API base to pin an origin against, so refusing is
-// the safe policy.
+// endpoint never redirects legitimately, so refusing is the safe
+// policy.
 func uploadHTTPClient() *http.Client {
 	return &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
