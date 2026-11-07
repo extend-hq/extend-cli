@@ -126,6 +126,8 @@ func main() {
 		emitClassify(args, mode)
 	case match(args, "split"):
 		emitSplit(args, mode)
+	case match(args, "edit", "templates", "list"):
+		emitEditTemplatesList(args, mode)
 	case match(args, "edit", "templates", "get"):
 		emitEditTemplatesGet(args, mode)
 	case match(args, "edit", "schema"), match(args, "edit", "detections"):

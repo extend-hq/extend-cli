@@ -39,8 +39,7 @@ type runsGroupSpec struct {
 	// cancelGotchas are appended to the generated cancel gotchas for
 	// type-specific cancel rules.
 	cancelGotchas []string
-	// listable: everything except edit and detect-form (no LIST
-	// endpoint for either).
+	// listable: everything except detect-form (no LIST endpoint).
 	listable bool
 	// deletable: everything except detect-form (no DELETE endpoint).
 	deletable bool
@@ -56,6 +55,13 @@ type runsGroupSpec struct {
 	// listColumn heads list's third column: "processor" by default,
 	// "file" for kinds without a processor.
 	listColumn string
+	// noBatches drops list's --batch filter for kinds without batch runs.
+	noBatches bool
+	// listStatuses and listSources override the --status and --source
+	// values named in list's flag help.
+	listStatuses string
+	listSources  string
+	listGotchas  []string
 	// sourceFilters: --source/--source-id on list. Workflow runs have
 	// no source filters at the server.
 	sourceFilters bool
@@ -134,9 +140,19 @@ func splitRunsSpec() runsGroupSpec {
 
 func editRunsSpec() runsGroupSpec {
 	return runsGroupSpec{
-		kind:          extendx.KindEdit,
-		exampleID:     "edr_aB3xY",
-		deletable:     true,
+		kind:         extendx.KindEdit,
+		exampleID:    "edr_aB3xY",
+		listable:     true,
+		deletable:    true,
+		sortable:     true,
+		listColumn:   "file",
+		noBatches:    true,
+		listStatuses: "PROCESSING|PROCESSED|FAILED",
+		listSources:  "API|STUDIO|ADMIN",
+		listGotchas: []string{
+			"Only runs in the API key's environment are listed: a test key sees only test runs.",
+			"List items leave out the run's config and output; use 'extend edit runs get <id>' for those.",
+		},
 		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
 		watchGotchas: []string{
 			"Edit runs cannot be cancelled; a watched edit run only ends in PROCESSED or FAILED.",
