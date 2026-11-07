@@ -1271,18 +1271,31 @@
       "path": "B",
       "prompt": "Cancel parse run pr_demo_processed for me.",
       "files": [],
-      "expected_output": "Agent recognizes parse runs cannot be cancelled — explains rather than retrying indefinitely.",
+      "expected_output": "Agent tries `extend parse runs cancel` (or checks the run first), sees the run already finished, and explains that only running parse runs can be cancelled — explains rather than retrying indefinitely.",
       "expectations": [
         {
+          "type": "extend_call",
+          "text": "agent used the parse runs commands on the given ID",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse",
+                "runs"
+              ]
+            }
+          ]
+        },
+        {
           "type": "stable_answer",
-          "text": "answer acknowledges parse runs cannot be cancelled",
-          "answer_pattern": "(parse|pr_).{0,40}(?:cannot|can't|not).{0,20}(cancel|cancell)"
+          "text": "answer says the run already finished, without claiming parse runs can never be cancelled",
+          "answer_pattern": "(already|has|was).{0,40}(finish|complet|processed)",
+          "answer_must_not_match": "parse runs? (cannot|can't|can not) be cancel"
         },
         {
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command",
           "count_under": {
-            "runs.cancel": 3
+            "parse.runs.cancel": 3
           }
         }
       ]

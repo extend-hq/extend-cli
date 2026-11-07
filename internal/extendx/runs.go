@@ -33,8 +33,8 @@ var TerminalSuccessStates = []RunStatus{StatusProcessed}
 // terminal outcome and cause action commands to exit non-zero.
 // NEEDS_REVIEW is intentionally not in this list: it pauses for human
 // action but the run itself has not failed. Per-kind subsets apply
-// (parse runs cannot be CANCELLED or REJECTED), but commands check
-// membership here.
+// (only workflow runs can be REJECTED), but commands check membership
+// here.
 var TerminalFailureStates = []RunStatus{StatusFailed, StatusCancelled, StatusRejected}
 
 // TerminalReviewStates lists statuses that are terminal but indicate
@@ -134,15 +134,15 @@ func RunKindFromID(id string) (RunKind, bool) {
 
 // SupportsRunAction reports whether a run kind has the given typed
 // runs subcommand. Mirrors the capability flags in the CLI's
-// runsGroupSpec table: parse, edit, and detect-form runs have no
-// cancel endpoint, edit and detect-form runs have no list endpoint,
+// runsGroupSpec table: edit and detect-form runs have no cancel
+// endpoint, edit and detect-form runs have no list endpoint,
 // detect-form runs have no delete endpoint, and only workflow runs
 // support update. Used so mismatch errors never redirect to a command
 // that doesn't exist for the ID's actual kind.
 func SupportsRunAction(k RunKind, action string) bool {
 	switch action {
 	case "cancel":
-		return k != KindParse && k != KindEdit && k != KindDetectForm
+		return k != KindEdit && k != KindDetectForm
 	case "list":
 		return k != KindEdit && k != KindDetectForm
 	case "delete":
