@@ -127,7 +127,7 @@ func TestSupportsRunAction(t *testing.T) {
 		{KindDetectForm, "cancel", false},
 		{KindExtract, "cancel", true},
 		{KindWorkflow, "cancel", true},
-		{KindEdit, "list", false},
+		{KindEdit, "list", true},
 		{KindParse, "list", true},
 		{KindWorkflow, "update", true},
 		{KindExtract, "update", false},

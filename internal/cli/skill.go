@@ -295,7 +295,7 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
 	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
-	b.WriteString("- **Edit runs** (`edr_*`) can't be listed or cancelled, and **form detection runs** (`sgr_*`) support only get and watch. Other runs support best-effort cancel.\n")
+	b.WriteString("- **Edit runs** (`edr_*`) can't be cancelled, and **form detection runs** (`sgr_*`) support only get and watch. Other runs support best-effort cancel.\n")
 	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
@@ -430,7 +430,6 @@ field per the generated shape (` + "`extend_edit:value`" + ` for explicit values
 ` + "`edit --schema`" + `:
 
     extend detect-form form.pdf --jq '.output.schema' -o json > schema.json
-    # populate values on each field per the generated shape, then:
     extend edit form.pdf --schema schema.json --output-file filled.pdf
 
 Combine both for fills that need conditional or formatting guidance the
@@ -440,9 +439,8 @@ schema cannot express:
         --instructions "format dates as MM/DD/YYYY; leave spouse blank if single"
 
 Without ` + "`--output-file`" + `, the filled PDF stays on the server; fetch later
-with ` + "`extend files download <file-id>`" + `. If you use the response's
-` + "`output.editedFile.presignedUrl`" + ` directly, download it promptly; it expires
-after 15 minutes.
+with ` + "`extend files download <file-id>`" + `. The response's
+` + "`output.editedFile.presignedUrl`" + ` expires after 15 minutes.
 
 ### Fill a PDF form from values in another document
 

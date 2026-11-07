@@ -260,14 +260,18 @@ func emitWorkflowRun(args []string, mode string) {
 // emitRunsList is the centerpiece for pagination tests. In paginated
 // mode we split fixtureFailedRuns across pages keyed by --page-token.
 //
-// Mirrors a real-CLI behaviour: `edit runs list` does not exist (the
-// API has no list-edit-runs endpoint). Agents are expected to
-// recognize this and use `edit runs get edr_xxx` per ID instead.
+// Mirrors a real-CLI behaviour: `detect-form runs list` does not exist
+// (the API has no list endpoint for form detection runs).
 func emitRunsList(args []string, mode string) {
-	if verb := positional(args)[0]; verb == "edit" || verb == "detect-form" {
+	verb := positional(args)[0]
+	if verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"list\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
+	}
+	runs := fixtureFailedRuns
+	if verb == "edit" {
+		runs = fixtureEditRuns
 	}
 	pageSize := atoiOr(flagValue(args, "page-size"), 0)
 	if pageSize == 0 {
@@ -276,13 +280,13 @@ func emitRunsList(args []string, mode string) {
 	if mode != "paginated" {
 		// Single-page mode: return all matching runs at once.
 		emitJSON(map[string]any{
-			"data":          filterRuns(args, fixtureFailedRuns),
+			"data":          filterRuns(args, runs),
 			"nextPageToken": nil,
 		})
 		return
 	}
 	pageToken := flagValue(args, "page-token")
-	all := filterRuns(args, fixtureFailedRuns)
+	all := filterRuns(args, runs)
 	pages := chunk(all, pageSize)
 	if len(pages) == 0 {
 		emitJSON(map[string]any{"data": []Run{}, "nextPageToken": nil})
@@ -1238,6 +1242,20 @@ func emitEvaluationRunsCreate(args []string, mode string) {
 		out["entity"] = map[string]any{"id": entity}
 	}
 	emitJSON(out)
+}
+
+// emitEditTemplatesList stubs `extend edit templates list`, filtering the
+// fixture templates by --name-contains like the API does.
+func emitEditTemplatesList(args []string, mode string) {
+	needle := strings.ToLower(flagValue(args, "name-contains"))
+	data := []map[string]any{}
+	for _, t := range fixtureEditTemplates {
+		if needle != "" && !strings.Contains(strings.ToLower(t["name"].(string)), needle) {
+			continue
+		}
+		data = append(data, t)
+	}
+	emitJSON(map[string]any{"object": "list", "data": data, "nextPageToken": nil})
 }
 
 // emitEditTemplatesGet stubs `extend edit templates get <edt_id>`. The ID is

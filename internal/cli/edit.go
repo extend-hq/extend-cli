@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,12 +31,13 @@ func newEditDoc(app *App) *CommandDoc {
 		engineVersion         string
 		outputFile            string
 		password              string
+		templateID            string
 		wait                  bool
 		timeout               time.Duration
 	)
 
 	return &CommandDoc{
-		Use:     "edit <input>",
+		Use:     "edit [<input>]",
 		Summary: "Fill a PDF form using a schema with values",
 		Group:   "Actions",
 		Triggers: []string{
@@ -48,7 +50,8 @@ func newEditDoc(app *App) *CommandDoc {
 		WhenToUse: `Use to fill the form fields of a PDF and emit a filled PDF. Two
 ways to provide values: pass --instructions for simple natural-language
 fills, or pass --schema with a scaffolded schema for structured fills.
-For schema scaffolding only, use 'extend detect-form'.`,
+To fill a form saved as a template in the dashboard, pass --template
+instead of an input. For schema scaffolding only, use 'extend detect-form'.`,
 		Details: `Fill PDF form fields and produce a filled PDF.
 
 There are two ways to provide values:
@@ -75,6 +78,16 @@ There are two ways to provide values:
      Each field in a --schema carries the extend_edit:* keys emitted by
      'extend detect-form' (set extend_edit:value to force a value); run
      that command's --help for the full key reference.
+
+Saved templates (--template edt_xxx, found with 'extend edit templates list')
+replace the input: the run fills the template's own PDF, using its saved
+schema, instructions, engine version and advanced options as defaults.
+  - --instructions and --engine-version replace the template's.
+  - --advanced-options is merged with the template's, key by key.
+  - --schema replaces the template's whole schema, saved values included.
+    To change only some values, start from the saved schema:
+        extend edit templates get edt_xxx --jq '.config.schema' -o json > schema.json
+  - A template saved without a schema needs --schema.
 
 By default, the command waits for the run to complete and prints a summary.
 Pass --output-file to auto-download the filled PDF, or --wait=false to
@@ -112,6 +125,7 @@ the output must remain editable.
 			{Label: "Two-step: scaffold then fill", Cmd: "extend detect-form form.pdf --jq '.output.schema' -o json > schema.json", Note: "Populate values on each field per the generated schema shape, then run the next example."},
 			{Label: "Fill from schema", Cmd: "extend edit form.pdf --schema schema.json --output-file filled.pdf"},
 			{Label: "Schema + fill-time instructions", Cmd: `extend edit form.pdf --schema schema.json --instructions "format dates as MM/DD/YYYY; check 'individual' in section 2"`},
+			{Label: "Fill a saved template", Cmd: `extend edit --template edt_9fK2a --instructions "Name: Acme Corp; TIN: 12-3456789" --output-file w9.pdf`},
 			{Label: "Tune detection", Cmd: `extend edit form.pdf --advanced-options '{"tableParsingEnabled":true,"radioEnumsEnabled":true}'`},
 			{Label: "Pin the engine version", Cmd: "extend edit form.pdf --schema schema.json --engine-version 1.0.0-beta"},
 			{Label: "Async (return run ID)", Cmd: "extend edit form.pdf --schema schema.json --wait=false"},
@@ -122,8 +136,9 @@ the output must remain editable.
 			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
 			"Options such as flattenPdf, nativeFieldsOnly and preserveSignatureValidity go in --advanced-options JSON; omitted fields use the server default.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
+			"--schema with --template replaces the template's saved values too; edit a copy of the template's schema rather than writing a new one.",
 		},
-		SeeAlso:  []string{"detect-form", "edit runs watch", "edit runs get", "files download"},
+		SeeAlso:  []string{"detect-form", "edit templates list", "edit runs watch", "edit runs get", "files download"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
@@ -134,11 +149,25 @@ the output must remain editable.
 			if len(args) > 0 && (args[0] == "schema" || args[0] == "detections") {
 				return fmt.Errorf("unknown command %q for \"extend edit\": schema scaffolding moved; use 'extend detect-form'", args[0])
 			}
+			if templateID != "" {
+				if len(args) > 0 {
+					return errors.New("pass either <input> or --template, not both; a template fills its own PDF")
+				}
+				return nil
+			}
+			if len(args) == 0 {
+				return errors.New("provide an input (a file path, file_xxx ID, or https:// URL) or use --template")
+			}
 			return cobra.ExactArgs(1)(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			input := ""
+			if len(args) > 0 {
+				input = args[0]
+			}
 			return runEdit(cmd.Context(), app, editParams{
-				input:                 args[0],
+				input:                 input,
+				templateID:            templateID,
 				schemaPath:            schemaPath,
 				instructions:          instructions,
 				schemaGenInstructions: schemaGenInstructions,
@@ -158,6 +187,7 @@ the output must remain editable.
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().StringVar(&templateID, "template", "", "Fill a saved edit template (edt_xxx) instead of an input; its saved schema, instructions and options are the defaults")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 		},
@@ -167,6 +197,7 @@ the output must remain editable.
 
 type editParams struct {
 	input                 string
+	templateID            string
 	schemaPath            string
 	instructions          string
 	schemaGenInstructions string
@@ -179,19 +210,28 @@ type editParams struct {
 }
 
 func runEdit(ctx context.Context, app *App, p editParams) error {
+	if p.templateID != "" && p.password != "" {
+		return errors.New("--password doesn't apply with --template; the template's PDF is already stored")
+	}
+
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
 	}
 
-	ref, err := uploadOrResolveWith(ctx, app, cli, p.input, p.password)
-	if err != nil {
-		return err
-	}
-
-	file, err := extendx.BuildEditFile(ref)
-	if err != nil {
-		return err
+	req := &extend.EditRunsCreateRequest{}
+	if p.templateID != "" {
+		req.TemplateID = extend.String(p.templateID)
+	} else {
+		ref, err := uploadOrResolveWith(ctx, app, cli, p.input, p.password)
+		if err != nil {
+			return err
+		}
+		file, err := extendx.BuildEditFile(ref)
+		if err != nil {
+			return err
+		}
+		req.File = file
 	}
 
 	cfg := &extend.EditConfig{}
@@ -226,11 +266,7 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		}
 		cfg.Schema = &schema
 	}
-
-	req := &extend.EditRunsCreateRequest{
-		File:   file,
-		Config: cfg,
-	}
+	req.Config = cfg
 
 	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.EditRun, error) {
 		return cli.EditRuns.Create(ctx, req, opts...)
@@ -363,18 +399,121 @@ func maybeWarnEmptyEditOutput(app *App, run *extend.EditRun) {
 }
 
 // newEditTemplatesDoc is the `extend edit templates` group: read-only
-// access to saved edit templates (EditTemplates.Retrieve in the SDK).
+// access to saved edit templates.
 func newEditTemplatesDoc(app *App) *CommandDoc {
 	return &CommandDoc{
 		Use:     "templates",
-		Summary: "Inspect saved edit templates",
-		WhenToUse: `Use this group to fetch a saved edit template's source file, default
-edit config, and schema-generation config so you can reuse them with
-'extend edit' and 'extend detect-form'.`,
-		Details: `Edit templates are authored in the dashboard; the CLI exposes read-only
-retrieval. Only 'get <template-id>' is available.`,
+		Summary: "Find and inspect saved edit templates",
+		WhenToUse: `Use this group to find saved edit templates and read their source file,
+default edit config, and schema-generation config. Fill a template with
+'extend edit --template <id>'.`,
+		Details: `Edit templates are authored in the dashboard; the CLI can list and read
+them, not create or change them.`,
 		Subcommands: []*CommandDoc{
+			newEditTemplatesListDoc(app),
 			newEditTemplatesGetDoc(app),
+		},
+	}
+}
+
+func newEditTemplatesListDoc(app *App) *CommandDoc {
+	var (
+		nameContains string
+		sortBy       string
+		sortDir      string
+		limit        int
+		maxN         int
+		all          bool
+		pageToken    string
+	)
+	return &CommandDoc{
+		Use:     "list",
+		Summary: "List saved edit templates",
+		Triggers: []string{
+			"list saved edit templates",
+			"find an edit template id",
+			"search edit templates by name",
+			"see which pdf form templates exist",
+		},
+		WhenToUse: `Use to find a saved edit template's ID (edt_...) by name. The ID column
+feeds 'extend edit --template <id>' and 'extend edit templates get <id>'.`,
+		Details: `Sorted by updatedAt descending by default. List items carry the name,
+description and source file; use 'extend edit templates get <id>' for the
+template's config and schema.
+
+` + paginationGuidance,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit templates list"},
+			{Label: "Filter by name", Cmd: "extend edit templates list --name-contains W-9"},
+			{Label: "Just IDs", Cmd: "extend edit templates list -o id"},
+		},
+		Gotchas: []string{
+			"--name-contains also matches an exact edt_ ID.",
+		},
+		SeeAlso: []string{"edit templates get", "edit"},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			req := &extend.EditTemplatesListRequest{}
+			if nameContains != "" {
+				req.NameContains = extend.String(nameContains)
+			}
+			if sortBy != "" {
+				sb, err := extend.NewSortByFromString(sortBy)
+				if err != nil {
+					return fmt.Errorf("--sort-by: %w", err)
+				}
+				req.SortBy = &sb
+			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+			var rows [][]string
+			var pages []any
+			for {
+				page, err := cli.EditTemplates.List(cmd.Context(), req)
+				if err != nil {
+					return err
+				}
+				pages = append(pages, page)
+				for _, t := range page.Data {
+					fileName := ""
+					if t.File != nil {
+						fileName = t.File.Name
+					}
+					rows = append(rows, []string{t.ID, truncate(t.Name, 40), truncate(fileName, 40), relTime(t.UpdatedAt)})
+				}
+				next := deref(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
+					break
+				}
+				req.NextPageToken = extend.String(next)
+			}
+			rows = capRowsToMax(rows, maxN)
+			return renderListForCmd(cmd, app, pages, []string{"id", "name", "file", "updated"}, rows, "No edit templates.")
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&nameContains, "name-contains", "", "Filter to templates whose name contains this substring")
+			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
 		},
 	}
 }
@@ -390,17 +529,18 @@ func newEditTemplatesGetDoc(app *App) *CommandDoc {
 			"reuse an edt_ template's edit config",
 		},
 		WhenToUse: `Use to retrieve a saved edit template (edt_...) — its source file, default
-edit 'config', and optional 'schemaConfig'. Reuse the returned config with
-'extend edit' and the schemaConfig with 'extend detect-form'.`,
+edit 'config', and optional 'schemaConfig'. Fill the template with
+'extend edit --template <id>'; reuse the schemaConfig with 'extend detect-form'.`,
 		Details: `Returns the full edit template object as JSON.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend edit templates get edt_abc"},
 			{Label: "Extract the default config", Cmd: "extend edit templates get edt_abc --jq '.config' -o json"},
+			{Label: "Save the schema to change values", Cmd: "extend edit templates get edt_abc --jq '.config.schema' -o json > schema.json"},
 		},
 		Gotchas: []string{
 			"Edit templates are authored in the dashboard; the CLI is read-only on them.",
 		},
-		SeeAlso: []string{"edit", "detect-form"},
+		SeeAlso: []string{"edit templates list", "edit", "detect-form"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

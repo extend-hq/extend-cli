@@ -135,8 +135,8 @@ func RunKindFromID(id string) (RunKind, bool) {
 // SupportsRunAction reports whether a run kind has the given typed
 // runs subcommand. Mirrors the capability flags in the CLI's
 // runsGroupSpec table: edit and detect-form runs have no cancel
-// endpoint, edit and detect-form runs have no list endpoint,
-// detect-form runs have no delete endpoint, and only workflow runs
+// endpoint, detect-form runs have no list or delete endpoint, and
+// only workflow runs
 // support update. Used so mismatch errors never redirect to a command
 // that doesn't exist for the ID's actual kind.
 func SupportsRunAction(k RunKind, action string) bool {
@@ -144,7 +144,7 @@ func SupportsRunAction(k RunKind, action string) bool {
 	case "cancel":
 		return k != KindEdit && k != KindDetectForm
 	case "list":
-		return k != KindEdit && k != KindDetectForm
+		return k != KindDetectForm
 	case "delete":
 		return k != KindDetectForm
 	case "update":
