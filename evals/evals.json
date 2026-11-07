@@ -1295,7 +1295,7 @@
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command",
           "count_under": {
-            "runs.cancel": 3
+            "parse.runs.cancel": 3
           }
         }
       ]
