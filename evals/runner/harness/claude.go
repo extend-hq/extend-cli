@@ -48,6 +48,14 @@ func (c *Claude) Available() error {
 	return nil
 }
 
+func (c *Claude) Version() string {
+	bin := c.Bin
+	if bin == "" {
+		bin = "claude"
+	}
+	return cliVersion(bin)
+}
+
 func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	bin := c.Bin
 	if bin == "" {
@@ -113,6 +121,7 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		HarnessName: c.Name(),
 		DurationMS:  durMS,
 		Tokens:      -1,
+		Model:       c.Model,
 	}
 	if err != nil {
 		// Distinguish timeout/cancel from a non-zero exit.
@@ -132,6 +141,9 @@ func (c *Claude) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		res.FinalMessage = claudeFinalMessage(events)
 		res.Tokens = claudeTokens(events)
 		res.SkillRead = anyClaudeSkillUsage(events)
+		if m := claudeModel(events); m != "" {
+			res.Model = m
+		}
 		if opts.FinalMessagePath != "" && res.FinalMessage != "" {
 			_ = os.WriteFile(opts.FinalMessagePath, []byte(res.FinalMessage), 0o644)
 		}
@@ -181,6 +193,22 @@ func claudeFinalMessage(events []map[string]any) string {
 		}
 	}
 	return last
+}
+
+// claudeModel returns the model named by the stream's `system`/`init`
+// event, e.g. "claude-opus-5-5".
+func claudeModel(events []map[string]any) string {
+	for _, ev := range events {
+		if t, _ := ev["type"].(string); t != "system" {
+			continue
+		}
+		if st, _ := ev["subtype"].(string); st != "init" {
+			continue
+		}
+		m, _ := ev["model"].(string)
+		return m
+	}
+	return ""
 }
 
 // claudeTokens reads the final `result` event for total token usage.

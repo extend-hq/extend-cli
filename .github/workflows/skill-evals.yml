@@ -5,9 +5,13 @@ name: skill-evals
 # sweep costs real LLM tokens (and Codex consumes them aggressively),
 # so this workflow is `workflow_dispatch`-only — never on PR/push.
 #
+# Both harnesses install at their latest release (see mise.toml) and
+# run on their own default model and effort unless the inputs below
+# pin them; the job log and benchmark.json record what ran.
+#
 # Required repository secrets:
 #   ANTHROPIC_API_KEY — used by Claude Code (the harness) AND by the
-#                       LLM judge (Opus 4.7 by default).
+#                       LLM judge (Opus 5.5 by default).
 #   OPENAI_API_KEY    — used by Codex; the workflow exports it as
 #                       CODEX_API_KEY so codex exec authenticates
 #                       without writing auth.json to disk.
@@ -19,11 +23,19 @@ on:
         required: false
         default: "claude_code,codex"
       claude_models:
-        description: "Claude model IDs to compare (comma-separated, e.g. claude-opus-4-7,claude-sonnet-4-6). Empty = single unpinned claude_code."
+        description: "Claude model IDs to compare (comma-separated, e.g. claude-opus-5-5,claude-sonnet-5-5). Empty = Claude Code's default model."
+        required: false
+        default: ""
+      codex_models:
+        description: "Codex model IDs to compare (comma-separated, e.g. gpt-6.1-sol,gpt-5.5). Empty = Codex's default model."
+        required: false
+        default: ""
+      effort:
+        description: "Effort for every harness (Claude Code: low|medium|high|xhigh|max; Codex: minimal|low|medium|high|xhigh). Empty = each harness's default."
         required: false
         default: ""
       cases:
-        description: "Case IDs to run (comma-separated, e.g. T+1,S-1; empty = all 33)"
+        description: "Case IDs to run (comma-separated, e.g. T+1,S-1; empty = all)"
         required: false
         default: ""
       runs:
@@ -41,7 +53,7 @@ on:
       judge_model:
         description: "LLM judge model (Anthropic)"
         required: false
-        default: "claude-opus-4-7"
+        default: "claude-opus-5-5"
       judge_effort:
         description: "Judge effort level (low|medium|high|xhigh|max)"
         required: false
@@ -116,6 +128,12 @@ jobs:
           if [ -n "${{ inputs.claude_models }}" ]; then
             ARGS+=(-claude-models "${{ inputs.claude_models }}")
           fi
+          if [ -n "${{ inputs.codex_models }}" ]; then
+            ARGS+=(-codex-models "${{ inputs.codex_models }}")
+          fi
+          if [ -n "${{ inputs.effort }}" ]; then
+            ARGS+=(-effort "${{ inputs.effort }}")
+          fi
           if [ "${{ inputs.no_judge }}" = "true" ]; then
             ARGS+=(-no-judge)
           fi
@@ -132,6 +150,7 @@ jobs:
             echo "**Harnesses:** \`${{ inputs.harnesses }}\`  "
             echo "**Cases:** \`${{ inputs.cases || 'all' }}\`  "
             echo "**Runs/tuple:** \`${{ inputs.runs }}\`  "
+            echo "**Effort:** \`${{ inputs.effort || 'harness default' }}\`  "
             echo "**Judge:** \`${{ inputs.judge_model }}\` (effort=\`${{ inputs.judge_effort }}\`, no-judge=\`${{ inputs.no_judge }}\`)"
             echo
             echo "### Summary"

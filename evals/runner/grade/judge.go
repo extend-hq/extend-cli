@@ -25,7 +25,7 @@ import (
 type JudgeConfig struct {
 	Disabled bool
 	APIKey   string        // ANTHROPIC_API_KEY; required when Disabled is false
-	Model    string        // model ID, e.g. "claude-opus-4-7"
+	Model    string        // model ID, e.g. "claude-opus-5-5"
 	Effort   string        // "low" | "medium" | "high" | "xhigh" | "max"; defaults to "low" for judging
 	BaseURL  string        // optional override, defaults to "https://api.anthropic.com"
 	Timeout  time.Duration // per-call timeout; defaults to 60s
@@ -36,19 +36,25 @@ type JudgeConfig struct {
 // runner calls this and then optionally overrides via flags.
 //
 // Defaults:
-//   - Model: claude-opus-4-7 (consistent rubric across both harness outputs).
+//   - Model: claude-opus-5-5 (one rubric grader for every harness's output).
 //   - Effort: low. Judging "did the agent's prose match this criterion?"
-//     is a simple classification, not deep reasoning — Opus 4.7 at low
-//     effort scopes its work to what was asked and runs much faster.
+//     is a simple classification, not deep reasoning.
 func JudgeFromEnv() JudgeConfig {
 	return JudgeConfig{
 		APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		Model:   "claude-opus-4-7",
+		Model:   defaultJudgeModel,
 		Effort:  "low",
 		BaseURL: "https://api.anthropic.com",
 		Timeout: 60 * time.Second,
 	}
 }
+
+const (
+	defaultJudgeModel = "claude-opus-5-5"
+	// Room for the verdict plus thinking, which current models always
+	// do and which counts against max_tokens.
+	judgeMaxTokens = 8192
+)
 
 // checkJudge dispatches a judge expectation to the Anthropic Messages
 // API and returns the verdict. Any infrastructure failure (no API key,
@@ -153,7 +159,7 @@ func buildJudgePrompt(exp spec.Expectation, in Inputs) string {
 func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 	model := cfg.Model
 	if model == "" {
-		model = "claude-opus-4-7"
+		model = defaultJudgeModel
 	}
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
@@ -201,7 +207,7 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 
 	body := map[string]any{
 		"model":         model,
-		"max_tokens":    1024,
+		"max_tokens":    judgeMaxTokens,
 		"output_config": outputConfig,
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
@@ -238,13 +244,20 @@ func callJudge(cfg JudgeConfig, prompt string) (*JudgeVerdict, error) {
 	}
 
 	var apiResp struct {
-		Content []struct {
+		StopReason string `json:"stop_reason"`
+		Content    []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("decode api response: %w", err)
+	}
+	switch apiResp.StopReason {
+	case "max_tokens":
+		return nil, fmt.Errorf("verdict cut off at max_tokens=%d", judgeMaxTokens)
+	case "refusal":
+		return nil, errors.New("judge refused to grade")
 	}
 
 	text := ""
