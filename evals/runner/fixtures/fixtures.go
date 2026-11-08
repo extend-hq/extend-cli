@@ -50,6 +50,10 @@ func generate(name, path string) error {
 		return writeJSON(path, sampleWorkflowSteps())
 	case base == "payload.json":
 		return writeJSON(path, sampleWebhookPayload())
+	case base == "invoice-page1.pdf":
+		return writeInvoicePagePDF(path, 1)
+	case base == "invoice-page2.pdf":
+		return writeInvoicePagePDF(path, 2)
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "invoice"):
 		return writeInvoicePDF(path)
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "contract"):
@@ -103,6 +107,49 @@ func writeInvoicePDF(path string) error {
 	pdf.Ln(8)
 	pdf.SetFont("Helvetica", "B", 11)
 	pdf.Cell(0, 8, "Total: 102.97")
+	return pdf.OutputFileAndClose(path)
+}
+
+// writeInvoicePagePDF emits one page of the invoice above, scanned as two
+// files: page 1 has the header and the first two line items, page 2 the
+// last item and the total.
+func writeInvoicePagePDF(path string, page int) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	pdf.SetFont("Helvetica", "B", 18)
+	items := [][3]string{{"Widget", "2", "29.99"}, {"Sprocket", "1", "14.50"}}
+	if page == 1 {
+		pdf.Cell(0, 12, "Acme Industries - Invoice INV-1024")
+		pdf.Ln(15)
+		pdf.SetFont("Helvetica", "", 11)
+		pdf.Cell(0, 8, "Bill to: Wile E. Coyote")
+		pdf.Ln(8)
+		pdf.Cell(0, 8, "Date: 2026-04-15")
+	} else {
+		pdf.Cell(0, 12, "Invoice INV-1024 (continued)")
+		items = [][3]string{{"Cog (large)", "3", "9.50"}}
+	}
+	pdf.Ln(12)
+	pdf.SetFont("Helvetica", "B", 11)
+	pdf.Cell(80, 8, "Description")
+	pdf.Cell(30, 8, "Qty")
+	pdf.Cell(30, 8, "Amount")
+	pdf.Ln(8)
+	pdf.SetFont("Helvetica", "", 11)
+	for _, item := range items {
+		pdf.Cell(80, 8, item[0])
+		pdf.Cell(30, 8, item[1])
+		pdf.Cell(30, 8, item[2])
+		pdf.Ln(8)
+	}
+	pdf.Ln(8)
+	if page == 2 {
+		pdf.SetFont("Helvetica", "B", 11)
+		pdf.Cell(0, 8, "Total: 102.97")
+		pdf.Ln(10)
+	}
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.Cell(0, 6, fmt.Sprintf("Page %d of 2", page))
 	return pdf.OutputFileAndClose(path)
 }
 

@@ -102,19 +102,39 @@ func typeFromPrefix(prefix string) string {
 }
 
 func emitExtract(args []string, mode string) {
+	inputs := positional(args)[1:]
+	pkg := hasFlag(args, "package")
+	// Mirror the real CLI, which takes several inputs only with --package.
+	if len(inputs) > 1 && !pkg {
+		fmt.Fprintf(stderr, "Error: extract takes one input, got %d: pass --package to process them together in one run, or use 'extend extract batch' for one run per file\n", len(inputs))
+		exitCode = 1
+		return
+	}
 	if err := validateFastInvoiceExtractConfig(flagValue(args, "config")); err != nil {
 		fmt.Fprintf(stderr, "Error: invalid extract config: %v\n", err)
 		exitCode = 1
 		return
 	}
+	var files []map[string]any
+	if pkg {
+		for _, in := range inputs {
+			id := in
+			if !strings.HasPrefix(in, "file_") {
+				id = nowID("file_")
+			}
+			files = append(files, map[string]any{"object": "file", "id": id, "name": filepath.Base(in)})
+		}
+	}
 	wait := !equalsFalse(flagValue(args, "wait"))
 	if !wait {
 		// Async: agent passed --wait=false; emit just the run ID.
 		r := terminalRun("exr_", "PROCESSING")
+		r.Files = files
 		emitJSON(r)
 		return
 	}
 	r := terminalRun("exr_", "PROCESSED")
+	r.Files = files
 	// Return realistic line-item content matching the invoice fixture
 	// PDF so the agent doesn't second-guess the result and fall back to
 	// `parse` to "recover" the data.
