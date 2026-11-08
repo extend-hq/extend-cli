@@ -72,6 +72,8 @@ type Run struct {
 	ProcessedAt string         `json:"processedAt"`
 	Output      map[string]any `json:"output,omitempty"`
 	Failure     *RunFailure    `json:"failure,omitempty"`
+	// Files lists a --package run's input files, in order.
+	Files []map[string]any `json:"files,omitempty"`
 }
 
 type RunFailure struct {

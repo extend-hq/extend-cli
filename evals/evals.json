@@ -708,9 +708,11 @@
       "path": "B",
       "prompt": "Run extract on every PDF in this directory using extractor ex_invoiceQ3 and tell me which files (if any) failed.",
       "files": [
-        "invoice.pdf"
+        "invoice.pdf",
+        "invoice2.pdf",
+        "invoice3.pdf"
       ],
-      "expected_output": "Agent uses `extend extract batch` (NOT a shell loop), then `runs list --batch ... --status FAILED` to identify failures.",
+      "expected_output": "Agent uses `extend extract batch` (NOT a shell loop, and NOT `extract --package`, whose single combined result can't say which file failed), then `runs list --batch ... --status FAILED` to identify failures.",
       "expectations": [
         {
           "type": "extend_call",
@@ -730,10 +732,27 @@
         },
         {
           "type": "extend_call",
+          "text": "agent did NOT combine the files with --package (one result can't say which file failed)",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag": "package"
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
           "text": "agent did NOT loop one PDF at a time (no bare `extract` calls)",
-          "count_under": {
-            "extract.invoice.pdf": 1
-          }
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract",
+                "invoice.pdf"
+              ]
+            }
+          ]
         },
         {
           "type": "extend_call",
@@ -2116,6 +2135,59 @@
           "patterns": [
             "edt_[a-zA-Z0-9_-]+"
           ]
+        }
+      ]
+    },
+    {
+      "id": "S-13",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "invoice-page1.pdf and invoice-page2.pdf are the two pages of one invoice, scanned separately: its line items start on the first page and finish on the second. Use extractor ex_invoiceQ3 to get all of its line items as one result.",
+      "files": [
+        "invoice-page1.pdf",
+        "invoice-page2.pdf"
+      ],
+      "expected_output": "Agent runs `extend extract invoice-page1.pdf invoice-page2.pdf --package --using ex_invoiceQ3`, one run across both files, and reports the combined line items. It doesn't extract each page on its own or use `extract batch`.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent extracted both pages in one --package run",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "args": [
+                "invoice-page1.pdf",
+                "invoice-page2.pdf"
+              ],
+              "flag": "package",
+              "flag_value": {
+                "using": "ex_invoiceQ3"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did not extract a page on its own or per file with extract batch",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "args": [
+                "invoice-page1.pdf"
+              ],
+              "must_not_have_flag": "package"
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer reports line items from both pages",
+          "answer_pattern": "(?s)(widget|sprocket).*cog|cog.*(widget|sprocket)"
         }
       ]
     }
