@@ -153,3 +153,25 @@ var fixtureEditTemplates = []map[string]any{
 		"file":      map[string]any{"object": "file", "id": "file_demo_nda", "name": "nda.pdf"},
 		"createdAt": "2026-03-11T09:00:00Z", "updatedAt": "2026-03-15T09:00:00Z"},
 }
+
+// fixtureEditTemplateConfigs are the saved fill defaults `edit templates
+// get` adds to the fixture templates; the list endpoint omits them. Each
+// has a schema, as a template saved from the dashboard does.
+var fixtureEditTemplateConfigs = map[string]map[string]any{
+	"edt_demo_w9": {
+		"instructions": "Fill the form using the provided values.",
+		"schema":       editSchema("name", "tin", "address"),
+	},
+	"edt_demo_nda": {
+		"instructions": "Fill in the counterparty and the effective date.",
+		"schema":       editSchema("counterparty_name", "effective_date"),
+	},
+}
+
+func editSchema(fields ...string) map[string]any {
+	props := map[string]any{}
+	for _, f := range fields {
+		props[f] = map[string]any{"type": "string", "extend_edit:value": nil}
+	}
+	return map[string]any{"type": "object", "properties": props}
+}
