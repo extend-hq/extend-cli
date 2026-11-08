@@ -135,3 +135,43 @@ var fixtureFailedRuns = []Run{
 	{ID: "exr_failed_005", Type: "extract", Status: "FAILED", ProcessedAt: "2026-04-26T09:30:00Z",
 		Failure: &RunFailure{Reason: "EXTRACTOR_ERROR", Message: "Page count exceeds limit"}},
 }
+
+// fixtureEditRuns backs `edit runs list`.
+var fixtureEditRuns = []Run{
+	{ID: "edr_demo_w9", Type: "edit", Status: "PROCESSED", ProcessedAt: "2026-04-30T10:12:00Z"},
+	{ID: "edr_demo_nda", Type: "edit", Status: "FAILED", ProcessedAt: "2026-04-29T16:40:00Z",
+		Failure: &RunFailure{Reason: "NO_FIELDS_DETECTED", Message: "No fillable fields were found in the document"}},
+}
+
+// fixtureEditTemplates backs `edit templates list`; agents may pass these
+// IDs to `edit --template` without fabricating.
+var fixtureEditTemplates = []map[string]any{
+	{"object": "edit_template", "id": "edt_demo_w9", "name": "W-9 (2024)",
+		"file":      map[string]any{"object": "file", "id": "file_demo_fw9", "name": "fw9.pdf"},
+		"createdAt": "2026-04-01T09:00:00Z", "updatedAt": "2026-04-20T09:00:00Z"},
+	{"object": "edit_template", "id": "edt_demo_nda", "name": "Acme mutual NDA",
+		"file":      map[string]any{"object": "file", "id": "file_demo_nda", "name": "nda.pdf"},
+		"createdAt": "2026-03-11T09:00:00Z", "updatedAt": "2026-03-15T09:00:00Z"},
+}
+
+// fixtureEditTemplateConfigs are the saved fill defaults `edit templates
+// get` adds to the fixture templates; the list endpoint omits them. Each
+// has a schema, as a template saved from the dashboard does.
+var fixtureEditTemplateConfigs = map[string]map[string]any{
+	"edt_demo_w9": {
+		"instructions": "Fill the form using the provided values.",
+		"schema":       editSchema("name", "tin", "address"),
+	},
+	"edt_demo_nda": {
+		"instructions": "Fill in the counterparty and the effective date.",
+		"schema":       editSchema("counterparty_name", "effective_date"),
+	},
+}
+
+func editSchema(fields ...string) map[string]any {
+	props := map[string]any{}
+	for _, f := range fields {
+		props[f] = map[string]any{"type": "string", "extend_edit:value": nil}
+	}
+	return map[string]any{"type": "object", "properties": props}
+}
