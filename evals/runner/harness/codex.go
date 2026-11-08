@@ -16,9 +16,21 @@ import (
 // --ignore-user-config, --ignore-rules).
 type Codex struct {
 	Bin string // path to `codex` binary; if empty, looked up on PATH
+
+	// Model pins the model via `-c model=<Model>`. Empty leaves Codex on
+	// its own default for the signed-in account, which changes between
+	// Codex releases. Each pinned model becomes its own named harness.
+	Model string
 }
 
-func (c *Codex) Name() string { return "codex" }
+// Name is "codex" when unpinned and "codex:<model>" when pinned, so
+// pinned variants keep separate benchmark results.
+func (c *Codex) Name() string {
+	if c.Model == "" {
+		return "codex"
+	}
+	return "codex:" + c.Model
+}
 
 func (c *Codex) Available() error {
 	bin := c.Bin
@@ -29,6 +41,14 @@ func (c *Codex) Available() error {
 		return fmt.Errorf("codex binary not on PATH: %w", err)
 	}
 	return nil
+}
+
+func (c *Codex) Version() string {
+	bin := c.Bin
+	if bin == "" {
+		bin = "codex"
+	}
+	return cliVersion(bin)
 }
 
 func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
@@ -53,16 +73,13 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--cd", opts.ScratchDir,
 	}
-	// Pin to gpt-5.5 — the codex CLI's default model varies per release
-	// and the codex-specific defaults (gpt-5.2-codex) reject API-key
-	// auth + don't accept text.verbosity="low". gpt-5.5 is the general
-	// reasoning model and accepts both auth modes and verbosity levels.
-	args = append(args, "-c", `model="gpt-5.5"`)
+	if c.Model != "" {
+		args = append(args, "-c", fmt.Sprintf("model=%q", c.Model))
+	}
 	if opts.Tune.Effort != "" {
 		// Codex calls this `model_reasoning_effort`; values: minimal,
-		// low, medium, high, xhigh. "minimal" disables image_gen and
-		// web_search tools — we don't need those, but stick to "low"
-		// for safety unless explicitly set.
+		// low, medium, high, xhigh. "minimal" disables the image_gen and
+		// web_search tools.
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", opts.Tune.Effort))
 	}
 	if opts.Tune.FastMode && hasChatGPTLogin() {
@@ -109,6 +126,9 @@ func (c *Codex) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 		HarnessName: c.Name(),
 		DurationMS:  durMS,
 		Tokens:      -1,
+		// codex exec's JSON events don't name the model, so an unpinned
+		// run leaves this empty.
+		Model: c.Model,
 	}
 	if err != nil {
 		if cctx.Err() == context.DeadlineExceeded {

@@ -18,6 +18,10 @@
 //	-runs       runs per (case, harness, mode, config) tuple (default 1)
 //	-timeout    per-run timeout (default 5m)
 //
+// Each harness runs on its own default model and effort unless
+// -claude-models, -codex-models or -effort say otherwise; run with -h
+// for every flag.
+//
 // Exit code: 0 if every run produced a graded result; 1 if any harness
 // invocation failed catastrophically (exit codes from the harness
 // itself are reported but do not fail the runner).
@@ -55,14 +59,15 @@ func run() error {
 		iter         = flag.Int("iteration", 0, "iteration number (default: next free)")
 		caseList     = flag.String("cases", "", "comma-separated case IDs to run (default: all)")
 		harnList     = flag.String("harnesses", "", "comma-separated harness names: claude_code,codex (default: all available). Also matches model-pinned variants by family, e.g. claude_code selects claude_code:<model>")
-		claudeModels = flag.String("claude-models", "", "comma-separated model IDs to run the Claude harness under, e.g. claude-opus-4-7,claude-sonnet-4-6. Each becomes a separate harness named claude_code:<model>. Empty runs a single unpinned claude_code.")
+		claudeModels = flag.String("claude-models", "", "comma-separated model IDs to run the Claude harness under, e.g. claude-opus-5-5,claude-sonnet-5-5. Each becomes a separate harness named claude_code:<model>. Empty runs a single claude_code on Claude Code's default model.")
+		codexModels  = flag.String("codex-models", "", "comma-separated model IDs to run the Codex harness under, e.g. gpt-6.1-sol,gpt-5.5. Each becomes a separate harness named codex:<model>. Empty runs a single codex on Codex's default model.")
 		runs         = flag.Int("runs", 1, "runs per (case, harness, mode, config) tuple")
 		timeout      = flag.Duration("timeout", 5*time.Minute, "per-run timeout")
 		concurrency  = flag.Int("concurrency", 4, "max harness invocations to run in parallel")
-		effort       = flag.String("effort", "low", "model effort/reasoning level: low|medium|high (low recommended for evals — tasks are simple and benefit from speed)")
+		effort       = flag.String("effort", "", "effort/reasoning level passed to every harness (Claude Code: low|medium|high|xhigh|max; Codex: minimal|low|medium|high|xhigh). Empty uses each harness's own default.")
 		fastMode     = flag.Bool("fast", true, "enable harness fast modes (Codex service_tier=fast). Anthropic priority tier requires a sales contract and is not toggled here.")
 		noJudge      = flag.Bool("no-judge", false, "skip LLM-judge expectations (no Anthropic API calls); judge expectations report Skipped")
-		judgeModel   = flag.String("judge-model", "claude-opus-4-7", "model used by the LLM judge for `judge` expectations")
+		judgeModel   = flag.String("judge-model", "claude-opus-5-5", "model the LLM judge uses to grade judge expectations")
 		judgeEffort  = flag.String("judge-effort", "low", "effort level for the judge: low|medium|high|xhigh|max (low recommended; judging is a simple classification task)")
 	)
 	flag.Parse()
@@ -91,7 +96,7 @@ func run() error {
 	}
 	fmt.Printf("stub: %s\n", stubBin)
 
-	drivers := pickHarnesses(*harnList, *claudeModels)
+	drivers := pickHarnesses(*harnList, *claudeModels, *codexModels)
 	if len(drivers) == 0 {
 		return fmt.Errorf("no available harnesses (install with `mise install`?)")
 	}
@@ -102,6 +107,14 @@ func run() error {
 	}
 
 	bench := newBenchmark()
+	for _, d := range drivers {
+		v := d.Version()
+		bench.setVersion(d.Name(), v)
+		if v == "" {
+			v = "version unknown"
+		}
+		fmt.Printf("harness: %s (%s)\n", d.Name(), v)
+	}
 
 	// Build the full task list once. Each task is one (case × harness ×
 	// config × run-n) tuple — these are independent and can run in
@@ -142,8 +155,12 @@ func run() error {
 	case judgeCfg.APIKey == "":
 		judgeNote = "judge=skipped (ANTHROPIC_API_KEY not set)"
 	}
-	fmt.Printf("running %d tasks (%d cases × %d harness × configs × runs) at concurrency=%d  [%s]\n",
-		len(tasks), len(cases), len(drivers), *concurrency, judgeNote)
+	effortNote := "effort=harness default"
+	if *effort != "" {
+		effortNote = "effort=" + *effort
+	}
+	fmt.Printf("running %d tasks (%d cases × %d harness × configs × runs) at concurrency=%d  [%s, %s]\n",
+		len(tasks), len(cases), len(drivers), *concurrency, effortNote, judgeNote)
 
 	// printedCases keeps console output legible: as soon as we have any
 	// result for a case, print its header once.
@@ -281,6 +298,7 @@ func writeTimingJSON(path string, r *harness.Result) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(map[string]any{
 		"harness":     r.HarnessName,
+		"model":       r.Model,
 		"duration_ms": r.DurationMS,
 		"tokens":      r.Tokens,
 		"exit_code":   r.ExitCode,
@@ -305,24 +323,13 @@ func buildStub(iterDir string) (string, error) {
 }
 
 // pickHarnesses returns drivers for every harness that's both
-// available on PATH and (if -harnesses was set) requested.
-//
-// The Claude family expands across claudeModels: with models set, one
-// claude_code:<model> driver is created per model; without, a single
-// unpinned claude_code. The -harnesses filter matches either the exact
-// Name() or the family prefix, so `-harnesses claude_code` selects all
-// pinned Claude variants while `-harnesses claude_code:claude-sonnet-4-6`
-// selects just one.
-func pickHarnesses(filter, claudeModels string) []harness.Driver {
-	var candidates []harness.Driver
-	if models := splitCommaList(claudeModels); len(models) > 0 {
-		for _, m := range models {
-			candidates = append(candidates, &harness.Claude{Model: m})
-		}
-	} else {
-		candidates = append(candidates, &harness.Claude{})
-	}
-	candidates = append(candidates, &harness.Codex{})
+// available on PATH and (if -harnesses was set) requested. The
+// -harnesses filter matches either the exact Name() or the family
+// prefix, so `-harnesses claude_code` selects all pinned Claude
+// variants while `-harnesses claude_code:claude-sonnet-5-5` selects
+// just one.
+func pickHarnesses(filter, claudeModels, codexModels string) []harness.Driver {
+	candidates := harnessCandidates(claudeModels, codexModels)
 
 	wants := map[string]bool{}
 	for _, h := range splitCommaList(filter) {
@@ -342,6 +349,28 @@ func pickHarnesses(filter, claudeModels string) []harness.Driver {
 	return out
 }
 
+// harnessCandidates expands each family across its pinned models: one
+// <family>:<model> driver per model, or a single unpinned driver on the
+// harness's default model when none are given.
+func harnessCandidates(claudeModels, codexModels string) []harness.Driver {
+	var out []harness.Driver
+	if models := splitCommaList(claudeModels); len(models) > 0 {
+		for _, m := range models {
+			out = append(out, &harness.Claude{Model: m})
+		}
+	} else {
+		out = append(out, &harness.Claude{})
+	}
+	if models := splitCommaList(codexModels); len(models) > 0 {
+		for _, m := range models {
+			out = append(out, &harness.Codex{Model: m})
+		}
+	} else {
+		out = append(out, &harness.Codex{})
+	}
+	return out
+}
+
 // harnessFamily strips the ":<model>" suffix from a harness name so a
 // family-level -harnesses filter (e.g. "claude_code") matches every
 // model-pinned variant.
@@ -353,7 +382,8 @@ func harnessFamily(name string) string {
 }
 
 // splitCommaList splits on commas and trims whitespace, dropping empty
-// entries. Shared by the -harnesses and -claude-models parsing.
+// entries. Shared by the -harnesses, -claude-models and -codex-models
+// parsing.
 func splitCommaList(s string) []string {
 	var out []string
 	for _, p := range strings.Split(s, ",") {

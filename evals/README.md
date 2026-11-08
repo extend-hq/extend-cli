@@ -16,9 +16,10 @@ evidence against per-case expectations.
 # Install the harnesses (once).
 mise install                       # provisions claude + codex via mise.toml
 
-# Make sure each harness is authenticated.
-claude setup-token                 # or set ANTHROPIC_API_KEY
-codex login                        # ChatGPT login or set OPENAI_API_KEY
+# Set ANTHROPIC_API_KEY for Claude Code and the judge; the isolated
+# Claude home does not reuse a saved login.
+# Codex reuses its saved login, or accepts CODEX_API_KEY without one.
+codex login                        # optional if CODEX_API_KEY is set
 
 # Run the full eval set against both harnesses.
 cd evals/runner
@@ -30,17 +31,27 @@ go run ./cmd/runner -cases T+1,S-1 -harnesses claude_code -runs 1
 # Compare two Claude models head-to-head against Codex. Each -claude-models
 # entry runs as its own harness named claude_code:<model>; -harnesses still
 # filters by family ("claude_code" selects every pinned Claude variant).
-go run ./cmd/runner -claude-models claude-opus-4-7,claude-sonnet-4-6
+# -codex-models does the same for Codex.
+go run ./cmd/runner -claude-models claude-opus-5-5,claude-sonnet-5-5
 ```
 
-The summary then prints a per-harness table so the model-vs-model delta
-is visible at a glance:
+By default each harness runs the way a fresh install does: on its own
+default model and effort, which change as the harnesses release. Pin
+models with `-claude-models` / `-codex-models` and set one effort for
+every harness with `-effort` (e.g. `-effort low` for a cheaper sweep).
+The run prints each harness's version up front, and the summary and
+`benchmark.json` record the models each harness reported (Codex
+doesn't report its default model, so only its version is recorded).
+`judge` expectations are graded by `claude-opus-5-5` (`-judge-model`).
+
+The summary also prints a per-harness table so the model-vs-model
+delta is visible at a glance:
 
 ```
 === Per-harness ===
 harness                              with_skill  without_skill        delta
-claude_code:claude-opus-4-7              94.2%          57.1%       +37.1pp
-claude_code:claude-sonnet-4-6             96.5%          59.0%       +37.5pp
+claude_code:claude-opus-5-5              94.2%          57.1%       +37.1pp
+claude_code:claude-sonnet-5-5             96.5%          59.0%       +37.5pp
 codex                                    91.0%          55.0%       +36.0pp
 ```
 
@@ -82,8 +93,9 @@ See `evals/AGENTS.md` for the full authoring contract. Short version:
 
 ## Cost
 
-A single 4-case sweep against both harnesses with `-runs 1` typically
-consumes:
+A single 4-case sweep against both harnesses with `-runs 1` used to
+consume the amounts below, measured at `-effort low` on older models;
+the harness defaults usually think more:
 
 - Claude Code: ~3,000–4,000 tokens per case-config (with cache hits)
 - Codex: ~100,000–200,000 tokens per case-config (full skill loaded
@@ -92,5 +104,4 @@ consumes:
 Bump `-runs 3` for stddev estimation; cost scales linearly. Use
 `-cases X,Y,Z` and `-harnesses claude_code` to scope down during
 development.
-
 
