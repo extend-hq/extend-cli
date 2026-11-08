@@ -410,3 +410,49 @@ func BuildWorkflowBatchFile(ref FileRef) (*extend.WorkflowRunsCreateBatchRequest
 		FileFromText: fromText,
 	}, nil
 }
+
+// packageFiles converts FileRefs into the URL-or-ID pairs a package's
+// files are made of; packages don't accept text inputs.
+func packageFiles(refs []FileRef) ([]*extend.FileFromURL, []*extend.FileFromID, error) {
+	urls := make([]*extend.FileFromURL, len(refs))
+	ids := make([]*extend.FileFromID, len(refs))
+	for i, ref := range refs {
+		fromURL, fromID, _, err := fileFromRef(ref)
+		if err != nil {
+			return nil, nil, err
+		}
+		if fromURL == nil && fromID == nil {
+			return nil, nil, errors.New("packages only accept URL or file-ID inputs")
+		}
+		urls[i], ids[i] = fromURL, fromID
+	}
+	return urls, ids, nil
+}
+
+// BuildExtractPackage converts FileRefs, in order, into the package of a
+// multi-file /extract_runs request.
+func BuildExtractPackage(refs []FileRef) (*extend.MultiFileRunPackage, error) {
+	urls, ids, err := packageFiles(refs)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]*extend.MultiFileRunPackageFilesItem, len(refs))
+	for i := range refs {
+		files[i] = &extend.MultiFileRunPackageFilesItem{FileFromURL: urls[i], FileFromID: ids[i]}
+	}
+	return &extend.MultiFileRunPackage{Files: files}, nil
+}
+
+// BuildWorkflowPackage converts FileRefs, in order, into the package of
+// a multi-file /workflow_runs request.
+func BuildWorkflowPackage(refs []FileRef) (*extend.WorkflowRunPackage, error) {
+	urls, ids, err := packageFiles(refs)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]*extend.WorkflowRunPackageFilesItem, len(refs))
+	for i := range refs {
+		files[i] = &extend.WorkflowRunPackageFilesItem{FileFromURL: urls[i], FileFromID: ids[i]}
+	}
+	return &extend.WorkflowRunPackage{Files: files}, nil
+}
