@@ -497,7 +497,7 @@ contained runs with ` + "`extend parse runs list --batch <id>`" + `.`,
 		Gotchas: []string{
 			"Maximum 1,000 inputs per batch.",
 			"No processor reference is required; engine is selected via --engine/--engine-version.",
-			"Parse runs cannot be cancelled once submitted.",
+			"There is no batch-level cancel; cancel individual runs with 'extend parse runs cancel <pr_id>' once they reach PROCESSING.",
 		},
 		SeeAlso: []string{"parse", "parse batches watch", "parse batches get", "parse runs list"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},

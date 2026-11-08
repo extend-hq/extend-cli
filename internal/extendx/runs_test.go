@@ -74,14 +74,14 @@ func TestValidateRunID(t *testing.T) {
 	}
 	// When the ID's actual kind lacks the invoked action, the error
 	// must not suggest a command that doesn't exist.
-	err = ValidateRunID(KindExtract, "pr_x", "cancel")
+	err = ValidateRunID(KindExtract, "edr_x", "cancel")
 	if err == nil {
-		t.Fatal("ValidateRunID(extract, pr_x, cancel) = nil; want mismatch error")
+		t.Fatal("ValidateRunID(extract, edr_x, cancel) = nil; want mismatch error")
 	}
-	if strings.Contains(err.Error(), "extend parse runs cancel") {
-		t.Errorf("mismatch error %q suggests nonexistent 'parse runs cancel'", err)
+	if strings.Contains(err.Error(), "extend edit runs cancel") {
+		t.Errorf("mismatch error %q suggests nonexistent 'edit runs cancel'", err)
 	}
-	if want := "parse runs do not support cancel"; !strings.Contains(err.Error(), want) {
+	if want := "edit runs do not support cancel"; !strings.Contains(err.Error(), want) {
 		t.Errorf("mismatch error %q does not mention %q", err, want)
 	}
 	err = ValidateRunID(KindWorkflow, "exr_x", "update")
@@ -122,8 +122,9 @@ func TestSupportsRunAction(t *testing.T) {
 		action string
 		want   bool
 	}{
-		{KindParse, "cancel", false},
+		{KindParse, "cancel", true},
 		{KindEdit, "cancel", false},
+		{KindDetectForm, "cancel", false},
 		{KindExtract, "cancel", true},
 		{KindWorkflow, "cancel", true},
 		{KindEdit, "list", false},

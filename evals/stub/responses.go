@@ -143,7 +143,69 @@ func emitExtractBatch(args []string, mode string) {
 	})
 }
 
+// writePDF stands in for a PDF the real CLI downloads to a local path.
+// Agents open the file to check it, so it is a valid one-page PDF whose
+// text is lines. "" and "-" (stdout) write nothing.
+func writePDF(path string, lines ...string) error {
+	if path == "" || path == "-" {
+		return nil
+	}
+	return os.WriteFile(path, onePagePDF(lines), 0o644)
+}
+
+func onePagePDF(lines []string) []byte {
+	esc := strings.NewReplacer(`\`, `\\`, "(", `\(`, ")", `\)`)
+	content := "BT /F1 12 Tf 16 TL 72 740 Td"
+	for _, l := range lines {
+		content += " (" + esc.Replace(l) + ") Tj T*"
+	}
+	content += " ET"
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content),
+	}
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, o := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, o)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xref)
+	return []byte(b.String())
+}
+
+// writeSearchablePDF stands in for --searchable-pdf. A local input is
+// copied, since the fixture PDFs already carry a text layer; the
+// trailing comment keeps the copy from being byte-identical, which
+// agents read as "Extend changed nothing".
+func writeSearchablePDF(args []string) error {
+	path := flagValue(args, "searchable-pdf")
+	if path == "" || path == "-" {
+		return nil
+	}
+	if pos := positional(args); len(pos) > 1 {
+		if b, err := os.ReadFile(pos[1]); err == nil {
+			return os.WriteFile(path, append(b, "% text layer added by Extend\n"...), 0o644)
+		}
+	}
+	return writePDF(path, "Parsed document", "Stub-generated text layer.")
+}
+
 func emitParse(args []string, mode string) {
+	if err := writeSearchablePDF(args); err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		exitCode = 1
+		return
+	}
 	r := terminalRun("pr_", "PROCESSED")
 	r.Output = map[string]any{
 		"chunks": []map[string]any{
@@ -316,16 +378,25 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	// Parse, edit, and detect-form runs have no cancel command in the
-	// real CLI; the dispatch reaches here for them too, so mirror
-	// cobra's unknown-command failure verbatim.
+	// Edit and detect-form runs have no cancel command in the real CLI;
+	// the dispatch reaches here for them too, so mirror cobra's
+	// unknown-command failure verbatim.
 	verb := positional(args)[0]
-	if verb == "parse" || verb == "edit" || verb == "detect-form" {
+	if verb == "edit" || verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
-	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+	id := typedRunID(args)
+	// The API cancels only PROCESSING parse runs and rejects the rest.
+	if r, ok := fixtureRuns[id]; ok && verb == "parse" && r.Status != "PROCESSING" {
+		fmt.Fprintln(stderr, "Error: INVALID_REQUEST")
+		fmt.Fprintf(stderr, "       Cannot cancel parse run with status %s. Only PROCESSING runs can be cancelled.\n", r.Status)
+		fmt.Fprintln(stderr, "       request: req_stub")
+		exitCode = 1
+		return
+	}
+	emitJSON(synthesizeRun(id, "CANCELLED"))
 }
 
 // emitRunsDelete mirrors `<verb> runs delete <id>`: the stub is never
