@@ -2064,6 +2064,60 @@
           "answer_pattern": "invoice-searchable\\.pdf"
         }
       ]
+    },
+    {
+      "id": "W-10",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Fill our saved 'W-9 (2024)' edit template for Acme Corp, TIN 12-3456789, and save the filled PDF to acme-w9.pdf. I don't have the template's ID handy.",
+      "files": [],
+      "expected_output": "Agent finds the template's ID with `extend edit templates list` (optionally --name-contains), then runs `extend edit --template edt_demo_w9` with the values in --instructions and --output-file acme-w9.pdf, without also passing an input file.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent looked the template up with `extend edit templates list`",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit",
+                "templates",
+                "list"
+              ],
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent filled edt_demo_w9 by template ID and saved it to acme-w9.pdf",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "flag_value": {
+                "template": "edt_demo_w9"
+              },
+              "flag_value_suffix": {
+                "output-file": "acme-w9.pdf"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "judge",
+          "text": "agent filled the template with the given values only",
+          "criterion": "The `extend edit --template` call supplies Acme Corp as the name and 12-3456789 as the TIN (in --instructions, or in a values or schema file the final message says it wrote), and the agent does not invent values for any other field."
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate the template ID",
+          "patterns": [
+            "edt_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
     }
   ]
 }

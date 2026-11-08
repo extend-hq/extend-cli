@@ -3,12 +3,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // emitJSON marshals v to stdout as compact JSON. The real CLI mostly
@@ -241,8 +244,93 @@ func emitSplit(args []string, mode string) {
 }
 
 func emitEdit(args []string, mode string) {
+	if hasFlag(args, "template") && len(positional(args)) > 1 {
+		fmt.Fprintln(stderr, "Error: pass either <input> or --template, not both; a template fills its own PDF")
+		exitCode = 1
+		return
+	}
+	out := flagValue(args, "output-file")
+	if out == "" {
+		out = shortFlagValue(args, "O")
+	}
+	// The run reports, and the filled PDF shows, the values the agent
+	// asked for, so an agent checking for them finds them.
+	title := "Filled form"
+	for _, t := range fixtureEditTemplates {
+		if t["id"] == flagValue(args, "template") {
+			title = t["name"].(string)
+		}
+	}
+	filled := editFilledValues(args)
+	lines := []string{title}
+	for _, k := range slices.Sorted(maps.Keys(filled)) {
+		lines = append(lines, fmt.Sprintf("%s: %v", k, filled[k]))
+	}
+	if err := writePDF(out, lines...); err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		exitCode = 1
+		return
+	}
 	r := terminalRun("edr_", "PROCESSED")
+	fileID := nowID("file_")
+	r.Output = map[string]any{
+		"editedFile":   map[string]any{"id": fileID, "presignedUrl": "https://files.extend.ai/stub/" + fileID + ".pdf"},
+		"filledValues": filled,
+	}
 	emitJSON(r)
+}
+
+// editFilledValues returns the values an edit run fills: the
+// "label: value" and "label is value" clauses of --instructions, and the
+// extend_edit:value entries of a --schema given inline or as a file.
+func editFilledValues(args []string) map[string]any {
+	filled := map[string]any{}
+	for _, clause := range instructionClauses(flagValue(args, "instructions")) {
+		label, value, ok := strings.Cut(clause, ":")
+		if !ok {
+			label, value, ok = strings.Cut(clause, " is ")
+		}
+		if !ok {
+			continue
+		}
+		filled[strings.TrimSpace(label)] = strings.TrimSpace(value)
+	}
+	src := flagValue(args, "schema")
+	b := []byte(src)
+	if src != "" && !strings.HasPrefix(strings.TrimSpace(src), "{") {
+		b, _ = os.ReadFile(strings.TrimPrefix(src, "file://"))
+	}
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if json.Unmarshal(b, &schema) == nil {
+		for name, p := range schema.Properties {
+			if v := p["extend_edit:value"]; v != nil {
+				filled[name] = v
+			}
+		}
+	}
+	return filled
+}
+
+// instructionClauses splits instructions at semicolons and sentence ends.
+// A period after a lone capital is an initial ("Wile E. Coyote"), not a
+// sentence end.
+func instructionClauses(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		end := s[i] == ';'
+		if s[i] == '.' && i+1 < len(s) && s[i+1] == ' ' {
+			initial := i >= 1 && unicode.IsUpper(rune(s[i-1])) && (i == 1 || s[i-2] == ' ')
+			end = !initial
+		}
+		if end {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // emitEditRemoved mirrors the real CLI's migration hint for the retired
@@ -1266,6 +1354,16 @@ func emitEditTemplatesGet(args []string, mode string) {
 	id := "edt_stub"
 	if len(pos) >= 4 {
 		id = pos[3]
+	}
+	for _, t := range fixtureEditTemplates {
+		if t["id"] != id {
+			continue
+		}
+		tmpl := maps.Clone(t)
+		tmpl["config"] = fixtureEditTemplateConfigs[id]
+		tmpl["schemaConfig"] = map[string]any{}
+		emitJSON(tmpl)
+		return
 	}
 	emitJSON(map[string]any{
 		"id":     id,
