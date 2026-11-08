@@ -394,16 +394,23 @@ This is the only create endpoint; there is no per-item POST.`,
 
     {"items":[{"fileId":"file_xxx","expectedOutput":{...}}, ...]}
 
+For a multi-file item, give "fileIds" (2 to 50 file IDs, in order) instead
+of "fileId". The item is evaluated as one multi-file extract run, like
+'extend extract --package', against a single expectedOutput for the whole
+set. Multi-file items work only in sets for JSON-schema extractors.
+
 --from-file accepts inline JSON, a plain path, an absolute file:// URI, or
 - for stdin. The response wraps the created items in
 {"evaluationSetItems":[...]}; this command surfaces that envelope verbatim.`,
 		Examples: []Example{
 			{Label: "From file", Cmd: "extend evaluations items create evs_abc --from-file items.json"},
 			{Label: "From stdin", Cmd: "cat items.json | extend evaluations items create evs_abc --from-file -"},
+			{Label: "Multi-file item", Cmd: `extend evaluations items create evs_abc --from-file '{"items":[{"fileIds":["file_msa","file_amend1"],"expectedOutput":{"value":{"term_months":24}}}]}'`},
 		},
 		Gotchas: []string{
 			"--from-file is required (no inline-flag form for items).",
 			"Body must use the bulk shape {items: [...]}; per-item POST is not supported.",
+			"An item's files can't be changed after it's created; delete the item and create it again.",
 		},
 		SeeAlso: []string{"evaluations items list", "evaluations create"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
@@ -447,7 +454,8 @@ func newEvaluationItemsUpdateDoc(app *App) *CommandDoc {
 		WhenToUse: `Use to update one item in an evaluation set, typically to change the
 expected output as the ground truth evolves.`,
 		Details: `--from-file accepts inline JSON, a plain path, an absolute file:// URI,
-or - for stdin.`,
+or - for stdin. An update changes the item's expectedOutput; its files stay
+as they were created (delete the item and create it again to change them).`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend evaluations items update evs_abc esi_xyz --from-file patch.json"},
 		},
