@@ -1952,6 +1952,78 @@
           "answer_must_not_match": "custom HMAC|write (a )?(script|code)|Python|Node"
         }
       ]
+    },
+    {
+      "id": "H-9",
+      "category": "help-discovery",
+      "path": "B",
+      "prompt": "Parse invoice.pdf and save the markdown to invoice.md. It contains customer data, so make sure Extend doesn't keep the document or the results once we have them.",
+      "files": [
+        "invoice.pdf"
+      ],
+      "expected_output": "Agent finds --zero-retention in `extend parse --help` and runs `extend parse invoice.pdf --zero-retention`, saving the markdown from that one run because the result can be read only once. It never parses the file without the flag.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent parsed with --zero-retention",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "flag": "zero-retention",
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent never parsed invoice.pdf without --zero-retention (that run's data would be kept)",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "args": [
+                "invoice.pdf"
+              ],
+              "must_not_have_flag": "zero-retention"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-12",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Use Extend to OCR invoice.pdf and save a searchable copy of it at invoice-searchable.pdf.",
+      "files": [
+        "invoice.pdf"
+      ],
+      "expected_output": "Agent runs `extend parse invoice.pdf --searchable-pdf invoice-searchable.pdf`, which waits for the run and saves the PDF with a text layer. It does not reach for local OCR tools.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran parse with --searchable-pdf saving to invoice-searchable.pdf",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "parse"
+              ],
+              "flag_value_suffix": {
+                "searchable-pdf": "invoice-searchable.pdf"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer points the user at the searchable copy",
+          "answer_pattern": "invoice-searchable\\.pdf"
+        }
+      ]
     }
   ]
 }
