@@ -179,7 +179,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&app.Region, "region", "", "Region: us|eu (or EXTEND_REGION; ignored if EXTEND_BASE_URL is set)")
 	root.PersistentFlags().BoolVar(&app.Debug, "debug", false, "Log every HTTP request to stderr (or EXTEND_DEBUG=1)")
 	root.PersistentFlags().StringVar(&app.Env, "env", "", "Environment label that selects the API key: e.g. --env test reads EXTEND_TEST_API_KEY instead of EXTEND_API_KEY (or EXTEND_ENV)")
-	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads bypass this and use an untimed client.")
+	root.PersistentFlags().DurationVar(&app.HTTPTimeout, "http-timeout", 0, "Per-HTTP-request timeout, e.g. 60s or 2m (or EXTEND_HTTP_TIMEOUT). Distinct from per-command --timeout (overall wait). Defaults to 60s; 0 leaves the client default in place; uploads and extractor schema generation bypass this and use an untimed client.")
 
 	app.NewClient = func() (*sdkclient.Client, error) {
 		s := resolveSettings(app.Env, app.Region, app.Workspace, os.Getenv, config.Load)
