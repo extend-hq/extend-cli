@@ -291,12 +291,12 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("`extend workflows run` is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
 	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `sgr_` detect-form, `workflow_run_` workflows):\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx\n\n")
-	b.WriteString("A wrong-type ID fails fast, naming the right command. Use `--exit-status` to gate downstream scripts on success:\n\n")
+	b.WriteString("Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
 	b.WriteString("**Run-type quirks:**\n\n")
 	b.WriteString("- **Edit runs** (`edr_*`) can't be cancelled, and **form detection runs** (`sgr_*`) support only get and watch. Other runs support best-effort cancel.\n")
-	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
+	b.WriteString("- **Workflow batches** have **no GET endpoint**; track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
 
@@ -331,7 +331,8 @@ func writeSkillWorkflows(b *strings.Builder) {
    for date/currency/signature fields. Currency fields must be objects with
    amount and iso_4217_currency_code, not primitive numbers. If extraction
    misses a value, inspect parse output before over-tuning the schema.
-2. Create the extractor draft from the config body:
+2. Create the extractor draft from the config body (or skip step 1 and pass
+   1-5 sample documents with ` + "`--sample`" + ` to have Extend write the schema):
 
        extend extractors create --from-file extractor.json --name "Q3 invoices"
 

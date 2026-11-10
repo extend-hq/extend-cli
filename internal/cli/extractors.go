@@ -58,13 +58,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 		verRowFn: func(v *extend.ExtractorVersionSummary) []string {
 			return []string{v.Version, v.ID, relTime(v.CreatedAt)}
 		},
-		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Extractor, error) {
-			var req extend.ExtractorsCreateRequest
-			if err := json.Unmarshal(body, &req); err != nil {
-				return nil, fmt.Errorf("decode body: %w", err)
-			}
-			return c.Extractors.Create(ctx, &req)
-		},
+		createDocFn: newExtractorsCreateDoc,
 		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Extractor, error) {
 			var req extend.ExtractorsUpdateRequest
 			if err := json.Unmarshal(body, &req); err != nil {

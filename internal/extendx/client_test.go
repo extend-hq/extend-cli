@@ -407,7 +407,7 @@ func TestUploadClientRefusesRedirect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	resp, err := uploadHTTPClient().Get(srv.URL + "/files/upload")
+	resp, err := untimedHTTPClient().Get(srv.URL + "/files/upload")
 	if err == nil {
 		resp.Body.Close()
 		t.Fatal("upload client followed a redirect")
