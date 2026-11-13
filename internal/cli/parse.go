@@ -80,12 +80,12 @@ knobs in the same forms.
 		Gotchas: []string{
 			"--target spatial does not support --chunk-strategy section.",
 			"--jq cannot be combined with -o markdown; use -o json --jq and select the markdown chunk paths.",
-			"Parse runs cannot be cancelled once submitted (unlike extract/classify/split).",
+			"Only PROCESSING parse runs can be cancelled; use 'extend parse runs cancel <id>' (best-effort).",
 		},
 		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get"},
 		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
-		Failures: []extendx.RunStatus{extendx.StatusFailed},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()

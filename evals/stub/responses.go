@@ -198,13 +198,19 @@ func emitWorkflowRun(args []string, mode string) {
 // emitRunsList is the centerpiece for pagination tests. In paginated
 // mode we split fixtureFailedRuns across pages keyed by --page-token.
 //
-// Mirrors a real-CLI behaviour: `edit runs list` does not exist (the
-// API has no list-edit-runs endpoint). Agents are expected to
-// recognize this and use `edit runs get edr_xxx` per ID instead.
+// Mirrors a real-CLI behaviour: `detect-form runs list` does not exist
+// (the API has no list-form-detection-runs endpoint). Agents are
+// expected to recognize this and use `detect-form runs get sgr_xxx`
+// per ID instead.
 func emitRunsList(args []string, mode string) {
-	if verb := positional(args)[0]; verb == "edit" || verb == "detect-form" {
+	verb := positional(args)[0]
+	if verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"list\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
+		return
+	}
+	if verb == "edit" {
+		emitJSON(map[string]any{"data": fixtureEditRuns, "nextPageToken": nil})
 		return
 	}
 	pageSize := atoiOr(flagValue(args, "page-size"), 0)
@@ -316,16 +322,22 @@ func emitRunsGet(args []string, mode string) {
 }
 
 func emitRunsCancel(args []string, mode string) {
-	// Parse, edit, and detect-form runs have no cancel command in the
-	// real CLI; the dispatch reaches here for them too, so mirror
-	// cobra's unknown-command failure verbatim.
+	// Edit and detect-form runs have no cancel command in the real CLI;
+	// the dispatch reaches here for them too, so mirror cobra's
+	// unknown-command failure verbatim.
 	verb := positional(args)[0]
-	if verb == "parse" || verb == "edit" || verb == "detect-form" {
+	if verb == "edit" || verb == "detect-form" {
 		fmt.Fprintf(stderr, "Error: unknown command \"cancel\" for \"extend %s runs\"\n", verb)
 		exitCode = 1
 		return
 	}
-	emitJSON(synthesizeRun(typedRunID(args), "CANCELLED"))
+	id := typedRunID(args)
+	if r, ok := fixtureRuns[id]; ok && r.Status != "PROCESSING" {
+		fmt.Fprintf(stderr, "Error: run %s is %s; only PROCESSING runs can be cancelled\n", id, r.Status)
+		exitCode = 1
+		return
+	}
+	emitJSON(synthesizeRun(id, "CANCELLED"))
 }
 
 // emitRunsDelete mirrors `<verb> runs delete <id>`: the stub is never

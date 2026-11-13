@@ -32,7 +32,9 @@ const splitConfigFields = `  - baseProcessor (string) — "splitting_performance
         be merged (splitting_light >= 1.3.0 / splitting_performance >= 1.5.0).
   - splitRules (string) — natural-language guidance on where to split and how to group pages.
   - advancedOptions (object) — splitExcelDocumentsBySheetEnabled, pageOverlapEnabled,
-    pageRanges. (Legacy splitIdentifierRules/splitMethod are accepted but ignored on
+    pageRanges, strictIdentifierModeEnabled (only merge segments whose identifierKey
+    values match; default on for splitting_performance >= 1.6.2 and splitting_light
+    >= 1.4.1). (Legacy splitIdentifierRules/splitMethod are accepted but ignored on
     current base versions.)
   - parseConfig (object) — parsing options applied before splitting; see ` + "`extend parse --help`" + `.`
 
@@ -154,6 +156,9 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - Simple steps use next entries shaped as { "step": "target_step" }.
       - CLASSIFY and SPLIT route with classificationId values. These must match
         classification IDs from the classifier/splitter config, not type labels.
+      - ROUTER routes with branchId values matching config.branches[].id, plus
+        branchId "otherwise" for the fall-through route when no branch matches.
+      - VALIDATION routes with result values: "pass" or "fail".
       - CONDITIONAL routes with conditionId values matching config.conditions[].id.
       - RULE_VALIDATION routes with result values: "pass" or "fail".
       - Conditional and formula fields can reference prior processor outputs as
@@ -176,6 +181,11 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       "next": [
         { "step": "webhook", "result": "pass" },
         { "step": "review", "result": "fail" }
+      ]
+
+      "next": [
+        { "step": "review", "branchId": "high_value" },
+        { "step": "webhook", "branchId": "otherwise" }
       ]
 
     Processor references and versions:
@@ -201,8 +211,23 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - SPLIT - splits a multi-document file and routes each sub-document by classificationId.
       - MERGE_EXTRACT - combines multiple upstream extract outputs; config.mergeOrder
         controls overlapping-field priority.
-      - CONDITIONAL - routes by IF/ELSE conditions over upstream output values, for
-        example leftOperand "{{ extract.output.value.total }}" with operation GTE.
+      - VALIDATION - runs config.blocks in order; routes "fail" if any block fails,
+        "pass" if all pass. Each block has a name and a blockType:
+          { "name": "Total within limit", "blockType": "code",
+            "code": { "language": "javascript",
+                      "code": "return context.outputs.extract.total.value <= 10000;" } }
+          { "name": "Vendor plausible", "blockType": "semantic",
+            "semantic": { "promptText": "{{ outputs.extract.vendor_name.value }} should be a registered company." } }
+        Code blocks are JavaScript only and must end with return true, false, or
+        [boolean, "reason"]; they read context.outputs.<stepName>.<field>.value,
+        context.files, and context.metadata. Semantic promptText is evaluated by an
+        LLM and embeds data with {{ jmespath }} references.
+      - ROUTER - routes to the first branch in config.branches whose predicate block
+        returns true, else to the "otherwise" route. Each branch is
+        { "id": "high_value", "name": "High value", "block": { <VALIDATION block> } }.
+      - CONDITIONAL - legacy; prefer ROUTER for new workflows. Routes by IF/ELSE
+        conditions over upstream output values, for example leftOperand
+        "{{ extract.output.value.total }}" with operation GTE.
         Supported operation/operator values: EQUALS, GTE, LTE, IS_NULL, CONTAINS,
         and NO_OP for a branch with no comparison. Use conditionId in next routes.
         Extraction confidence can be referenced with "{{ extract.avgConfidence }}",
@@ -215,11 +240,12 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
         can use previous step outputs, external validation outputs, and run metadata;
         each rule points to an extractor reference. Include a final rule with formula
         "TRUE" as the default fallback so unmatched documents do not fail at runtime.
-      - RULE_VALIDATION - checks boolean formulas against extracted data; route on
-        result "pass" or "fail". Rules have name, optional description, and formula;
-        the formula must evaluate to a boolean and may reference any earlier step
-        output, including data fetched with EXTERNAL_DATA_VALIDATION. A common
-        topology routes pass to WEBHOOK_RESPONSE and fail to HUMAN_REVIEW.
+      - RULE_VALIDATION - legacy; prefer VALIDATION for new workflows. Checks boolean
+        formulas against extracted data; route on result "pass" or "fail". Rules have
+        name, optional description, and formula; the formula must evaluate to a boolean
+        and may reference any earlier step output, including data fetched with
+        EXTERNAL_DATA_VALIDATION. A common topology routes pass to WEBHOOK_RESPONSE
+        and fail to HUMAN_REVIEW.
       - EXTERNAL_DATA_VALIDATION - posts extraction data to an external HTTP endpoint;
         config.requestOptions sets url, method, headers, and contentType, and
         failureBehavior controls failures. Extend also signs requests with the
@@ -237,8 +263,8 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - Human-in-the-loop: trigger -> parse -> extract -> review -> webhook.
       - Classify and route: trigger -> parse -> classify -> extractor branches -> review/webhook.
       - Split and collect: trigger -> parse -> split -> extractor/review branches -> collect -> webhook.
-      - Conditional review: trigger -> parse -> extract -> conditional -> review or webhook.
-      - Validation gate: trigger -> parse -> extract -> rule validation -> pass webhook or fail review.`
+      - Conditional review: trigger -> parse -> extract -> router -> review or webhook.
+      - Validation gate: trigger -> parse -> extract -> validation -> pass webhook or fail review.`
 
 // actionConfigDoc wraps a bare field catalog with the lead-in shown under
 // an action verb's --config flag (extract/classify/split). The object is
@@ -305,7 +331,9 @@ const parseBlockOptionsFields = `  - figures (object) — enabled; figureImageCl
     (carry headers across page breaks); cellBlocksEnabled (emit a block per cell);
     agentic (object: enabled, customInstructions).
   - text (object) — signatureDetectionEnabled; agentic (object: enabled, customInstructions).
-  - keyValue (object) — blankFieldFormattingEnabled (emit detected blank fields).
+  - keyValue (object) — blankFieldFormattingEnabled (emit detected blank fields);
+    structuredOutputEnabled (return each form region as a typed tree under details.form;
+    requires parse_performance >= 2.0.0, parse_light >= 1.0.0, or parse_auto).
   - barcodes (object) — readingEnabled (decode barcode values); imageClippingEnabled.
   - formulas (object) — enabled (detect formulas and include their LaTeX representation).`
 
@@ -313,6 +341,9 @@ const parseBlockOptionsFields = `  - figures (object) — enabled; figureImageCl
 // object (parse --advanced-options).
 const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-detect and correct rotated pages.
   - pageRanges (array) — restrict parsing to page ranges; each entry { start, end }.
+  - textExtractionMethod ("auto"|"ocr_only") — "auto" uses reliable embedded PDF text and OCRs
+    the rest; "ocr_only" ignores embedded text. parse_auto and parse_light >= 1.0.0 only (both
+    default to "auto"); other engines always OCR.
   - excelParsingMode ("basic"|"advanced") — "advanced" enables layout block detection for complex spreadsheets; .xls files always use "basic".
   - excelSkipHiddenContent (bool) — drop hidden rows, columns, and sheets.
   - excelUseRawCellValues (bool) — emit raw calculated values instead of locale-formatted ones.
@@ -320,8 +351,17 @@ const parseAdvancedOptionsFields = `  - pageRotationEnabled (bool) — auto-dete
   - excelIncludeCellMetadata (bool) — include cell provenance (source refs/formulas, data-cell/data-formula in HTML); advanced mode only.
   - excelIncludeCellFormatting (bool) — include cell formatting (bold, italic, font/background color, inline HTML styles); advanced mode only.
   - verticalGroupingThreshold (number 0.1–5.0, default 1.0) — line-grouping sensitivity; --target spatial only.
-  - returnOcr (object) — words (bool): include word-level raw OCR data in the response.
+  - embedOcrInPdf (bool) — embed OCR words as an invisible text layer in the processed PDF
+    (searchable/selectable); pages that already have text are skipped. Once processed,
+    download it with 'extend files download <file.id from the run>'.
+  - returnOcr (object) — words (bool): include word-level raw OCR data; lines (bool): include
+    line-level OCR data at output.ocr.lines. Independent opt-ins, both default false.
   - alwaysConvertToPdf (bool) — convert images/Office/HTML to PDF first (enables spatial bboxes).
+    Cannot be combined with htmlSourceAnchors.
+  - htmlSourceAnchors (bool) — HTML only: anchor each block to its byte range in the uploaded
+    file (block.source instead of polygon/boundingBox). UTF-8 or Windows-1252 input only.
+  - returnSourceNodes (bool) — HTML only: include word-level source anchors under
+    output.source.nodes. Requires htmlSourceAnchors.
   - enrichmentFormat ("xml"|"bracket") — annotation style, e.g. <page_number>1</page_number> vs [page_number: 1].
   - imageConversionQuality ("high"|"medium"|"low") — quality when converting to PDF.
   - formattingDetection (array) — change-tracking detection; each entry { "type": "change_tracking" }.
@@ -362,10 +402,15 @@ each field. Populate the value keys; leave detected structural keys as generated
   - extend_edit:page_index (int) — zero-based page index where the field sits.
   - extend_edit:image (object) — signature image fill: {"image_url":"https://..."};
     PNG or JPEG only.
-  - extend_edit:text_edit_options (object) — text styling: combing, maxLength,
-    fontSize, fontColor (RGB 0-255), font.
+  - extend_edit:text_edit_options (object) — text styling: combing, maxLength, multiLine,
+    fontSize, color (RGB 0-255; fontColor is a deprecated alias), opacity (0-1), font.
   - extend_edit:column_width (number) — column width percentage for table fields.
   - extend_edit:row_heights (array) — row height percentages for array/table fields.
+  - extend_edit:source_acroform (object) — the native PDF field this property maps to:
+    fieldName, fieldType, and optionMap/optionValue for choice fields. Generated for
+    AcroForm fields; set fieldName yourself when using preserveSignatureValidity.
+  - extend:descriptions (array) — human-readable labels for enum values, in enum order.
+    Keep it when reusing a schema from 'extend detect-form'.
 
 Standard JSON Schema keys carry through: description, properties, items, enum,
 required, additionalProperties, and maxItems (row cap for array/table fields).

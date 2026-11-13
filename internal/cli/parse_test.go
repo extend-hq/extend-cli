@@ -246,8 +246,8 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 	if err := runParse(context.Background(), ta.app, parseParams{
 		input:               "file_xK9",
 		target:              "markdown",
-		blockOptionsPath:    `{"tables":{"enabled":true}}`,
-		advancedOptionsPath: `{"pageRanges":[{"start":1,"end":3}]}`,
+		blockOptionsPath:    `{"tables":{"enabled":true},"keyValue":{"structuredOutputEnabled":true}}`,
+		advancedOptionsPath: `{"pageRanges":[{"start":1,"end":3}],"textExtractionMethod":"ocr_only","returnOcr":{"lines":true}}`,
 		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
@@ -255,7 +255,10 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 	body := string(srv.lastRequest().Body)
 	for _, want := range []string{
 		`"tables":{"enabled":true}`,
+		`"structuredOutputEnabled":true`,
 		`"pageRanges":[{"start":1,"end":3}]`,
+		`"textExtractionMethod":"ocr_only"`,
+		`"returnOcr":{"lines":true}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %s: %s", want, body)

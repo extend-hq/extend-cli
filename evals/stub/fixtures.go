@@ -120,6 +120,13 @@ var fixtureRuns = map[string]Run{
 	},
 }
 
+// fixtureEditRuns backs `edit runs list`.
+var fixtureEditRuns = []Run{
+	{ID: "edr_demo_001", Type: "edit", Status: "PROCESSED", ProcessedAt: "2026-04-30T09:12:00Z"},
+	{ID: "edr_demo_002", Type: "edit", Status: "FAILED", ProcessedAt: "2026-04-29T16:40:00Z",
+		Failure: &RunFailure{Reason: "INVALID_OPTIONS", Message: "No compatible form fields to fill"}},
+}
+
 // fixtureFailedRuns is the list of FAILED extract runs used by
 // `runs list --status FAILED`. Larger than the get-by-id map so
 // pagination has meaningful pages to split.
