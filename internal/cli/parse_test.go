@@ -52,6 +52,34 @@ func TestParse_RawMarkdownWhenPiped(t *testing.T) {
 	}
 }
 
+func TestParse_CancelledRunErrorsAndExplainsEmptyOutput(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(w, 200, map[string]any{"id": "pr_cx", "status": "PENDING"})
+		case http.MethodGet:
+			writeJSON(w, 200, map[string]any{"id": "pr_cx", "status": "CANCELLED"})
+		}
+	})
+	ta := newTestApp(t, srv)
+
+	err := runParse(context.Background(), ta.app, parseParams{
+		input:   "file_xK9",
+		target:  "markdown",
+		wait:    true,
+		timeout: 2 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "run pr_cx was cancelled") {
+		t.Fatalf("err = %v, want cancelled error", err)
+	}
+	if ta.out.Len() != 0 {
+		t.Errorf("stdout should stay empty, got %q", ta.out.String())
+	}
+	if !strings.Contains(ta.errOut.String(), "Run pr_cx is CANCELLED; no parsed content.") {
+		t.Errorf("stderr = %q, want status note", ta.errOut.String())
+	}
+}
+
 func TestParse_JSONFormatRendersFullRun(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -246,8 +274,8 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 	if err := runParse(context.Background(), ta.app, parseParams{
 		input:               "file_xK9",
 		target:              "markdown",
-		blockOptionsPath:    `{"tables":{"enabled":true}}`,
-		advancedOptionsPath: `{"pageRanges":[{"start":1,"end":3}]}`,
+		blockOptionsPath:    `{"tables":{"enabled":true},"keyValue":{"structuredOutputEnabled":true}}`,
+		advancedOptionsPath: `{"pageRanges":[{"start":1,"end":3}],"textExtractionMethod":"ocr_only","returnOcr":{"lines":true}}`,
 		wait:                false,
 	}); err != nil {
 		t.Fatalf("runParse: %v", err)
@@ -255,7 +283,10 @@ func TestParse_BlockOptionsAndAdvancedOptionsInline(t *testing.T) {
 	body := string(srv.lastRequest().Body)
 	for _, want := range []string{
 		`"tables":{"enabled":true}`,
+		`"structuredOutputEnabled":true`,
 		`"pageRanges":[{"start":1,"end":3}]`,
+		`"textExtractionMethod":"ocr_only"`,
+		`"returnOcr":{"lines":true}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %s: %s", want, body)

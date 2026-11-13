@@ -110,11 +110,27 @@ func TestTypedRunsCancel_MismatchedKindRedirects(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "extend workflows runs cancel") {
 		t.Errorf("expected redirect naming the workflows runs group, got %v", err)
 	}
-	// Parse runs have no cancel command at all; a parse ID handed to
+	// Edit runs have no cancel command at all; an edit ID handed to
 	// another kind's cancel must not suggest a nonexistent command.
-	err = runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "pr_abc", true)
-	if err == nil || !strings.Contains(err.Error(), "parse runs do not support cancel") {
-		t.Errorf("expected parse-cannot-cancel error, got %v", err)
+	err = runTypedRunsCancel(context.Background(), ta.app, extendx.KindExtract, "edr_abc", true)
+	if err == nil || !strings.Contains(err.Error(), "edit runs do not support cancel") {
+		t.Errorf("expected edit-cannot-cancel error, got %v", err)
+	}
+}
+
+func TestTypedRunsCancel_ParseHitsCancelEndpoint(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"object": "parse_run", "id": "pr_abc", "status": "CANCELLED"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "parse", "runs", "cancel")
+	cmd.SetArgs([]string{"pr_abc", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	req := srv.lastRequest()
+	if req.Method != http.MethodPost || req.Path != "/parse_runs/pr_abc/cancel" {
+		t.Errorf("hit %s %s, want POST /parse_runs/pr_abc/cancel", req.Method, req.Path)
 	}
 }
 
@@ -290,6 +306,60 @@ func TestRunsList_AllFiltersOnExtract(t *testing.T) {
 	} {
 		if !strings.Contains(q, expected) {
 			t.Errorf("query missing %q (full: %s)", expected, q)
+		}
+	}
+}
+
+func TestRunsList_EditFilters(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"object": "list",
+			"data": []any{map[string]any{
+				"object": "edit_run", "id": "edr_abc", "status": "PROCESSED",
+				"createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-01T00:00:00Z",
+			}},
+		})
+	})
+	ta := newTestApp(t, srv)
+	cli, err := ta.app.NewClient()
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	rows, _, err := collectListRows(context.Background(), cli, extendx.KindEdit, runsListParams{
+		status:   "PROCESSED",
+		source:   "API",
+		fileName: "w9",
+		sortBy:   "createdAt",
+		sortDir:  "asc",
+		limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("collectListRows: %v", err)
+	}
+	if len(rows) != 1 || rows[0][0] != "edr_abc" || rows[0][1] != "PROCESSED" {
+		t.Errorf("rows = %v, want one PROCESSED edr_abc row", rows)
+	}
+	req := srv.lastRequest()
+	if req.Path != "/edit_runs" {
+		t.Errorf("path = %q, want /edit_runs", req.Path)
+	}
+	for _, expected := range []string{
+		"status=PROCESSED",
+		"source=API",
+		"fileNameContains=w9",
+		"sortBy=createdAt",
+		"sortDir=asc",
+		"maxPageSize=10",
+	} {
+		if !strings.Contains(req.Query, expected) {
+			t.Errorf("query missing %q (full: %s)", expected, req.Query)
+		}
+	}
+
+	list := findCmd(t, ta.app, "edit", "runs", "list")
+	for _, unsupported := range []string{"batch", "source-id", "using"} {
+		if list.Flags().Lookup(unsupported) != nil {
+			t.Errorf("edit runs list registers --%s, which the edit list endpoint does not support", unsupported)
 		}
 	}
 }

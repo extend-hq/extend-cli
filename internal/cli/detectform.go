@@ -63,9 +63,11 @@ run object reports the resolved exact version under config.
 Detection options ride in --advanced-options as a JSON object (omitted
 fields use the server default):
 
-  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
-  tableParsingEnabled  bool  Parse table regions as arrays of objects.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum.
+  nativeFieldsOnly                 bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled              bool  Parse table regions as arrays of objects.
+  radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum.
+  conditionalGenerationEnabled     bool  Add root-level conditional rules for requirements stated in the form.
+  advancedSchemaRefinementEnabled  bool  Refine field names/descriptions for consistency (engine >= 1.0.0; adds latency).
 
 ` + formDetectionOutputDoc + `
 
@@ -156,7 +158,7 @@ fields use the server default):
 			return renderWithDefault(app, final, output.FormatJSON)
 		},
 		Configure: func(cmd *cobra.Command) {
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled, conditionalGenerationEnabled, advancedSchemaRefinementEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form instructions to guide schema generation")
 			cmd.Flags().StringVar(&inputSchemaPath, "input-schema", "", "Starting-point JSON Schema (overlaid by detection). Source: inline JSON, path, file:// URI, or '-' for stdin.")

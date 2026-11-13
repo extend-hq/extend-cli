@@ -74,6 +74,7 @@ func TestConfigCatalogsCoverSDKFields(t *testing.T) {
 		// Parse --advanced-options: top-level plus the returnOcr leaf.
 		{"ParseConfigAdvancedOptions", reflect.TypeOf(extend.ParseConfigAdvancedOptions{}), parseAdvancedOptionsFields},
 		{"ParseConfigAdvancedOptionsReturnOcr", reflect.TypeOf(extend.ParseConfigAdvancedOptionsReturnOcr{}), parseAdvancedOptionsFields},
+		{"SplitAdvancedOptions", reflect.TypeOf(extend.SplitAdvancedOptions{}), splitConfigFields},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +84,29 @@ func TestConfigCatalogsCoverSDKFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEditAdvancedOptionsCoverSDK guards the --advanced-options catalogs
+// inlined in the edit and detect-form Details: every field on the SDK
+// struct the flag decodes into must be named in that command's help, or
+// users can't discover options the CLI already forwards.
+func TestEditAdvancedOptionsCoverSDK(t *testing.T) {
+	ta := newTestApp(t, newFakeServer(t, nil))
+	cases := []struct {
+		path []string
+		typ  reflect.Type
+	}{
+		{[]string{"edit"}, reflect.TypeOf(extend.EditConfigAdvancedOptions{})},
+		{[]string{"detect-form"}, reflect.TypeOf(extend.EditSchemaGenerationConfigAdvancedOptions{})},
+	}
+	for _, tc := range cases {
+		cmd := findCmd(t, ta.app, tc.path...)
+		for _, field := range jsonFieldNames(tc.typ) {
+			if !documentsToken(cmd.Long, field) {
+				t.Errorf("%s --help is missing advanced option %q from %s", strings.Join(tc.path, " "), field, tc.typ.Name())
+			}
+		}
 	}
 }
 

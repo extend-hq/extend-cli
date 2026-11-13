@@ -96,10 +96,17 @@ Config fields:
     version). Pass through --engine-version; omitted runs use the server
     default. The run object reports the resolved exact version under config.
 
-  flattenPdf           bool  Make the filled form non-editable (server default: true).
-  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
-  tableParsingEnabled  bool  Parse table regions as arrays of objects so their cells can be filled.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum so only one option fills.
+  flattenPdf                       bool  Make the filled form non-editable (server default: true, false on 1.0.0-beta).
+  nativeFieldsOnly                 bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
+  tableParsingEnabled              bool  Parse table regions as arrays of objects so their cells can be filled.
+  radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum so only one option fills.
+  preserveSignatureValidity        bool  Keep existing digital signatures valid (engine >= 1.0.0-beta). Fills only
+                                         existing fields (map them via extend_edit:source_acroform.fieldName)
+                                         and defaults flattenPdf to false.
+  conditionalGenerationEnabled     bool  When --schema is omitted, add root-level conditional rules for
+                                         requirements stated in the form.
+  advancedSchemaRefinementEnabled  bool  When --schema is omitted, refine generated field names/descriptions
+                                         (engine >= 1.0.0; adds latency).
 
 Prefer schema-driven fills for production/repeated forms. Natural-language
 instructions are fastest for prototypes; schemas with extend_edit:value are
@@ -156,7 +163,7 @@ the output must remain editable.
 			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend detect-form'. Omit to let the server auto-detect form fields.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection and output options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled, preserveSignatureValidity, conditionalGenerationEnabled, advancedSchemaRefinementEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
@@ -372,9 +379,104 @@ func newEditTemplatesDoc(app *App) *CommandDoc {
 edit config, and schema-generation config so you can reuse them with
 'extend edit' and 'extend detect-form'.`,
 		Details: `Edit templates are authored in the dashboard; the CLI exposes read-only
-retrieval. Only 'get <template-id>' is available.`,
+access: 'list' to find template IDs and 'get <template-id>' for the full object.`,
 		Subcommands: []*CommandDoc{
+			newEditTemplatesListDoc(app),
 			newEditTemplatesGetDoc(app),
+		},
+	}
+}
+
+func newEditTemplatesListDoc(app *App) *CommandDoc {
+	var (
+		nameContains string
+		limit        int
+		maxN         int
+		all          bool
+		pageToken    string
+		sortBy       string
+		sortDir      string
+	)
+	return &CommandDoc{
+		Use:     "list",
+		Summary: "List saved edit templates",
+		Triggers: []string{
+			"list edit templates in the workspace",
+			"find an edit template id by name",
+			"page through saved pdf form templates",
+		},
+		WhenToUse: `Use to discover edt_ IDs of saved edit templates, optionally filtered by
+--name-contains (case-insensitive). Pass an ID to 'extend edit templates get'
+for the template's config and schema.`,
+		Details: `By default returns the first --limit (default 20) templates.
+
+` + paginationGuidance,
+		Examples: []Example{
+			{Label: "Basic", Cmd: "extend edit templates list"},
+			{Label: "Filter by name", Cmd: "extend edit templates list --name-contains W-9"},
+			{Label: "Just IDs", Cmd: "extend edit templates list -o json --jq '.data[].id'"},
+		},
+		SeeAlso: []string{"edit templates get", "edit"},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cli, err := app.NewClient()
+			if err != nil {
+				return err
+			}
+			req := &extend.EditTemplatesListRequest{}
+			if nameContains != "" {
+				req.NameContains = extend.String(nameContains)
+			}
+			if sortBy != "" {
+				sb, err := extend.NewSortByFromString(sortBy)
+				if err != nil {
+					return fmt.Errorf("--sort-by: %w", err)
+				}
+				req.SortBy = &sb
+			}
+			if sortDir != "" {
+				sd, err := extend.NewSortDirFromString(sortDir)
+				if err != nil {
+					return fmt.Errorf("--sort: %w", err)
+				}
+				req.SortDir = &sd
+			}
+			if limit > 0 {
+				ps := extend.MaxPageSize(limit)
+				req.MaxPageSize = &ps
+			}
+			if pageToken != "" {
+				req.NextPageToken = extend.String(pageToken)
+			}
+
+			var rows [][]string
+			var pages []any
+			for {
+				page, err := cli.EditTemplates.List(cmd.Context(), req)
+				if err != nil {
+					return err
+				}
+				pages = append(pages, page)
+				for _, t := range page.Data {
+					rows = append(rows, []string{t.ID, truncate(t.Name, 40), relTime(t.CreatedAt)})
+				}
+				next := deref(page.NextPageToken)
+				if paginationDone(all, maxN, len(rows), next) {
+					break
+				}
+				req.NextPageToken = extend.String(next)
+			}
+			rows = capRowsToMax(rows, maxN)
+			return renderListForCmd(cmd, app, pages, []string{"id", "name", "created"}, rows, "No edit templates.")
+		},
+		Configure: func(cmd *cobra.Command) {
+			cmd.Flags().StringVar(&nameContains, "name-contains", "", "Filter to templates whose name contains this substring (case-insensitive)")
+			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
+			cmd.Flags().IntVar(&maxN, "max", 0, "Stop after at most N total results, auto-paginating internally (0 = single page)")
+			cmd.Flags().StringVar(&pageToken, "page-token", "", "Resume from a specific page (cursor from a previous response; advanced — prefer --max)")
+			cmd.Flags().BoolVar(&all, "all", false, "Fetch every page (use --max for a bounded fetch)")
+			cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: updatedAt|createdAt (server default: updatedAt)")
+			cmd.Flags().StringVar(&sortDir, "sort", "desc", "Sort direction: asc|desc")
 		},
 	}
 }

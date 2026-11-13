@@ -133,6 +133,36 @@ func TestEditTemplatesGet_UsesRetrieveRoute(t *testing.T) {
 	}
 }
 
+func TestEditTemplatesList_FiltersAndRendersRows(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/edit_templates" || r.Method != http.MethodGet {
+			t.Fatalf("hit %s %s, want GET /edit_templates", r.Method, r.URL.Path)
+		}
+		writeJSON(w, 200, map[string]any{
+			"object": "list",
+			"data": []any{map[string]any{
+				"object": "edit_template", "id": "edt_abc", "name": "W-9 2026",
+				"createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-01T00:00:00Z",
+			}},
+		})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "edit", "templates", "list")
+	cmd.SetArgs([]string{"--name-contains", "W-9", "--limit", "5"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	q := srv.lastRequest().Query
+	for _, want := range []string{"nameContains=W-9", "maxPageSize=5"} {
+		if !strings.Contains(q, want) {
+			t.Errorf("query missing %q (full: %s)", want, q)
+		}
+	}
+	if !strings.Contains(ta.out.String(), "edt_abc") {
+		t.Errorf("expected edt_abc in output, got: %s", ta.out.String())
+	}
+}
+
 // TestEdit_AdvancedOptionsForwardedAsJSON locks in that --advanced-options
 // JSON reaches the request body under config.advancedOptions, including the
 // table-parsing and radio-enums fields that were previously unreachable.
@@ -151,7 +181,7 @@ func TestEdit_AdvancedOptionsForwardedAsJSON(t *testing.T) {
 	if err := runEdit(context.Background(), ta.app, editParams{
 		input:               "file_a",
 		instructions:        "fill it",
-		advancedOptionsPath: `{"tableParsingEnabled":true,"radioEnumsEnabled":true}`,
+		advancedOptionsPath: `{"tableParsingEnabled":true,"radioEnumsEnabled":true,"preserveSignatureValidity":true}`,
 		wait:                true,
 		timeout:             2 * time.Second,
 	}); err != nil {
@@ -160,6 +190,9 @@ func TestEdit_AdvancedOptionsForwardedAsJSON(t *testing.T) {
 	body := string(srv.requests[0].Body)
 	if !strings.Contains(body, `"config":{`) || !strings.Contains(body, `"advancedOptions":`) {
 		t.Errorf("advanced options must nest under config.advancedOptions; got %s", body)
+	}
+	if !strings.Contains(body, `"preserveSignatureValidity":true`) {
+		t.Errorf("body must carry preserveSignatureValidity; got %s", body)
 	}
 	if !strings.Contains(body, `"tableParsingEnabled":true`) {
 		t.Errorf("body must carry tableParsingEnabled; got %s", body)

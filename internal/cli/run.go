@@ -349,6 +349,18 @@ func stepRunInfo(step *extend.StepRun) (name, stepType, status string) {
 		} else if s != nil {
 			status = string(s.Status)
 		}
+	case "VALIDATION":
+		if s := step.Validation; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
+		}
+	case "ROUTER":
+		if s := step.Router; s != nil && s.Step != nil {
+			capture(s.Status, s.Step.Name, s.Step.Type)
+		} else if s != nil {
+			status = string(s.Status)
+		}
 	}
 	if stepType == "" {
 		stepType = step.StepType

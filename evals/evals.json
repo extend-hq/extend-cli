@@ -1247,20 +1247,20 @@
       "id": "Q-1",
       "category": "run-type-quirk",
       "path": "B",
-      "prompt": "List all my edit runs from this week.",
+      "prompt": "List all my form detection runs from this week.",
       "files": [],
-      "expected_output": "Agent recognizes edit runs are not listable (there is no `edit runs list` command). Suggests `extend edit runs get edr_xxx` for individual edit runs.",
+      "expected_output": "Agent recognizes form detection runs are not listable (there is no `detect-form runs list` command). Suggests `extend detect-form runs get sgr_xxx` for individual runs.",
       "expectations": [
         {
           "type": "stable_answer",
-          "text": "answer mentions edit not listable or runs get edr_",
-          "answer_pattern": "not listable|cannot list|no list endpoint|runs\\s+get\\s+edr_|edit\\s+runs?\\s+(?:are not|aren't|cannot)"
+          "text": "answer mentions detect-form not listable or runs get sgr_",
+          "answer_pattern": "not listable|cannot (?:be )?list|can(?:no|['’])t list|couldn['’]t list|could not list|unable to list|no list endpoint|does(?:n['’]t| not) (?:expose|support|have|provide)[^.]{0,60}list|runs\\s+get\\s+sgr_|only supports?[^.]{0,20}get[^.]{0,20}watch|(?:detect-form|detection)\\s+runs?\\s+(?:are not|aren['’]t|cannot|can['’]t)"
         },
         {
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command (max 2 attempts)",
           "count_under": {
-            "edit.runs.list": 3
+            "detect-form.runs.list": 3
           }
         }
       ]
@@ -1271,18 +1271,18 @@
       "path": "B",
       "prompt": "Cancel parse run pr_demo_processed for me.",
       "files": [],
-      "expected_output": "Agent recognizes parse runs cannot be cancelled — explains rather than retrying indefinitely.",
+      "expected_output": "Agent recognizes the parse run already finished (PROCESSED), so it can no longer be cancelled — explains rather than retrying indefinitely.",
       "expectations": [
         {
           "type": "stable_answer",
-          "text": "answer acknowledges parse runs cannot be cancelled",
-          "answer_pattern": "(parse|pr_).{0,40}(?:cannot|can't|not).{0,20}(cancel|cancell)"
+          "text": "answer acknowledges the run already finished and cannot be cancelled",
+          "answer_pattern": "\\b(?:already|PROCESSED|completed|finished|terminal)\\b.{0,120}\\b(?:cannot|can['’]t|couldn['’]t|could not|not|no longer|unable|rejected|only\\s+`?PROCESSING)\\b|\\b(?:cannot|can['’]t|couldn['’]t|could not|no longer|unable to|rejected)\\b.{0,40}cancel.{0,120}\\b(?:already|PROCESSED|completed|finished|terminal)\\b"
         },
         {
           "type": "extend_call",
           "text": "agent did NOT loop on the rejected command",
           "count_under": {
-            "runs.cancel": 3
+            "parse.runs.cancel": 3
           }
         }
       ]

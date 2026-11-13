@@ -294,10 +294,8 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("A wrong-type ID fails fast, naming the right command. Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
-	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
-	b.WriteString("- **Edit runs** (`edr_*`) are not listable; the API has no `LIST /edit_runs`.\n")
-	b.WriteString("- **Parse and edit runs** have no cancel command; other run types support best-effort cancel.\n")
-	b.WriteString("- **Form detection runs** (`sgr_*`) support only get and watch.\n")
+	b.WriteString("**Run-type quirks:**\n\n")
+	b.WriteString("- **Edit runs** (`edr_*`) can't be cancelled; **form detection runs** (`sgr_*`) only support get/watch.\n")
 	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }

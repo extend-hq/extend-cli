@@ -33,11 +33,10 @@ type runsGroupSpec struct {
 	// ("form detection run" instead of "detect-form run"). Empty means
 	// the kind string reads fine as prose.
 	proseName string
-	// cancellable: extract/classify/split/workflow. Parse, edit, and
+	// cancellable: extract/parse/classify/split/workflow. Edit and
 	// detect-form runs have no cancel endpoint.
 	cancellable bool
-	// listable: everything except edit and detect-form (no LIST
-	// endpoint for either).
+	// listable: everything except detect-form (no LIST endpoint).
 	listable bool
 	// deletable: everything except detect-form (no DELETE endpoint).
 	deletable bool
@@ -51,7 +50,7 @@ type runsGroupSpec struct {
 	// usingExample is a processor ID for list examples (ex_abc, ...).
 	usingExample string
 	// sourceFilters: --source/--source-id on list. Workflow runs have
-	// no source filters at the server.
+	// no source filters at the server; edit runs filter by --source only.
 	sourceFilters bool
 	// sortable: --sort-by/--sort on list. Parse runs ignore both.
 	sortable bool
@@ -82,14 +81,12 @@ func parseRunsSpec() runsGroupSpec {
 	return runsGroupSpec{
 		kind:          extendx.KindParse,
 		exampleID:     "pr_pJDa8iX",
+		cancellable:   true,
 		listable:      true,
 		deletable:     true,
 		responseType:  true,
 		sourceFilters: true,
-		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
-		watchGotchas: []string{
-			"Parse runs cannot be cancelled; a watched parse run only ends in PROCESSED or FAILED.",
-		},
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 	}
 }
 
@@ -127,7 +124,10 @@ func editRunsSpec() runsGroupSpec {
 	return runsGroupSpec{
 		kind:          extendx.KindEdit,
 		exampleID:     "edr_aB3xY",
+		listable:      true,
 		deletable:     true,
+		sourceFilters: true,
+		sortable:      true,
 		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
 		watchGotchas: []string{
 			"Edit runs cannot be cancelled; a watched edit run only ends in PROCESSED or FAILED.",
@@ -787,10 +787,13 @@ func deleteRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, i
 }
 
 // cancelRun calls the per-kind cancel endpoint. Only kinds with a
-// cancel endpoint have a cancel command, so parse/edit never reach
+// cancel endpoint have a cancel command, so edit/detect-form never reach
 // this switch.
 func cancelRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) error {
 	switch kind {
+	case extendx.KindParse:
+		_, err := c.ParseRuns.Cancel(ctx, id, &extend.ParseRunsCancelRequest{})
+		return err
 	case extendx.KindExtract:
 		_, err := c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
 		return err
