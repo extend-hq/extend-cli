@@ -193,8 +193,11 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	if err := renderParseResult(app, final, p.target); err != nil {
 		return err
 	}
-	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
+	switch extendx.RunStatus(final.Status) {
+	case extendx.StatusFailed:
 		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
+	case extendx.StatusCancelled:
+		return fmt.Errorf("run %s was cancelled", final.ID)
 	}
 	return nil
 }
@@ -320,6 +323,9 @@ func renderParseResult(app *App, run *extend.ParseRun, target string) error {
 func renderMarkdown(app *App, run *extend.ParseRun) error {
 	md := concatChunks(run)
 	if md == "" {
+		if run.Status != extend.ParseRunStatusEnumProcessed {
+			fmt.Fprintf(app.IO.ErrOut, "Run %s is %s; no parsed content.\n", run.ID, run.Status)
+		}
 		return nil
 	}
 	if app.IO.IsStdoutTTY() && app.IO.ColorEnabled() {

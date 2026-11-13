@@ -52,6 +52,34 @@ func TestParse_RawMarkdownWhenPiped(t *testing.T) {
 	}
 }
 
+func TestParse_CancelledRunErrorsAndExplainsEmptyOutput(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(w, 200, map[string]any{"id": "pr_cx", "status": "PENDING"})
+		case http.MethodGet:
+			writeJSON(w, 200, map[string]any{"id": "pr_cx", "status": "CANCELLED"})
+		}
+	})
+	ta := newTestApp(t, srv)
+
+	err := runParse(context.Background(), ta.app, parseParams{
+		input:   "file_xK9",
+		target:  "markdown",
+		wait:    true,
+		timeout: 2 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "run pr_cx was cancelled") {
+		t.Fatalf("err = %v, want cancelled error", err)
+	}
+	if ta.out.Len() != 0 {
+		t.Errorf("stdout should stay empty, got %q", ta.out.String())
+	}
+	if !strings.Contains(ta.errOut.String(), "Run pr_cx is CANCELLED; no parsed content.") {
+		t.Errorf("stderr = %q, want status note", ta.errOut.String())
+	}
+}
+
 func TestParse_JSONFormatRendersFullRun(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
