@@ -284,6 +284,7 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 	}
 
 	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. Several files: `<verb> batch` or `workflows run batch` give each its own run (up to 1,000); `--package` on `extract` or `workflows run` reads 2 to 50 together into one result.\n\n")
+	b.WriteString("Options worth knowing: `parse --zero-retention` has Extend delete the document and its result once read; `parse --searchable-pdf <path>` saves a scanned PDF with a text layer; `edit --template edt_xxx` fills a form saved as a template (find it with `edit templates list`).\n\n")
 	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` and `detect-form` run alone (no processor); `edit` takes `--instructions` (free-form prose).\n\n")
 }
 
