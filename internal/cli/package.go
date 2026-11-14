@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -67,12 +68,42 @@ func (p *packageInputs) resolve(ctx context.Context, app *App, cli *sdkclient.Cl
 	if len(inputs) > maxPackageFiles {
 		return nil, fmt.Errorf("--package takes at most %d inputs, got %d", maxPackageFiles, len(inputs))
 	}
-	seen := make(map[string]bool, len(inputs))
+	// Every input is checked before any is uploaded, so a missing file
+	// doesn't leave the others uploaded for nothing.
+	seen := make(map[string]string, len(inputs))
 	for _, in := range inputs {
-		if seen[in] {
-			return nil, fmt.Errorf("%s is listed twice; a package can include each file only once", in)
+		_, path, err := extendx.ResolveInput(in)
+		if err != nil {
+			return nil, err
 		}
-		seen[in] = true
+		key := in
+		if path != "" && path != "-" {
+			if abs, err := filepath.Abs(path); err == nil {
+				key = abs
+			}
+		}
+		if first, dup := seen[key]; dup {
+			if first == in {
+				return nil, fmt.Errorf("%s is listed twice; a package can include each file only once", in)
+			}
+			return nil, fmt.Errorf("%s and %s are the same file; a package can include each file only once", first, in)
+		}
+		seen[key] = in
 	}
 	return uploadAllOrResolve(ctx, app, cli, inputs, password)
+}
+
+// oneInput is the argument check for a verb that takes a single input
+// and has a batch form for several. optional allows no input, for verbs
+// that also take --text.
+func oneInput(verb string, optional bool) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		switch {
+		case len(args) > 1:
+			return fmt.Errorf("%s takes one input, got %d: use 'extend %s batch' for one run per file", verb, len(args), verb)
+		case len(args) == 0 && !optional:
+			return fmt.Errorf("%s needs an input: a file path, file_xxx ID or https:// URL", verb)
+		}
+		return nil
+	}
 }

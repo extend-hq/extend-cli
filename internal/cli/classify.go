@@ -88,7 +88,7 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.MaximumNArgs(1),
+		Args:     oneInput("classify", true),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {

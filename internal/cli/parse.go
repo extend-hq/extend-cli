@@ -112,7 +112,7 @@ PDF inputs only; it sets advancedOptions.embedOcrInPdf.
 		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.ExactArgs(1),
+		Args:     oneInput("parse", false),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {

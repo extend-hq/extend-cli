@@ -138,11 +138,28 @@ func TestPackage_ArgumentRules(t *testing.T) {
 	for i := range fiftyOne {
 		fiftyOne[i] = fmt.Sprintf("file_%d", i)
 	}
+	pdfs := writePDFs(t, "contract.pdf")
+	sameFile := filepath.Dir(pdfs[0]) + string(filepath.Separator) + "." + string(filepath.Separator) + "contract.pdf"
+	missing := filepath.Join(filepath.Dir(pdfs[0]), "missing.pdf")
 	cases := []struct {
 		path []string
 		args []string
 		want string
 	}{
+		// The same file under two spellings, and a missing file: both are
+		// caught before anything is uploaded.
+		{[]string{"extract"}, []string{pdfs[0], sameFile, "--package", "--using", "ex_1"},
+			"are the same file; a package can include each file only once"},
+		{[]string{"extract"}, []string{pdfs[0], missing, "--package", "--using", "ex_1"},
+			"missing.pdf\" is not a local file"},
+		{[]string{"parse"}, []string{"file_a", "file_b"},
+			"parse takes one input, got 2: use 'extend parse batch' for one run per file"},
+		{[]string{"split"}, []string{"file_a", "file_b", "--using", "spl_1"},
+			"split takes one input, got 2: use 'extend split batch' for one run per file"},
+		{[]string{"classify"}, []string{"file_a", "file_b", "--using", "cl_1"},
+			"classify takes one input, got 2: use 'extend classify batch' for one run per file"},
+		{[]string{"parse"}, []string{},
+			"parse needs an input: a file path, file_xxx ID or https:// URL"},
 		{[]string{"extract"}, []string{"file_a", "file_b", "--using", "ex_1"},
 			"extract takes one input, got 2: pass --package to process them together in one run, or use 'extend extract batch'"},
 		{[]string{"extract"}, []string{"--files-from", "list.txt", "--using", "ex_1"},
