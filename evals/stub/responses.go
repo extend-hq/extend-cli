@@ -377,6 +377,10 @@ func emitRunsList(args []string, mode string) {
 		exitCode = 1
 		return
 	}
+	if verb == "verify" {
+		emitJSON(map[string]any{"data": priorVerifyRuns(args), "nextPageToken": nil})
+		return
+	}
 	runs := fixtureFailedRuns
 	if verb == "edit" {
 		runs = fixtureEditRuns
@@ -468,6 +472,10 @@ func emitRunsWatch(args []string, mode string) {
 		emitDetectionRun(id)
 		return
 	}
+	if positional(args)[0] == "verify" {
+		emitVerifyRunResult(args, id)
+		return
+	}
 	if r, ok := fixtureRuns[id]; ok {
 		emitJSON(r)
 		return
@@ -480,6 +488,10 @@ func emitRunsGet(args []string, mode string) {
 	id := typedRunID(args)
 	if positional(args)[0] == "detect-form" {
 		emitDetectionRun(id)
+		return
+	}
+	if positional(args)[0] == "verify" {
+		emitVerifyRunResult(args, id)
 		return
 	}
 	if r, ok := fixtureRuns[id]; ok {
@@ -500,6 +512,16 @@ func emitRunsCancel(args []string, mode string) {
 		return
 	}
 	id := typedRunID(args)
+	// Verify runs finish as soon as they're created here, and the real CLI
+	// reports cancelling a finished one on stderr.
+	if verb == "verify" {
+		if _, ok := priorVerifyFile(id); !ok {
+			emitVerifyRunNotFound()
+			return
+		}
+		fmt.Fprintf(stderr, "○ %s had already finished (PROCESSED); nothing to cancel\n", id)
+		return
+	}
 	// The API cancels only PROCESSING parse runs and rejects the rest.
 	if r, ok := fixtureRuns[id]; ok && verb == "parse" && r.Status != "PROCESSING" {
 		fmt.Fprintln(stderr, "Error: INVALID_REQUEST")
@@ -537,7 +559,7 @@ func emitRunsDelete(args []string, mode string) {
 	id := typedRunID(args)
 	if id == "" {
 		for _, a := range args {
-			for _, p := range []string{"exr_", "pr_", "clr_", "splr_", "edr_", "workflow_run_"} {
+			for _, p := range []string{"exr_", "pr_", "clr_", "splr_", "edr_", "vr_", "workflow_run_"} {
 				if strings.HasPrefix(a, p) {
 					id = a
 				}
@@ -545,6 +567,172 @@ func emitRunsDelete(args []string, mode string) {
 		}
 	}
 	fmt.Fprintf(stderr, "✓ Deleted run %s\n", id)
+}
+
+// emitVerify mirrors `extend verify <input>`: it checks its arguments like
+// the real CLI, then prints the finished run, a HIGH-risk result so the
+// agent has something to act on, and with --fail-on exits 1 as the real
+// CLI does at that risk.
+func emitVerify(args []string, mode string) {
+	inputs := positional(args)[1:]
+	if len(inputs) != 1 {
+		fmt.Fprintf(stderr, "Error: verify takes one input (a file path, file_xxx ID or https:// URL), got %d\n", len(inputs))
+		exitCode = 1
+		return
+	}
+	failOn, ok := verifyFailOn(args)
+	if !ok {
+		return
+	}
+	file := map[string]any{"object": "file", "id": inputs[0], "name": filepath.Base(inputs[0])}
+	if !strings.HasPrefix(inputs[0], "file_") {
+		file["id"] = nowID("file_")
+	}
+	id := nowID("vr_")
+	if equalsFalse(flagValue(args, "wait")) {
+		if failOn != "" {
+			fmt.Fprintf(stderr, "Error: --fail-on needs the run's result, so it can't be used with --wait=false; follow the run with 'extend verify runs watch <id> --fail-on %s'\n", failOn)
+			exitCode = 1
+			return
+		}
+		emitJSON(map[string]any{"object": "verify_run", "id": id, "status": "PROCESSING", "source": "API", "file": file})
+		return
+	}
+	emitJSON(verifyResult(id, file))
+	failVerifyAt(id, failOn)
+}
+
+// emitVerifyRunResult answers `verify runs get|watch <id>` for a run an
+// earlier call created.
+func emitVerifyRunResult(args []string, id string) {
+	failOn, ok := verifyFailOn(args)
+	if !ok {
+		return
+	}
+	file, found := priorVerifyFile(id)
+	if !found {
+		emitVerifyRunNotFound()
+		return
+	}
+	emitJSON(verifyResult(id, file))
+	if positional(args)[2] == "watch" {
+		failVerifyAt(id, failOn)
+	}
+}
+
+// verifyFailOn reads --fail-on like the real CLI; ok is false after an
+// invalid value has been reported.
+func verifyFailOn(args []string) (level string, ok bool) {
+	level = strings.ToLower(flagValue(args, "fail-on"))
+	if level != "" && level != "medium" && level != "high" {
+		fmt.Fprintf(stderr, "Error: --fail-on must be medium or high, got %q\n", flagValue(args, "fail-on"))
+		exitCode = 1
+		return "", false
+	}
+	return level, true
+}
+
+// failVerifyAt fails like --fail-on does: every stub result is HIGH risk,
+// at or above both levels.
+func failVerifyAt(id, failOn string) {
+	if failOn == "" {
+		return
+	}
+	fmt.Fprintf(stderr, "Error: run %s found HIGH risk, at or above --fail-on %s\n", id, failOn)
+	exitCode = 1
+}
+
+func emitVerifyRunNotFound() {
+	fmt.Fprintln(stderr, "Error: NOT_FOUND")
+	fmt.Fprintln(stderr, "       Verify run not found.")
+	fmt.Fprintln(stderr, "       request: req_stub")
+	exitCode = 1
+}
+
+// verifyResult is the finished run for a document: HIGH risk, an amount
+// masked and retyped after the document was made.
+func verifyResult(id string, file map[string]any) map[string]any {
+	signal := func(id, typ, level, summary string) map[string]any {
+		return map[string]any{
+			"id": id, "type": typ, "summary": summary,
+			"riskAssessment": map[string]any{"type": "LEVEL", "level": level},
+			"evidence": []any{map[string]any{
+				"evidenceId": id + ":001", "type": "structural_pattern",
+				"data":      map[string]any{"code": "OPAQUE_MASK_FOLLOWED_BY_TEXT"},
+				"locations": []any{map[string]any{"locationId": "loc_1", "page": map[string]any{"number": 1}}},
+			}},
+		}
+	}
+	return map[string]any{
+		"object": "verify_run", "id": id, "status": "PROCESSED", "source": "API", "file": file,
+		"output": map[string]any{
+			"riskLevel": "HIGH",
+			"summary":   "An amount on page 1 was covered with an opaque box and retyped in a different font after the document was created.",
+			"signals": []any{
+				signal("vs_mask", "PDF_LAYERS_TEXT_AND_FORMS", "HIGH", "An opaque rectangle was drawn over an amount and new text was drawn on top of it."),
+				signal("vs_resave", "REVISION_AND_PRODUCTION_HISTORY", "MEDIUM", "The file was saved again by a different PDF tool after it was created."),
+			},
+		},
+		"config":  map[string]any{"engine": "verify_agentic", "engineVersion": "0.1.0", "advancedOptions": map[string]any{"requireParsing": true}},
+		"metrics": map[string]any{"processingTimeMs": 41250, "pageCount": 1},
+	}
+}
+
+// priorVerifyRuns lists the verify runs earlier calls created, as list
+// items: all PROCESSED at HIGH risk, so the --status and --risk-level
+// filters keep all or none.
+func priorVerifyRuns(args []string) []any {
+	out := []any{}
+	status, risk := flagValue(args, "status"), strings.ToUpper(flagValue(args, "risk-level"))
+	if (status != "" && status != "PROCESSED") || (risk != "" && risk != "HIGH") {
+		return out
+	}
+	data, _ := os.ReadFile(os.Getenv("EXTEND_EVAL_RECORD"))
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		var rec struct {
+			Stdout string `json:"stdout"`
+		}
+		var run map[string]any
+		if json.Unmarshal([]byte(line), &rec) != nil || json.Unmarshal([]byte(rec.Stdout), &run) != nil {
+			continue
+		}
+		id, _ := run["id"].(string)
+		if !strings.HasPrefix(id, "vr_") || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, map[string]any{
+			"object": "verify_run", "id": id, "status": "PROCESSED", "riskLevel": "HIGH",
+			"source": "API", "file": run["file"],
+		})
+	}
+	return out
+}
+
+// priorVerifyFile returns the file of verify run id as an earlier call
+// printed it, so get and watch report the document that was verified.
+func priorVerifyFile(id string) (map[string]any, bool) {
+	data, err := os.ReadFile(os.Getenv("EXTEND_EVAL_RECORD"))
+	if err != nil {
+		return nil, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		var rec struct {
+			Stdout string `json:"stdout"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil {
+			continue
+		}
+		var run map[string]any
+		if json.Unmarshal([]byte(rec.Stdout), &run) != nil || run["id"] != id {
+			continue
+		}
+		if file, ok := run["file"].(map[string]any); ok {
+			return file, true
+		}
+	}
+	return nil, false
 }
 
 // emitDetectForm mirrors `extend detect-form <input>`, which waits by

@@ -76,6 +76,7 @@ const (
 	KindWorkflow   RunKind = "workflow"
 	KindEdit       RunKind = "edit"
 	KindDetectForm RunKind = "detect-form"
+	KindVerify     RunKind = "verify"
 )
 
 // Verb returns the CLI command group that owns this kind's typed runs
@@ -105,6 +106,8 @@ func RunIDPrefix(k RunKind) string {
 		return "edr_"
 	case KindDetectForm:
 		return "sgr_"
+	case KindVerify:
+		return "vr_"
 	}
 	return ""
 }
@@ -128,6 +131,8 @@ func RunKindFromID(id string) (RunKind, bool) {
 		return KindEdit, true
 	case strings.HasPrefix(id, "sgr_"):
 		return KindDetectForm, true
+	case strings.HasPrefix(id, "vr_"):
+		return KindVerify, true
 	}
 	return "", false
 }

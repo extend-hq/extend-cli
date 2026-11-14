@@ -62,6 +62,8 @@ func generate(name, path string) error {
 		return writeReceiptPDF(path)
 	case strings.HasSuffix(base, ".pdf") && strings.HasPrefix(base, "combined"):
 		return writeCombinedPDF(path)
+	case base == "statement.pdf":
+		return writeStatementPDF(path)
 	case base == "w2.pdf":
 		return writeW2PDF(path)
 	case base == "form1040.pdf":
@@ -69,6 +71,41 @@ func generate(name, path string) error {
 	default:
 		return fmt.Errorf("no fixture generator for %q", name)
 	}
+}
+
+// writeStatementPDF emits a one-page bank statement.
+func writeStatementPDF(path string) error {
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+	pdf.SetFont("Helvetica", "B", 16)
+	pdf.Cell(0, 10, "First Example Bank - Account Statement")
+	pdf.Ln(12)
+	pdf.SetFont("Helvetica", "", 11)
+	pdf.Cell(0, 7, "Account holder: Wile E. Coyote")
+	pdf.Ln(7)
+	pdf.Cell(0, 7, "Statement period: 2026-09-01 to 2026-09-30")
+	pdf.Ln(12)
+	pdf.SetFont("Helvetica", "B", 11)
+	pdf.Cell(30, 8, "Date")
+	pdf.Cell(90, 8, "Description")
+	pdf.Cell(30, 8, "Amount")
+	pdf.Ln(8)
+	pdf.SetFont("Helvetica", "", 11)
+	for _, row := range [][3]string{
+		{"2026-09-02", "Payroll deposit - Acme Corp", "4,250.00"},
+		{"2026-09-05", "Rent - Desert Properties", "-1,800.00"},
+		{"2026-09-14", "Incoming wire fee", "-15.00"},
+		{"2026-09-21", "Transfer to savings", "-500.00"},
+	} {
+		pdf.Cell(30, 8, row[0])
+		pdf.Cell(90, 8, row[1])
+		pdf.Cell(30, 8, row[2])
+		pdf.Ln(8)
+	}
+	pdf.Ln(6)
+	pdf.SetFont("Helvetica", "B", 11)
+	pdf.Cell(0, 8, "Closing balance: 12,480.15")
+	return pdf.OutputFileAndClose(path)
 }
 
 // writeInvoicePDF emits a minimal one-page invoice PDF. The content

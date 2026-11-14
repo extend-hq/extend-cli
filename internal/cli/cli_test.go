@@ -222,6 +222,8 @@ func inferObjectFromMap(m map[string]any) string {
 		return "workflow_run"
 	case strings.HasPrefix(id, "edr_"):
 		return "edit_run"
+	case strings.HasPrefix(id, "vr_"):
+		return "verify_run"
 	case strings.HasPrefix(id, "bpr_"), strings.HasPrefix(id, "bpar_"):
 		return "batch_run"
 	case strings.HasPrefix(id, "file_"):

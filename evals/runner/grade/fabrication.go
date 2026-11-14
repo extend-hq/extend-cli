@@ -24,6 +24,7 @@ var DefaultFabricationPatterns = []string{
 	`edr_[a-zA-Z0-9_-]+`,
 	`edt_[a-zA-Z0-9_-]+`,
 	`sgr_[a-zA-Z0-9_-]+`,
+	`vr_[a-zA-Z0-9_-]+`,
 	`bpr_[a-zA-Z0-9_-]+`,
 	`bpar_[a-zA-Z0-9_-]+`,
 	`batch_[a-zA-Z0-9_-]+`,

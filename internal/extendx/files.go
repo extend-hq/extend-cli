@@ -308,6 +308,23 @@ func BuildEditFile(ref FileRef) (*extend.EditRunsCreateRequestFile, error) {
 	}, nil
 }
 
+// BuildVerifyFile converts a FileRef into the SDK's per-endpoint file
+// union for /verify_runs (URL and ID inputs only: Verify checks the
+// exact bytes of a file, so text has nothing to check).
+func BuildVerifyFile(ref FileRef) (*extend.VerifyRunsCreateRequestFile, error) {
+	fromURL, fromID, _, err := fileFromRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	if fromURL == nil && fromID == nil {
+		return nil, errors.New("verify runs only accept URL or file-ID inputs")
+	}
+	return &extend.VerifyRunsCreateRequestFile{
+		FileFromURL: fromURL,
+		FileFromID:  fromID,
+	}, nil
+}
+
 // BuildFormDetectionFile converts a FileRef into the SDK's per-endpoint
 // file union for /form_detection_runs (URL and ID inputs only).
 func BuildFormDetectionFile(ref FileRef) (*extend.FormDetectionRunsCreateRequestFile, error) {

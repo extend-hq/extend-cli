@@ -50,6 +50,7 @@ func TestValidateRunID(t *testing.T) {
 		KindWorkflow:   "workflow_run_x",
 		KindEdit:       "edr_x",
 		KindDetectForm: "sgr_x",
+		KindVerify:     "vr_x",
 	}
 	for kind, id := range matching {
 		if err := ValidateRunID(kind, id, "get"); err != nil {
@@ -107,6 +108,13 @@ func TestValidateRunID(t *testing.T) {
 	if want := "detect-form runs do not support delete"; !strings.Contains(err.Error(), want) {
 		t.Errorf("mismatch error %q does not mention %q", err, want)
 	}
+	err = ValidateRunID(KindExtract, "vr_x", "cancel")
+	if err == nil {
+		t.Fatal("ValidateRunID(extract, vr_x, cancel) = nil; want mismatch error")
+	}
+	if want := "extend verify runs cancel vr_x"; !strings.Contains(err.Error(), want) {
+		t.Errorf("mismatch error %q does not mention %q", err, want)
+	}
 	// Unknown prefixes fail.
 	if err := ValidateRunID(KindExtract, "file_x", "get"); err == nil {
 		t.Error("ValidateRunID(extract, file_x) = nil; want non-nil")
@@ -140,6 +148,10 @@ func TestSupportsRunAction(t *testing.T) {
 		{KindDetectForm, "cancel", false},
 		{KindDetectForm, "delete", false},
 		{KindDetectForm, "update", false},
+		{KindVerify, "list", true},
+		{KindVerify, "cancel", true},
+		{KindVerify, "delete", true},
+		{KindVerify, "update", false},
 	}
 	for _, tc := range cases {
 		if got := SupportsRunAction(tc.kind, tc.action); got != tc.want {

@@ -2265,6 +2265,78 @@
           "answer_pattern": "102\\.97"
         }
       ]
+    },
+    {
+      "id": "S-14",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "Before I pay it, use Extend to check whether someone altered invoice.pdf after it was issued, and tell me what it found.",
+      "files": [
+        "invoice.pdf"
+      ],
+      "expected_output": "Agent runs `extend verify invoice.pdf`, reports the HIGH risk (an amount masked and retyped after the document was made), and advises not paying it as-is.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran extend verify on invoice.pdf",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "verify"
+              ],
+              "args": [
+                "invoice.pdf"
+              ],
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer reports the HIGH risk level",
+          "answer_pattern": "(?i)\\bhigh\\b[^.\\n]{0,40}\\brisk\\b|\\brisk\\b[^.\\n]{0,40}\\bhigh\\b"
+        },
+        {
+          "type": "judge",
+          "criterion": "The answer says Extend found signs of tampering (an amount covered over and retyped) and advises against paying the invoice as-is, or to confirm it with the vendor first. It does not call the invoice legitimate or safe to pay."
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not make up a verify run ID",
+          "patterns": [
+            "vr_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T+8",
+      "category": "trigger-positive",
+      "path": "A",
+      "prompt": "The bank statement in this folder looks off to me. Can you find out whether someone doctored it?",
+      "files": [
+        "statement.pdf"
+      ],
+      "expected_output": "Agent finds statement.pdf in the working directory and turns to `extend verify` rather than only reading the PDF itself: it runs `extend verify statement.pdf` and reports the HIGH risk, or, because a bank statement is sensitive, offers that check and asks before uploading the file.",
+      "notes": "Opus 5.5 often holds off uploading a bank statement to a third-party service and asks first. That counts as a pass when it names `extend verify`; an answer built only from the agent's own reading of the PDF does not.",
+      "expectations": [
+        {
+          "type": "skill_activates",
+          "skill": "extend",
+          "text": "skill is activated"
+        },
+        {
+          "type": "judge",
+          "criterion": "The agent either ran `extend verify` on statement.pdf and reported its result (HIGH risk), or told the user that Extend's `extend verify` tamper check can test the file and asked before uploading it. It fails if the answer never brings up Extend's verify check, or presents a verify result when no `extend verify` command was run."
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not make up a verify run ID",
+          "patterns": [
+            "vr_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
     }
   ]
 }

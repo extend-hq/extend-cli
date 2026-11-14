@@ -63,10 +63,11 @@ var descriptionVerbs = []descriptionVerb{
 	{"splitting multi-document bundles into segments", "split"},
 	{"filling PDF forms via a values schema", "edit"},
 	{"detecting form fields to scaffold an edit schema", "detect-form"},
+	{"checking whether a document is genuine or was tampered with, forged or AI-generated", "verify"},
 	{"running multi-step document AI workflows", "workflows"},
 	// Run inspection is typed per verb (extract runs, workflows runs, ...);
 	// the guard maps to the primary verb whose runs subgroup carries the shape.
-	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, sgr_, workflow_run_)", "extract"},
+	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, sgr_, vr_, workflow_run_)", "extract"},
 	{"uploading documents to an Extend workspace and managing the resulting file_xxx IDs", "files"},
 }
 
@@ -87,6 +88,7 @@ var disambiguationExamples = []string{
 	`categorize this contract`,
 	`fill out this PDF form`,
 	`split this combined PDF into individual statements`,
+	`is this pay stub real?`,
 }
 
 // resourceFamily captures one of the four processor families (extractors,
@@ -148,7 +150,7 @@ var workflowExtraCommands = []string{
 // state by default. The "Wait, async, watch" prose section asserts these
 // behaviours; a test asserts each entry's CommandDoc.Wait.DefaultsToWait
 // matches the documented value.
-var waitDefaultVerbs = []string{"extract", "classify", "parse", "split", "edit"}
+var waitDefaultVerbs = []string{"extract", "classify", "parse", "split", "edit", "verify"}
 
 // asyncDefaultVerbs lists the command paths whose runs are async by
 // default (workflow runs only, currently). Same guard as
@@ -227,7 +229,7 @@ func writeSkillActiveBehaviour(b *strings.Builder) {
 	b.WriteString("## When this skill is active\n\n")
 	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking.\n")
 	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
-	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for the typed runs commands (`extend <verb> runs get|watch|cancel`) — not a host-tool task tracker.\n")
+	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`vr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for the typed runs commands (`extend <verb> runs get|watch|cancel`) — not a host-tool task tracker.\n")
 	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
 }
 
@@ -287,16 +289,17 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 
 func writeSkillWait(b *strings.Builder) {
 	b.WriteString("## Wait, async, watch\n\n")
-	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`) **wait by default** for terminal state and print the result. Pass `--wait=false` to return the run ID immediately.\n\n")
+	b.WriteString("Action verbs (`extract`/`classify`/`parse`/`split`/`edit`/`verify`) **wait by default** for terminal state and print the result. Pass `--wait=false` to return the run ID immediately.\n\n")
 	b.WriteString("`extend workflows run` is **async by default** because workflow runs can take minutes to hours. Pass `--wait` to block on it.\n\n")
-	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `sgr_` detect-form, `workflow_run_` workflows):\n\n")
+	b.WriteString("Run inspection is typed per verb; the ID prefix names the owner (`exr_` extract, `pr_` parse, `clr_` classify, `splr_` split, `edr_` edit, `sgr_` detect-form, `vr_` verify, `workflow_run_` workflows):\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx\n\n")
 	b.WriteString("Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
 	b.WriteString("**Run-type quirks:**\n\n")
 	b.WriteString("- **Edit runs** (`edr_*`) can't be cancelled, and **form detection runs** (`sgr_*`) support only get and watch. Other runs support best-effort cancel.\n")
-	b.WriteString("- **Workflow batches** have **no GET endpoint**; track them with `extend workflows runs list --batch <id>`.\n\n")
+	b.WriteString("- **Workflow batches** have **no GET endpoint**; track them with `extend workflows runs list --batch <id>`.\n")
+	b.WriteString("- **Verify runs** (`vr_*`) finish PROCESSED whatever the risk, so `extend verify` exits 0 even at HIGH risk; read `output.riskLevel`, or pass `--fail-on high` to exit non-zero.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")
 }
 
