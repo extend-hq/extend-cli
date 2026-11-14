@@ -406,7 +406,7 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 		args []string
 		want string // substring of the error message
 	}{
-		{[]string{"runs", "watch", "exr_x"}, "extend <extract|parse|classify|split|edit|workflows> runs"},
+		{[]string{"runs", "watch", "exr_x"}, "extend <extract|parse|classify|split|edit|verify|workflows> runs"},
 		{[]string{"run", "in.pdf"}, "extend workflows run"},
 		{[]string{"batches", "get", "bpr_x"}, "extend <extract|parse|classify|split> batches"},
 		{[]string{"edit", "runs", "cancel", "edr_x"}, `unknown command "cancel" for "extend edit runs"`},
