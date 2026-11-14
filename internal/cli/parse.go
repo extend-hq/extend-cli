@@ -84,9 +84,10 @@ Available on the Scale plan and above, or when Extend enables it.
 
 Searchable PDF (--searchable-pdf <path>): adds the recognized words to the
 PDF as an invisible text layer, so it can be searched and copied, and saves
-the PDF to <path> ('-' writes the PDF to stdout instead of the markdown).
-Pages that already have text are left as they are. PDF inputs only; it sets
-advancedOptions.embedOcrInPdf.
+the PDF to <path> ('-' writes the PDF to stdout). The command then prints
+where the PDF went, not the parsed text; pass -o markdown or -o json to
+print the text as well. Pages that already have text are left as they are.
+PDF inputs only; it sets advancedOptions.embedOcrInPdf.
 
 ` + parseOptionsDoc(),
 		Examples: []Example{
@@ -250,7 +251,13 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	}
 
 	status := extendx.RunStatus(final.Status)
-	resultErr := writeParseResult(ctx, app, cli, final, p)
+	shown, resultErr := writeParseResult(ctx, app, cli, final, p)
+	if resultErr != nil && !shown && p.zeroRetention && status == extendx.StatusProcessed {
+		// The result can't be fetched again, so it mustn't be lost to a
+		// failure in showing it (a --jq runtime error, say).
+		fmt.Fprintln(app.IO.ErrOut, "The result can't be fetched again, so it is printed as JSON instead.")
+		resultErr = errors.Join(resultErr, output.Render(app.IO.Out, output.FormatJSON, apiJSON(final), output.WithPretty(app.IO.IsStdoutTTY())))
+	}
 	cleanupErr := deleteRunUpload(ctx, app, cli, uploadToDelete)
 	switch {
 	case status == extendx.StatusFailed:
@@ -262,29 +269,43 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 }
 
 // writeParseResult prints the finished run and, with --searchable-pdf,
-// saves the processed PDF. A PDF sent to stdout replaces the printed run.
-func writeParseResult(ctx context.Context, app *App, cli *sdkclient.Client, run *extend.ParseRun, p parseParams) error {
+// saves the processed PDF. shown reports whether what was asked for
+// reached stdout or the PDF's path.
+//
+// A PDF sent to stdout replaces the printed run. A PDF saved to a path
+// with no -o or --jq does too: the caller asked for the PDF, so the
+// command says where it went instead of printing the whole document.
+func writeParseResult(ctx context.Context, app *App, cli *sdkclient.Client, run *extend.ParseRun, p parseParams) (shown bool, err error) {
 	if p.searchablePDF == "" || extendx.RunStatus(run.Status) != extendx.StatusProcessed {
-		return renderParseResult(app, run, p.target)
+		err := renderParseResult(app, run, p.target)
+		return err == nil, err
 	}
 	if run.File == nil || run.File.ID == "" {
-		return fmt.Errorf("run %s has no file to save as a searchable PDF", run.ID)
+		return false, fmt.Errorf("run %s has no file to save as a searchable PDF", run.ID)
 	}
 	if run.File.Type == nil || *run.File.Type != extend.FileTypePdf {
 		fileType := "unknown"
 		if run.File.Type != nil {
 			fileType = string(*run.File.Type)
 		}
-		return fmt.Errorf("--searchable-pdf only works on PDFs; %s is type %s, so no text layer was added", run.File.Name, fileType)
+		return false, fmt.Errorf("--searchable-pdf only works on PDFs; %s is type %s, so no text layer was added", run.File.Name, fileType)
 	}
 	if p.searchablePDF == "-" {
-		_, err := extendx.DownloadFile(ctx, cli, run.File.ID, app.IO.Out)
-		return err
+		n, err := extendx.DownloadFile(ctx, cli, run.File.ID, app.IO.Out)
+		return n > 0, err
+	}
+	if app.Format == "" && app.JQ == "" {
+		if err := writeFileFromExtend(ctx, app, cli, run.File.ID, p.searchablePDF); err != nil {
+			return false, err
+		}
+		fmt.Fprintf(app.IO.Out, "%s %s (%s): searchable PDF saved to %s\n",
+			statusIcon(paletteFor(app.IO), extendx.StatusProcessed), run.ID, run.Status, p.searchablePDF)
+		return true, nil
 	}
 	if err := renderParseResult(app, run, p.target); err != nil {
-		return err
+		return false, err
 	}
-	return writeFileFromExtend(ctx, app, cli, run.File.ID, p.searchablePDF)
+	return true, writeFileFromExtend(ctx, app, cli, run.File.ID, p.searchablePDF)
 }
 
 // deleteRunUpload deletes a file the CLI uploaded for a single run. An

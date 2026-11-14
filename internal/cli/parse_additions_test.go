@@ -211,8 +211,65 @@ func TestParse_SearchablePDFSetsTheOptionAndSavesThePDF(t *testing.T) {
 	if err != nil || string(got) != "%PDF-1.7 searchable" {
 		t.Errorf("saved PDF = %q, %v; want the processed file's bytes", got, err)
 	}
-	if !strings.Contains(ta.out.String(), "# Scan") {
-		t.Errorf("stdout = %q, want the parsed markdown too", ta.out.String())
+	// Asked only for the PDF: one line says where it went, and the
+	// document isn't printed.
+	if got, want := ta.out.String(), "✓ pr_new (PROCESSED): searchable PDF saved to "+out+"\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestParse_SearchablePDFWithOutputFormatAlsoPrintsTheText(t *testing.T) {
+	ps := newParseServer(t, "PROCESSED", pdfFile)
+	ta := newTestApp(t, ps.fakeServer)
+	ta.app.Format = "markdown"
+	out := filepath.Join(t.TempDir(), "searchable.pdf")
+	if err := runParse(context.Background(), ta.app, parseParams{
+		input: "file_up", target: "markdown", searchablePDF: out, wait: true, timeout: 2 * time.Second,
+	}); err != nil {
+		t.Fatalf("runParse: %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("searchable PDF not saved: %v", err)
+	}
+	if got := ta.out.String(); got != "# Scan\n" {
+		t.Errorf("stdout = %q, want the parsed markdown", got)
+	}
+}
+
+// A zero-retention result can be read only once, so a failure to show
+// it as asked must not lose it.
+func TestParse_ZeroRetentionPrintsTheResultWhenShowingItFails(t *testing.T) {
+	for _, tc := range []struct{ name, format, jq string }{
+		{"jq runtime error", "", ".output | tonumber"},
+		{"format the command can't render", "table", ""},
+	} {
+		ps := newParseServer(t, "PROCESSED", pdfFile)
+		ta := newTestApp(t, ps.fakeServer)
+		ta.app.Format, ta.app.JQ = tc.format, tc.jq
+		err := runParse(context.Background(), ta.app, parseParams{
+			input: "file_up", target: "markdown", zeroRetention: true, wait: true, timeout: 2 * time.Second,
+		})
+		if err == nil {
+			t.Errorf("%s: err = nil, want the rendering error", tc.name)
+		}
+		if got := ta.out.String(); !strings.Contains(got, `"content":"# Scan"`) {
+			t.Errorf("%s: stdout = %q, want the run's JSON", tc.name, got)
+		}
+		if !strings.Contains(ta.errOut.String(), "can't be fetched again") {
+			t.Errorf("%s: stderr = %q, want the explanation", tc.name, ta.errOut.String())
+		}
+	}
+}
+
+// Without zero retention the run can be fetched again, so a failure to
+// show it prints nothing extra.
+func TestParse_RenderFailureWithoutZeroRetentionPrintsNothing(t *testing.T) {
+	ps := newParseServer(t, "PROCESSED", pdfFile)
+	ta := newTestApp(t, ps.fakeServer)
+	ta.app.JQ = ".output | tonumber"
+	err := runParse(context.Background(), ta.app, parseParams{input: "file_up", target: "markdown", wait: true, timeout: 2 * time.Second})
+	if err == nil || ta.out.Len() != 0 {
+		t.Errorf("err = %v, stdout = %q; want an error and no output", err, ta.out.String())
 	}
 }
 

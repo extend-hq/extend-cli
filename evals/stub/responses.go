@@ -207,6 +207,13 @@ func emitParse(args []string, mode string) {
 		return
 	}
 	r := terminalRun("pr_", "PROCESSED")
+	// Asked only for the PDF, the real CLI says where it went instead of
+	// printing the document.
+	if pdf := flagValue(args, "searchable-pdf"); pdf != "" && pdf != "-" &&
+		flagValue(args, "output") == "" && shortFlagValue(args, "o") == "" && flagValue(args, "jq") == "" {
+		fmt.Fprintf(stdout, "✓ %s (PROCESSED): searchable PDF saved to %s\n", r.ID, pdf)
+		return
+	}
 	r.Output = map[string]any{
 		"chunks": []map[string]any{
 			{"type": "text", "content": "# Document\n\nStub-generated markdown body."},
