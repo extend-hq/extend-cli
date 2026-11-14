@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,12 +51,12 @@ func TestExtractorsCreate_GeneratesTheSchemaFromSamples(t *testing.T) {
 // Generation takes minutes and is billed, so it must outlast the
 // per-request HTTP timeout and must not be retried.
 func TestExtractorsCreate_GenerationIgnoresTheHTTPTimeoutAndIsNotRetried(t *testing.T) {
-	var creates int
-	fail := false
+	var creates atomic.Int32
+	var fail atomic.Bool
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		creates++
+		creates.Add(1)
 		time.Sleep(300 * time.Millisecond)
-		if fail {
+		if fail.Load() {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "UNAVAILABLE", "message": "try later"})
 			return
 		}
@@ -80,12 +81,13 @@ func TestExtractorsCreate_GenerationIgnoresTheHTTPTimeoutAndIsNotRetried(t *test
 		t.Fatalf("generation failed on a 100ms --http-timeout: %v", err)
 	}
 
-	fail, creates = true, 0
+	fail.Store(true)
+	creates.Store(0)
 	if err := run("--name", "Invoices", "--sample", "file_a"); err == nil {
 		t.Fatal("generation succeeded against a failing server")
 	}
-	if creates != 1 {
-		t.Errorf("made %d generation requests, want 1 (no retries)", creates)
+	if n := creates.Load(); n != 1 {
+		t.Errorf("made %d generation requests, want 1 (no retries)", n)
 	}
 }
 
