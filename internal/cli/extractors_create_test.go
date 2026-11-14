@@ -48,6 +48,29 @@ func TestExtractorsCreate_GeneratesTheSchemaFromSamples(t *testing.T) {
 	}
 }
 
+// A shell expands --sample samples/*.pdf into one flag value followed by
+// arguments; those are samples too, in order.
+func TestExtractorsCreate_ArgumentsAfterSampleAreSamples(t *testing.T) {
+	srv := packageServer(t, "/extractors", generatedExtractor)
+	ta := newTestApp(t, srv)
+	ta.app.IO.SetStderrTTY(true)
+	cmd := findCmd(t, ta.app, "extractors", "create")
+	cmd.SetArgs([]string{"--name", "Invoices", "--sample", "file_a", "file_b", "file_c"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("extractors create: %v", err)
+	}
+	body := createBody(t, srv, "/extractors")
+	files, _ := body["generate"].(map[string]any)["files"].([]any)
+	want := []any{map[string]any{"id": "file_a"}, map[string]any{"id": "file_b"}, map[string]any{"id": "file_c"}}
+	if !reflect.DeepEqual(files, want) {
+		t.Errorf("generate.files = %v, want %v", files, want)
+	}
+	// In a terminal the command points at the next step.
+	if !strings.Contains(ta.errOut.String(), "Try it: extend extract <file> --using ex_gen --version draft") {
+		t.Errorf("stderr = %q, want the next step", ta.errOut.String())
+	}
+}
+
 // Generation takes minutes and is billed, so it must outlast the
 // per-request HTTP timeout and must not be retried.
 func TestExtractorsCreate_GenerationIgnoresTheHTTPTimeoutAndIsNotRetried(t *testing.T) {
@@ -115,6 +138,7 @@ func TestExtractorsCreate_SampleRules(t *testing.T) {
 	for _, id := range []string{"file_1", "file_2", "file_3", "file_4", "file_5", "file_6"} {
 		six = append(six, "--sample", id)
 	}
+	doc := writePDFs(t, "invoice.pdf")[0]
 	cases := []struct {
 		args []string
 		want string
@@ -130,6 +154,15 @@ func TestExtractorsCreate_SampleRules(t *testing.T) {
 			"the instructions are 2501 characters; the limit is 2500"},
 		{[]string{"invoice.pdf", "--name", "Invoices"},
 			"takes no arguments; to generate the schema from invoice.pdf, pass --sample invoice.pdf"},
+		// The first things someone tries: no flags at all, and "from file"
+		// read as "from this document".
+		{[]string{}, "--name is required to create an extractor; add --sample <document> to generate its schema, or --from-file <body.json> to set its config"},
+		{[]string{"--name", "Invoices", "--from-file", doc},
+			"invoice.pdf isn't JSON; to generate a schema from that document, use --sample " + doc},
+		// Six samples given the way a glob expands: one flag value, the
+		// rest as arguments.
+		{[]string{"--name", "Invoices", "--sample", "file_1", "file_2", "file_3", "file_4", "file_5", "file_6"},
+			"schema generation takes 1 to 5 samples, got 6"},
 	}
 	for _, tc := range cases {
 		ta := newTestApp(t, srv)

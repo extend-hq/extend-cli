@@ -684,14 +684,21 @@ func emitExtractorsGet(args []string, mode string) {
 }
 
 func emitExtractorsCreate(args []string, mode string) {
-	// Mirror the real CLI's argument checks.
-	if pos := positional(args); len(pos) > 2 {
-		fmt.Fprintf(stderr, "Error: extractors create takes no arguments; to generate the schema from %s, pass --sample %s\n", pos[2], pos[2])
+	// Mirror the real CLI's argument checks. Arguments after --sample
+	// are more samples, as a glob expands to.
+	extra := positional(args)[2:]
+	if len(extra) > 0 && !hasFlag(args, "sample") {
+		fmt.Fprintf(stderr, "Error: extractors create takes no arguments; to generate the schema from %s, pass --sample %s\n", extra[0], extra[0])
 		exitCode = 1
 		return
 	}
 	name := flagValue(args, "name")
 	if !hasFlag(args, "sample") {
+		if name == "" && !hasFlag(args, "from-file") {
+			fmt.Fprintln(stderr, "Error: --name is required to create an extractor; add --sample <document> to generate its schema, or --from-file <body.json> to set its config")
+			exitCode = 1
+			return
+		}
 		if name == "" {
 			name = "Stub extractor"
 		}
@@ -703,7 +710,7 @@ func emitExtractorsCreate(args []string, mode string) {
 		exitCode = 1
 		return
 	}
-	samples := 0
+	samples := len(extra)
 	for _, a := range args {
 		if a == "--sample" || strings.HasPrefix(a, "--sample=") {
 			samples++

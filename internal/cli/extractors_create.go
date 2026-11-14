@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -49,15 +52,16 @@ generates the schema from them; to set the config yourself, pass the API
 body with --from-file. The new extractor starts as a draft (no published
 version); use 'extend extractors versions create' once you're ready to
 deploy.`,
-		Details: `With --sample (repeat it for up to 5 samples: local files, file_xxx IDs or
-https:// URLs), Extend writes a JSON schema for the samples into the new
-extractor's draft. It reads only the first pages of each sample: 5 for one
-or two samples, 3 for three, 2 for four or five. --instructions (up to
-2,500 characters) says what the documents are and which fields to extract;
-it's optional but makes the schema better. Generation runs inside the
-request and usually takes 30s to 2m; --timeout caps the wait. If it fails
-or is stopped, Extend deletes the new extractor. The command prints the
-extractor with its generated schema.
+		Details: `With --sample (up to 5 samples: local files, file_xxx IDs or https://
+URLs; repeat the flag, or list more after it, as a glob does), Extend
+writes a JSON schema for the samples into the new extractor's draft. It
+reads only the first pages of each sample: 5 for one or two samples, 3 for
+three, 2 for four or five. --instructions (up to 2,500 characters) says
+what the documents are and which fields to extract; it's optional but
+makes the schema better. Generation runs inside the request and usually
+takes 30s to 2m; --timeout caps the wait. If it fails or is stopped, Extend
+deletes the new extractor. The command prints the extractor with its
+generated schema.
 
 Try the draft, then publish it:
 
@@ -67,6 +71,7 @@ Try the draft, then publish it:
 ` + bodyDetails,
 		Examples: []Example{
 			{Label: "From sample documents", Cmd: `extend extractors create --name "Invoices" --sample invoice-1.pdf --sample invoice-2.pdf --instructions "Vendor invoices: vendor, invoice number and date, line items, total"`},
+			{Label: "From a folder of samples", Cmd: `extend extractors create --name "Invoices" --sample samples/*.pdf`},
 			{Label: "From file with name", Cmd: `extend extractors create --from-file extractor.json --name "My extractor"`},
 			{Label: "From stdin", Cmd: "cat extractor.json | extend extractors create --from-file -"},
 		},
@@ -78,19 +83,32 @@ Try the draft, then publish it:
 		SeeAlso: []string{"extractors list", "extractors update", "extractors versions create", "extract"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
+			if len(args) > 0 && len(samples) == 0 {
 				return fmt.Errorf("extractors create takes no arguments; to generate the schema from %s, pass --sample %s", args[0], args[0])
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Arguments after --sample are more samples: a shell expands
+			// --sample samples/*.pdf into one flag value and the rest as
+			// arguments.
+			samples := append(samples, args...)
 			body, err := mergeBody(fromFile, map[string]string{"name": name})
 			if err != nil {
+				if looksLikeDocument(fromFile) {
+					return fmt.Errorf("--from-file takes the extractor's JSON body, and %s isn't JSON; to generate a schema from that document, use --sample %s", fromFile, fromFile)
+				}
 				return err
 			}
 			var req extend.ExtractorsCreateRequest
 			if err := json.Unmarshal(body, &req); err != nil {
 				return fmt.Errorf("decode body: %w", err)
+			}
+			if req.Name == "" {
+				if fromFile == "" && len(samples) == 0 {
+					return errors.New("--name is required to create an extractor; add --sample <document> to generate its schema, or --from-file <body.json> to set its config")
+				}
+				return errors.New("--name is required to create an extractor")
 			}
 			if len(samples) == 0 && req.Generate == nil {
 				if instructions != "" {
@@ -126,7 +144,13 @@ Try the draft, then publish it:
 			if err != nil {
 				return err
 			}
-			return renderWithDefault(app, ex, output.FormatJSON)
+			if err := renderWithDefault(app, ex, output.FormatJSON); err != nil {
+				return err
+			}
+			if app.IO.IsStderrTTY() {
+				fmt.Fprintln(app.IO.ErrOut, paletteFor(app.IO).Dimf("Created %s as a draft. Try it: extend extract <file> --using %s --version draft", ex.ID, ex.ID))
+			}
+			return nil
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&fromFile, "from-file", "", "JSON body, path, file:// URI, or '-' for stdin")
@@ -138,15 +162,25 @@ Try the draft, then publish it:
 	}
 }
 
+// looksLikeDocument reports whether path names a local file of a kind
+// Extend processes, as opposed to a JSON body.
+func looksLikeDocument(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".bmp", ".webp", ".heic",
+		".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx":
+	default:
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // prepareGenerate checks a request that generates its schema, before any
 // sample is uploaded, and applies --instructions to it. samples is the
 // number of --sample flags.
 func prepareGenerate(req *extend.ExtractorsCreateRequest, samples int, instructions string) error {
 	if req.Config != nil || req.CloneExtractorID != nil {
 		return errors.New("generating the schema can't be combined with a config or cloneExtractorId in --from-file; remove them from the body")
-	}
-	if req.Name == "" {
-		return errors.New("--name is required to create an extractor")
 	}
 	if req.Generate == nil {
 		req.Generate = &extend.ExtractorsCreateRequestGenerate{}
