@@ -192,14 +192,18 @@ func TestSkillIncludesWorkflowLifecycleRecipe(t *testing.T) {
 //     better home, raise the budget *deliberately* with a comment
 //     explaining why.
 func TestSkillUnderRecommendedTokenBudget(t *testing.T) {
-	const recommendedTokens = 5000
+	const specTokens = 5000
+	// Raised past the spec's recommendation to fit verify and workspaces
+	// in the catalog; the recipes the cuts would have removed are the
+	// skill's most-used content.
+	const budgetTokens = 5500
 	const charsPerToken = 4
-	const recommendedBytes = recommendedTokens * charsPerToken
+	const budgetBytes = budgetTokens * charsPerToken
 
 	body := RenderSkill(RootDoc(testAppForDocs()))
-	if got := len(body); got > recommendedBytes {
-		t.Errorf("skill body is %d bytes (~%d tokens at %d chars/token); spec recommends <=%d tokens. Trim a section, move detail behind `extend <cmd> --help`, or raise the budget deliberately.",
-			got, got/charsPerToken, charsPerToken, recommendedTokens)
+	if got := len(body); got > budgetBytes {
+		t.Errorf("skill body is %d bytes (~%d tokens at %d chars/token); the budget is %d tokens (the spec recommends <=%d). Trim a section, move detail behind `extend <cmd> --help`, or raise the budget deliberately.",
+			got, got/charsPerToken, charsPerToken, budgetTokens, specTokens)
 	}
 }
 

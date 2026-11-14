@@ -205,10 +205,11 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	return string(r[:max-1]) + "…"
 }
 
 // newFilesGetDoc returns the typed documentation for `extend files get`.

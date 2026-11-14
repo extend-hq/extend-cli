@@ -332,7 +332,7 @@ func TestRunsWatch_ExitStatusOnFailedRun(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
-	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, true)
+	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, true, "")
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Errorf("expected --exit-status to surface FAILED as error, got %v", err)
 	}
@@ -344,7 +344,7 @@ func TestRunsWatch_ExitStatusFalseHidesFailure(t *testing.T) {
 	})
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
-	if err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, false); err != nil {
+	if err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_fail", 5*time.Second, false, ""); err != nil {
 		t.Errorf("without --exit-status, FAILED should not error; got %v", err)
 	}
 }
@@ -356,7 +356,7 @@ func TestRunsWatch_TimeoutCancelsPolling(t *testing.T) {
 	ta := newTestApp(t, srv)
 	ta.app.Format = "json"
 	start := time.Now()
-	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_slow", 200*time.Millisecond, false)
+	err := runTypedRunsWatch(context.Background(), ta.app, extractRunsSpec(), "exr_slow", 200*time.Millisecond, false, "")
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected timeout error")
