@@ -201,9 +201,6 @@ func verifyRunsSpec() runsGroupSpec {
 			"A verify run that's still processing is cancelled first; its input file is kept.",
 		},
 		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		watchGotchas: []string{
-			"--fail-on medium|high exits non-zero when the run's risk is at or above that level, or when the run has no result to check.",
-		},
 	}
 }
 
@@ -359,8 +356,46 @@ func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
 		{Label: "Custom timeout", Cmd: fmt.Sprintf("extend %s %s --timeout 5m", s.path("runs watch"), s.exampleID)},
 		{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --exit-status && deploy.sh", s.path("runs watch"), s.exampleID)},
 	}
+	whenToUse := fmt.Sprintf(`Use to block until %s %s run reaches a terminal state. Combine with
+--exit-status to gate downstream scripts on success.`, articleFor(s.name()), s.name())
+	details := fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
+status transitions. The final result is rendered using the same format
+as the originating command.
+
+Use --exit-status for shell composition: the command exits non-zero if
+the run terminates in %s, so:
+
+    extend %s <id> --exit-status && downstream-script.sh
+
+works as expected.`, statusListProse(s.watchFailures), s.path("runs watch"))
 	if s.riskLevels {
-		examples = append(examples, Example{Label: "Fail on high risk", Cmd: fmt.Sprintf("extend %s %s --fail-on high", s.path("runs watch"), s.exampleID)})
+		// A finished run isn't a document that passed, so the gate that
+		// matters here is the risk, not the run status.
+		whenToUse = fmt.Sprintf(`Use to block until %s %s run reaches a terminal state and print its
+result. To gate a script on the result, pass --fail-on medium|high: a run
+that finishes exits 0 whatever risk it found.`, articleFor(s.name()), s.name())
+		details = fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
+status transitions. The final result is rendered using the same format
+as the originating command.
+
+Use --fail-on for shell composition: the command exits non-zero when the
+risk is at or above that level, or when the run has no result to check
+(it ended %s), so:
+
+    extend %s <id> --fail-on high && downstream-script.sh
+
+runs the script only for a document that passed. --exit-status alone
+doesn't look at the risk: a HIGH-risk result is a finished run, and
+passes it.`, statusListProse(s.watchFailures), s.path("runs watch"))
+		gotchas = append([]string{
+			"--exit-status doesn't look at the risk; a HIGH-risk result exits 0 with it. Use --fail-on to act on the risk.",
+			"Without --exit-status or --fail-on, the command exits 0 on any successful poll regardless of run status.",
+		}, s.watchGotchas...)
+		examples = []Example{
+			examples[0],
+			{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --fail-on high && deploy.sh", s.path("runs watch"), s.exampleID)},
+			examples[1],
+		}
 	}
 	return &CommandDoc{
 		Use:     "watch <run-id>",
@@ -370,25 +405,15 @@ func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
 			fmt.Sprintf("poll %s %s run for terminal state", articleFor(s.name()), s.name()),
 			fmt.Sprintf("follow %s run progress live", s.name()),
 		},
-		WhenToUse: fmt.Sprintf(`Use to block until %s %s run reaches a terminal state. Combine with
---exit-status to gate downstream scripts on success.`, articleFor(s.name()), s.name()),
-		Details: fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
-status transitions. The final result is rendered using the same format
-as the originating command.
-
-Use --exit-status for shell composition: the command exits non-zero if
-the run terminates in %s, so:
-
-    extend %s <id> --exit-status && downstream-script.sh
-
-works as expected.`, statusListProse(s.watchFailures), s.path("runs watch")),
-		Examples: examples,
-		Gotchas:  gotchas,
-		SeeAlso:  s.seeAlso("watch"),
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
-		Failures: s.watchFailures,
-		Args:     cobra.ExactArgs(1),
+		WhenToUse: whenToUse,
+		Details:   details,
+		Examples:  examples,
+		Gotchas:   gotchas,
+		SeeAlso:   s.seeAlso("watch"),
+		Output:    OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:      &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures:  s.watchFailures,
+		Args:      cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gate, err := parseFailOn(failOn)
 			if err != nil {

@@ -59,7 +59,8 @@ func newWebhooksVerifyDoc(app *App) *CommandDoc {
 		WhenToUse: `Use in your webhook receiver to validate that an incoming payload
 came from Extend and was not tampered with. Pass the signature header,
 timestamp header, the raw body, and the signing secret stored from
-endpoint creation.`,
+endpoint creation. To check a document for tampering or forgery, use
+'extend verify' instead.`,
 		Details: `Verify a webhook payload's signature against a signing secret. The
 signature is HMAC-SHA256 over "v0:<timestamp>:<body>".
 

@@ -107,6 +107,31 @@ func TestVerify_TerminalShowsRiskThenSignalsByLevel(t *testing.T) {
 	}
 }
 
+// A signal's summary says what was found, so the terminal shows all of
+// it, wrapped rather than cut off.
+func TestVerify_TerminalShowsWholeSignalSummaries(t *testing.T) {
+	long := "An opaque rectangle was drawn over the closing balance on page 1, and a new amount was drawn on top of it in a font that appears nowhere else in the document."
+	run := verifiedRun("HIGH")
+	run["output"].(map[string]any)["signals"] = []any{verifySignal("vs_1", "PDF_LAYERS_TEXT_AND_FORMS", "HIGH", long)}
+	srv := verifyServer(t, run)
+	ta := newTestApp(t, srv)
+	ta.app.IO.SetStdoutTTY(true)
+	cmd := findCmd(t, ta.app, "verify", "runs", "get")
+	cmd.SetArgs([]string{"vr_x"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("verify runs get: %v", err)
+	}
+	out := ta.out.String()
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), long) {
+		t.Errorf("output lacks the whole summary:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) > 100 {
+			t.Errorf("line is %d characters, want it wrapped: %q", len(line), line)
+		}
+	}
+}
+
 func TestVerify_FailOn(t *testing.T) {
 	cases := []struct {
 		risk, failOn, wantErr string
