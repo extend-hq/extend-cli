@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -212,6 +213,9 @@ type editParams struct {
 func runEdit(ctx context.Context, app *App, p editParams) error {
 	if p.templateID != "" && p.password != "" {
 		return errors.New("--password doesn't apply with --template; the template's PDF is already stored")
+	}
+	if p.templateID != "" && !strings.HasPrefix(p.templateID, "edt_") {
+		return fmt.Errorf("--template takes a template ID (edt_...), not %q; find the ID with: extend edit templates list --name-contains %s", p.templateID, shellQuote(p.templateID))
 	}
 
 	cli, err := app.NewClient()

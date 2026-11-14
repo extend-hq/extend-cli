@@ -154,6 +154,7 @@ func TestEdit_TemplateArgumentRules(t *testing.T) {
 		{[]string{"form.pdf", "--template", "edt_x"}, "pass either <input> or --template, not both"},
 		{[]string{}, "provide an input (a file path, file_xxx ID, or https:// URL) or use --template"},
 		{[]string{"--template", "edt_x", "--password", "pw"}, "--password doesn't apply with --template"},
+		{[]string{"--template", "W-9 (2024)"}, "not \"W-9 (2024)\"; find the ID with: extend edit templates list --name-contains 'W-9 (2024)'"},
 	}
 	for _, tc := range cases {
 		ta := newTestApp(t, srv)

@@ -256,6 +256,11 @@ func emitEdit(args []string, mode string) {
 		exitCode = 1
 		return
 	}
+	if t := flagValue(args, "template"); t != "" && !strings.HasPrefix(t, "edt_") {
+		fmt.Fprintf(stderr, "Error: --template takes a template ID (edt_...), not %q; find the ID with: extend edit templates list --name-contains '%s'\n", t, t)
+		exitCode = 1
+		return
+	}
 	out := flagValue(args, "output-file")
 	if out == "" {
 		out = shortFlagValue(args, "O")
