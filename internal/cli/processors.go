@@ -58,14 +58,17 @@ type processorAccessor[T any, TS any, V any, VS any] struct {
 	// `--help` enumerates the JSON shape rather than punting to "copy
 	// an existing one" (per the Flags-vs-JSON-config contract in
 	// AGENTS.md). Built from the shared catalogs in configdocs.go.
-	bodyDoc     string
-	rowFields   func(TS) []string
-	listFn      func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (resp any, data []TS, nextPageToken string, err error)
-	getFn       func(ctx context.Context, c *sdkclient.Client, id string) (T, error)
-	listVerFn   func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (resp any, data []VS, nextPageToken string, err error)
-	getVerFn    func(ctx context.Context, c *sdkclient.Client, id, ver string) (V, error)
-	verRowFn    func(VS) []string
-	createFn    func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (T, error)
+	bodyDoc   string
+	rowFields func(TS) []string
+	listFn    func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (resp any, data []TS, nextPageToken string, err error)
+	getFn     func(ctx context.Context, c *sdkclient.Client, id string) (T, error)
+	listVerFn func(ctx context.Context, c *sdkclient.Client, id string, opts listProcessorVersionsOptions) (resp any, data []VS, nextPageToken string, err error)
+	getVerFn  func(ctx context.Context, c *sdkclient.Client, id, ver string) (V, error)
+	verRowFn  func(VS) []string
+	createFn  func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (T, error)
+	// createDocFn, when set, replaces the generic create command with the
+	// family's own. bodyDetails is the generic --from-file documentation.
+	createDocFn func(app *App, bodyDetails string) *CommandDoc
 	updateFn    func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (T, error)
 	createVerFn func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (V, error)
 }
@@ -97,7 +100,10 @@ func (a processorAccessor[T, TS, V, VS]) doc(app *App) *CommandDoc {
 		a.listDoc(app),
 		a.getDoc(app),
 	}
-	if a.createFn != nil {
+	switch {
+	case a.createDocFn != nil:
+		subs = append(subs, a.createDocFn(app, a.createBodyDetails()))
+	case a.createFn != nil:
 		subs = append(subs, a.createDoc(app))
 	}
 	if a.updateFn != nil {
@@ -518,18 +524,7 @@ func (a processorAccessor[T, TS, V, VS]) createDoc(app *App) *CommandDoc {
 		WhenToUse: fmt.Sprintf(`Use to create %s %s in the current workspace. The new %s starts as
 a draft (no published version); use 'extend %s versions create' once
 you're ready to deploy.`, articleFor(a.noun), a.noun, a.noun, a.pluralNoun),
-		Details: fmt.Sprintf(`Pass --from-file with the full API body (inline JSON, path, file:// URI, or
-- for stdin); --name overrides any name in the body.
-
-%s
-
-To clone the shape of an existing %s instead of authoring the body by hand,
-dump one and edit it (use "draft" for the working copy, or a published
-version like "1.0"):
-
-    extend %s versions get <existing-id> draft > template.json
-
-Then edit and pass via --from-file.`, a.bodyDoc, a.noun, a.pluralNoun),
+		Details: a.createBodyDetails(),
 		Examples: []Example{
 			{Label: "From file with name", Cmd: fmt.Sprintf(`extend %s create --from-file %s.json --name "My %s"`, a.pluralNoun, a.noun, a.noun)},
 			{Label: "From stdin", Cmd: fmt.Sprintf("cat %s.json | extend %s create --from-file -", a.noun, a.pluralNoun)},
@@ -564,6 +559,23 @@ Then edit and pass via --from-file.`, a.bodyDoc, a.noun, a.pluralNoun),
 			cmd.Flags().StringVar(&name, "name", "", "Name (overrides body)")
 		},
 	}
+}
+
+// createBodyDetails documents creating the resource from a --from-file
+// body.
+func (a processorAccessor[T, TS, V, VS]) createBodyDetails() string {
+	return fmt.Sprintf(`Pass --from-file with the full API body (inline JSON, path, file:// URI, or
+- for stdin); --name overrides any name in the body.
+
+%s
+
+To clone the shape of an existing %s instead of authoring the body by hand,
+dump one and edit it (use "draft" for the working copy, or a published
+version like "1.0"):
+
+    extend %s versions get <existing-id> draft > template.json
+
+Then edit and pass via --from-file.`, a.bodyDoc, a.noun, a.pluralNoun)
 }
 
 func (a processorAccessor[T, TS, V, VS]) updateDoc(app *App) *CommandDoc {

@@ -2190,6 +2190,81 @@
           "answer_pattern": "(?s)(widget|sprocket).*cog|cog.*(widget|sprocket)"
         }
       ]
+    },
+    {
+      "id": "W-11",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Create an extractor named \"Acme invoices\" for invoices like invoice.pdf and invoice2.pdf. I don't have a schema for them. Then run it on invoice3.pdf and tell me the total.",
+      "files": [
+        "invoice.pdf",
+        "invoice2.pdf",
+        "invoice3.pdf"
+      ],
+      "expected_output": "Agent runs `extend extractors create --name \"Acme invoices\" --sample invoice.pdf --sample invoice2.pdf` so Extend generates the schema, then `extend extract invoice3.pdf --using <the new ex_ ID>`, and reports the total.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent generated the extractor from both sample invoices",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extractors",
+                "create"
+              ],
+              "args": [
+                "invoice.pdf",
+                "invoice2.pdf"
+              ],
+              "flag": "sample",
+              "flag_value": {
+                "name": "Acme invoices"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent ran an extractor on invoice3.pdf",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "extract",
+                "invoice3.pdf"
+              ],
+              "flag": "using",
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent did not run the existing Q3 extractor instead of the new one",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "flag_value": {
+                "using": "ex_invoiceQ3"
+              }
+            }
+          ]
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent used the extractor ID that create returned",
+          "patterns": [
+            "ex_[a-zA-Z0-9_-]+"
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer reports the invoice total",
+          "answer_pattern": "102\\.97"
+        }
+      ]
     }
   ]
 }
