@@ -35,6 +35,7 @@ func newExtractDoc(app *App) *CommandDoc {
 		priority    int
 		timeout     time.Duration
 		meta        metaFlags
+		pkg         packageFlags
 	)
 
 	return &CommandDoc{
@@ -47,6 +48,7 @@ func newExtractDoc(app *App) *CommandDoc {
 			"schema-driven document extraction",
 			"ocr a contract with a defined schema",
 			"run an extractor against a pdf",
+			"extract one result across several related documents",
 		},
 		WhenToUse: `Use when you have a configured extractor (or inline JSON config) and need
 typed structured fields back. Prefer 'parse' for raw text or markdown,
@@ -56,6 +58,13 @@ typed structured fields back. Prefer 'parse' for raw text or markdown,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
   - omitted, with --text "<inline text>" to extract from raw text directly
+
+With --package, the command takes 2 to 50 inputs (as arguments, or one per
+line with --files-from, '-' for stdin) and extracts across all of them in
+one run, in the given order: one output for the whole set, such as a
+contract and its amendments. The run has "files" instead of "file", and
+each citation's fileId names the file it came from. For one result per
+file, use 'extend extract batch'.
 
 The extraction config comes from one of these three forms. Exactly one
 of --using or --config is required:
@@ -85,18 +94,21 @@ complete standalone config that replaces the need for one entirely.
 			{Label: "Patch a saved extractor for this run", Cmd: "extend extract invoice.pdf --using ex_abc --patch tweaks.json"},
 			{Label: "Inline patch", Cmd: `extend extract invoice.pdf --using ex_abc --patch '{"foo":"bar"}'`},
 			{Label: "One-off run with no saved extractor", Cmd: "extend extract invoice.pdf --config inline-config.json"},
+			{Label: "Several files, one result", Cmd: "extend extract contract.pdf amendment-1.pdf amendment-2.pdf --package --using ex_abc"},
 			{Label: "Filter output with jq", Cmd: "extend extract invoice.pdf --using ex_abc --jq '.output.value.invoice_id' -o raw"},
 		},
 		Gotchas: []string{
 			"--config and --patch are different: --config runs without a saved extractor; --patch merges onto a --using extractor.",
 			"Exactly one of --using or --config is required (server schema rejects both or neither).",
 			"--patch requires --using; for a standalone config use --config instead.",
+			"Several inputs need --package (one run across them) or 'extend extract batch' (one run per file).",
+			"--package works only with JSON-schema extract configs; the API rejects legacy fields-based extractors.",
 		},
 		SeeAlso:  []string{"parse", "classify", "extract batch", "extract runs watch", "extract runs get"},
 		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.MaximumNArgs(1),
+		Args:     cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
@@ -108,12 +120,24 @@ complete standalone config that replaces the need for one entirely.
 			if configPath != "" && patchPath != "" {
 				return errors.New("exactly one of --using or --config is required: --patch needs --using; for a standalone config use --config instead")
 			}
+			pkgInputs, err := pkg.inputs("extract", "extend extract batch", args)
+			if err != nil {
+				return err
+			}
 			input := ""
-			if len(args) > 0 {
+			if pkgInputs != nil {
+				if text != "" {
+					return errors.New("--text can't be used with --package; a package takes files, file IDs or URLs")
+				}
+				if name != "" {
+					return errors.New("--name applies to a single URL or --text input, not to --package")
+				}
+			} else if len(args) > 0 {
 				input = args[0]
 			}
 			return runExtract(cmd.Context(), app, extractParams{
 				input:       input,
+				pkg:         pkgInputs,
 				text:        text,
 				name:        name,
 				extractorID: extractorID,
@@ -138,6 +162,7 @@ complete standalone config that replaces the need for one entirely.
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().IntVar(&priority, "priority", 0, "Priority 0-100 (lower = higher priority); 0 = default")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
+			pkg.attach(cmd)
 			meta.attach(cmd)
 		},
 		Subcommands: []*CommandDoc{newExtractBatchDoc(app), extractRunsSpec().doc(app), extractBatchesSpec().doc(app)},
@@ -146,6 +171,7 @@ complete standalone config that replaces the need for one entirely.
 
 type extractParams struct {
 	input       string
+	pkg         *packageInputs // set for a --package run, instead of input
 	text        string
 	name        string
 	extractorID string
@@ -165,18 +191,23 @@ func runExtract(ctx context.Context, app *App, p extractParams) error {
 		return err
 	}
 
-	ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
-	if err != nil {
-		return err
-	}
-
-	file, err := extendx.BuildExtractFile(ref)
-	if err != nil {
-		return err
-	}
-
-	req := &extend.ExtractRunsCreateRequest{
-		File: file,
+	req := &extend.ExtractRunsCreateRequest{}
+	if p.pkg != nil {
+		refs, err := p.pkg.resolve(ctx, app, cli, p.password)
+		if err != nil {
+			return err
+		}
+		if req.Package, err = extendx.BuildExtractPackage(refs); err != nil {
+			return err
+		}
+	} else {
+		ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
+		if err != nil {
+			return err
+		}
+		if req.File, err = extendx.BuildExtractFile(ref); err != nil {
+			return err
+		}
 	}
 	if p.metadata != nil {
 		md := extend.RunMetadata(p.metadata)

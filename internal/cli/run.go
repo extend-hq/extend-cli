@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -32,6 +33,7 @@ func newWorkflowsRunDoc(app *App) *CommandDoc {
 		text        string
 		name        string
 		meta        metaFlags
+		pkg         packageFlags
 	)
 
 	return &CommandDoc{
@@ -43,6 +45,7 @@ func newWorkflowsRunDoc(app *App) *CommandDoc {
 			"submit a multi-step pipeline run",
 			"kick off a custom processing workflow",
 			"run an extend workflow against a file",
+			"run one workflow over a package of files",
 		},
 		WhenToUse: `Use when you have a configured Extend workflow (multi-step pipeline) and
 want to run it on a document. Prefer the single-purpose verbs (extract,
@@ -52,6 +55,13 @@ classify, split, parse) when you only need one processor.`,
   - a file_xxx ID (use a previously uploaded file)
   - an https:// URL (Extend fetches the document)
   - omitted, with --text "<inline text>" to run the workflow on raw text directly
+
+With --package, the command takes 2 to 50 inputs (as arguments, or one per
+line with --files-from, '-' for stdin) and starts one run over all of them.
+Each file is parsed on its own; a COLLECT step then gathers them, and the
+steps after it work on the whole set, so an EXTRACT step there returns one
+output for all the files. For one run per file, use 'extend workflows run
+batch'.
 
 Workflow runs are asynchronous by default because they can take minutes to
 hours; the run ID and dashboard URL are printed immediately.
@@ -74,6 +84,7 @@ Repeatable.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend workflows run invoice.pdf --using workflow_abc"},
 			{Label: "Block until terminal", Cmd: "extend workflows run invoice.pdf --using workflow_abc --wait"},
+			{Label: "Several files in one run", Cmd: "extend workflows run msa.pdf amendment-1.pdf --package --using workflow_abc --wait"},
 			{Label: "Pin version with priority", Cmd: "extend workflows run invoice.pdf --using workflow_abc --version v2-with-review --priority 10"},
 			{Label: "Seed processor outputs", Cmd: "extend workflows run invoice.pdf --using workflow_abc --outputs seeded.json"},
 			{Label: "Inline seeded outputs", Cmd: `extend workflows run invoice.pdf --using workflow_abc --outputs '[{"processorId":"ex_abc","output":{"value":{}}}]`},
@@ -84,23 +95,38 @@ Repeatable.`,
 			"NEEDS_REVIEW is treated as terminal — review and approve at the dashboard URL.",
 			"--outputs entries must match the shape of the processor they replace (extract/classify/split).",
 			"--secret values are not echoed back; use them for per-run API keys, not as run metadata.",
+			"--package needs a workflow with a COLLECT step before its EXTRACT step, and can't be combined with --outputs or --text.",
 		},
 		SeeAlso:  []string{"extract", "workflows run batch", "workflows runs watch", "workflows runs get", "webhooks subscriptions create"},
 		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: false},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled, extendx.StatusRejected},
-		Args:     cobra.MaximumNArgs(1),
+		Args:     cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {
 				return err
 			}
+			pkgInputs, err := pkg.inputs("workflows run", "extend workflows run batch", args)
+			if err != nil {
+				return err
+			}
 			input := ""
-			if len(args) > 0 {
+			if pkgInputs != nil {
+				switch {
+				case outputsPath != "":
+					return errors.New("--outputs can't be used with --package; a package run produces one merged result")
+				case text != "":
+					return errors.New("--text can't be used with --package; a package takes files, file IDs or URLs")
+				case name != "":
+					return errors.New("--name applies to a single URL or --text input, not to --package")
+				}
+			} else if len(args) > 0 {
 				input = args[0]
 			}
 			return runWorkflow(cmd.Context(), app, workflowParams{
 				input:       input,
+				pkg:         pkgInputs,
 				text:        text,
 				name:        name,
 				workflowID:  workflowID,
@@ -125,6 +151,7 @@ Repeatable.`,
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
 			cmd.Flags().StringVar(&text, "text", "", "Run the workflow on this inline text instead of a file/URL/ID input (omit the positional <input>)")
 			cmd.Flags().StringVar(&name, "name", "", "Display name for the input (honored for --text and URL inputs)")
+			pkg.attach(cmd)
 			meta.attach(cmd)
 			_ = cmd.MarkFlagRequired("using")
 		},
@@ -134,6 +161,7 @@ Repeatable.`,
 
 type workflowParams struct {
 	input       string
+	pkg         *packageInputs // set for a --package run, instead of input
 	text        string
 	name        string
 	workflowID  string
@@ -153,25 +181,29 @@ func runWorkflow(ctx context.Context, app *App, p workflowParams) error {
 		return err
 	}
 
-	ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
-	if err != nil {
-		return err
-	}
-
-	file, err := extendx.BuildWorkflowFile(ref)
-	if err != nil {
-		return err
-	}
-
 	wf := &extend.WorkflowReference{ID: p.workflowID}
 	if p.version != "" {
 		v := extend.ProcessorVersionString(p.version)
 		wf.Version = &v
 	}
 
-	req := &extend.WorkflowRunsCreateRequest{
-		Workflow: wf,
-		File:     file,
+	req := &extend.WorkflowRunsCreateRequest{Workflow: wf}
+	if p.pkg != nil {
+		refs, err := p.pkg.resolve(ctx, app, cli, p.password)
+		if err != nil {
+			return err
+		}
+		if req.Package, err = extendx.BuildWorkflowPackage(refs); err != nil {
+			return err
+		}
+	} else {
+		ref, err := resolveInputOrText(ctx, app, cli, p.input, p.text, p.name, p.password)
+		if err != nil {
+			return err
+		}
+		if req.File, err = extendx.BuildWorkflowFile(ref); err != nil {
+			return err
+		}
 	}
 	if p.metadata != nil {
 		md := extend.RunMetadata(p.metadata)
@@ -257,8 +289,12 @@ func renderWorkflowResult(app *App, run *extend.WorkflowRun) error {
 
 func renderWorkflowTTY(app *App, run *extend.WorkflowRun) error {
 	pal := paletteFor(app.IO)
-	fmt.Fprintf(app.IO.Out, "%s %s (%s, %d step%s)\n",
-		statusIcon(pal, extendx.RunStatus(run.Status)), run.ID, run.Status, len(run.StepRuns), pluralize(len(run.StepRuns)))
+	files := ""
+	if n := len(run.Files); n > 1 {
+		files = fmt.Sprintf("%d files, ", n)
+	}
+	fmt.Fprintf(app.IO.Out, "%s %s (%s, %s%d step%s)\n",
+		statusIcon(pal, extendx.RunStatus(run.Status)), run.ID, run.Status, files, len(run.StepRuns), pluralize(len(run.StepRuns)))
 	if run.DashboardURL != "" {
 		fmt.Fprintf(app.IO.Out, "  %s\n", pal.Dimf("Dashboard: %s", run.DashboardURL))
 	}
