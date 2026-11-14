@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +149,39 @@ func TestResolveHTTPTimeout(t *testing.T) {
 				t.Errorf("timeout = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A mistake in --output or --jq must fail before the command does any
+// work: found after the run, it would waste a run that already finished.
+func TestOutputFlagsAreCheckedBeforeAnyRequest(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("%s %s was sent before the output flags were checked", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	t.Setenv("EXTEND_API_KEY", "test-key")
+	t.Setenv("EXTEND_BASE_URL", srv.URL())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cases := []struct {
+		name      string
+		envOutput string
+		args      []string
+		want      string
+	}{
+		{"jq syntax", "", []string{"extract", "file_x", "--using", "ex_1", "--jq", ".output.value["}, "invalid --jq expression"},
+		{"jq unknown function", "", []string{"extract", "file_x", "--using", "ex_1", "--jq", ".output | nosuchfunction"}, "invalid --jq expression"},
+		{"unknown format", "", []string{"extract", "file_x", "--using", "ex_1", "-o", "csv"}, `unknown output format "csv"`},
+		{"unknown format from the environment", "jsn", []string{"extract", "file_x", "--using", "ex_1"}, `EXTEND_OUTPUT: unknown output format "jsn"`},
+		{"jq with markdown", "", []string{"parse", "file_x", "-o", "markdown", "--jq", ".status"}, "--jq cannot be combined with -o markdown"},
+	}
+	for _, tc := range cases {
+		t.Setenv("EXTEND_OUTPUT", tc.envOutput)
+		root := NewRoot()
+		root.SetArgs(tc.args)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		if err := root.Execute(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
 	}
 }

@@ -195,12 +195,36 @@ func normalize(payload any) (any, error) {
 	return out, nil
 }
 
-func applyJQ(expr string, value any) ([]any, error) {
+// CheckJQ reports whether expr can be used as a --jq expression, so a
+// mistake in it can be rejected before any work is done. "" is valid.
+func CheckJQ(expr string) error {
+	if expr == "" {
+		return nil
+	}
+	_, err := compileJQ(expr)
+	return err
+}
+
+// compileJQ also catches what parsing alone lets through, such as a
+// call to a function that doesn't exist.
+func compileJQ(expr string) (*gojq.Code, error) {
 	q, err := gojq.Parse(expr)
 	if err != nil {
-		return nil, fmt.Errorf("parse --jq: %w", err)
+		return nil, fmt.Errorf("invalid --jq expression: %w", err)
 	}
-	iter := q.Run(value)
+	code, err := gojq.Compile(q)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --jq expression: %w", err)
+	}
+	return code, nil
+}
+
+func applyJQ(expr string, value any) ([]any, error) {
+	code, err := compileJQ(expr)
+	if err != nil {
+		return nil, err
+	}
+	iter := code.Run(value)
 	var out []any
 	for {
 		v, ok := iter.Next()
