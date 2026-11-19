@@ -873,11 +873,8 @@ func relTime(t time.Time) string {
 }
 
 // relTimeFromISO parses an RFC 3339 string and renders it via relTime.
-// Used by call paths that receive timestamps as strings — primarily
-// the ParseRun.createdAt field (which the SDK's typed struct doesn't
-// model, so we pull it out of extraProperties as a string) and tests
-// that synthesize timestamps. An unparseable input passes through
-// verbatim so test ergonomics around `not-a-date` keep working.
+// Lists use it to show a timeCell on a terminal. An unparseable input
+// passes through verbatim.
 func relTimeFromISO(iso string) string {
 	if iso == "" {
 		return ""

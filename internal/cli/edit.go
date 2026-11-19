@@ -499,7 +499,7 @@ template's config and schema.
 					if t.File != nil {
 						fileName = t.File.Name
 					}
-					rows = append(rows, []string{t.ID, truncate(t.Name, 40), truncate(fileName, 40), relTime(t.UpdatedAt)})
+					rows = append(rows, []string{t.ID, fitCell(app, t.Name, 40), fitCell(app, fileName, 40), timeCell(t.UpdatedAt)})
 				}
 				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {

@@ -21,7 +21,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 		runVerb:    "extract",
 		bodyDoc:    processorBodyDoc(extractConfigFields),
 		rowFields: func(e *extend.ExtractorSummary) []string {
-			return []string{e.ID, e.Name, relTime(e.CreatedAt)}
+			return []string{e.ID, e.Name, timeCell(e.CreatedAt)}
 		},
 		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.ExtractorSummary, string, error) {
 			sb, sd, ps, np, err := processorListReqOpts(opts)
@@ -56,7 +56,7 @@ func extractorAccessor() processorAccessor[*extend.Extractor, *extend.ExtractorS
 			return c.ExtractorVersions.Retrieve(ctx, id, ver, &extend.ExtractorVersionsRetrieveRequest{})
 		},
 		verRowFn: func(v *extend.ExtractorVersionSummary) []string {
-			return []string{v.Version, v.ID, relTime(v.CreatedAt)}
+			return []string{v.Version, v.ID, timeCell(v.CreatedAt)}
 		},
 		createDocFn: newExtractorsCreateDoc,
 		updateFn: func(ctx context.Context, c *sdkclient.Client, id string, body json.RawMessage) (*extend.Extractor, error) {
