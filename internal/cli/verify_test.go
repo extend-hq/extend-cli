@@ -75,7 +75,21 @@ func TestVerify_UploadsAndSendsConfig(t *testing.T) {
 	if !reflect.DeepEqual(body, want) {
 		t.Errorf("body = %v, want %v", body, want)
 	}
-	// Piped output is the run's JSON.
+	// Piped output is the same summary a terminal gets.
+	if out := ta.out.String(); !strings.HasPrefix(out, "! HIGH risk: statement.pdf (2 signals)") {
+		t.Errorf("stdout = %q, want the summary", out)
+	}
+}
+
+func TestVerify_JSONOnRequest(t *testing.T) {
+	srv := verifyServer(t, verifiedRun("HIGH"))
+	ta := newTestApp(t, srv)
+	ta.app.Format = "json"
+	cmd := findCmd(t, ta.app, "verify")
+	cmd.SetArgs([]string{"file_stmt"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
 	if out := ta.out.String(); !strings.Contains(out, `"riskLevel":"HIGH"`) {
 		t.Errorf("stdout = %q, want the run's JSON", out)
 	}

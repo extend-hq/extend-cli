@@ -311,7 +311,7 @@ instead of the inline payload (useful for large documents).`
 	}
 	out := OutputSpec{TTY: OutputJSON, Pipe: OutputJSON}
 	if s.kind == extendx.KindVerify {
-		out.TTY = OutputPretty
+		out = OutputSpec{TTY: OutputPretty, Pipe: OutputPretty}
 	}
 	return &CommandDoc{
 		Use:     "get <run-id>",

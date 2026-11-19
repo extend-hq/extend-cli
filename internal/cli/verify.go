@@ -62,7 +62,7 @@ about 10 minutes with the default engine. --wait=false returns the run at
 once; Verify runs send no webhook events, so follow it with 'extend
 verify runs watch'.
 
-In a terminal the result reads like this; piped, it's the run's JSON:
+The result reads like this, piped or not; -o json prints the whole run:
 
     ! HIGH risk: statement.pdf (1 signal)
       Summary: A row was deleted from the fees table after the document was signed.
@@ -71,7 +71,7 @@ In a terminal the result reads like this; piped, it's the run's JSON:
       HIGH    DIGITAL_SIGNATURE_INTEGRITY
               The document was changed after a certification that allows no changes.
 
-The JSON has output.riskLevel (LOW, MEDIUM or HIGH), output.summary and
+The run has output.riskLevel (LOW, MEDIUM or HIGH), output.summary and
 output.signals: each with a type, riskAssessment.level, a summary, and
 evidence that names what was found and where (page and bounding box).
 
@@ -114,7 +114,7 @@ every verify command fails and says so.`,
 			"--fail-on needs the result, so it can't be combined with --wait=false; use 'extend verify runs watch <id> --fail-on high' instead.",
 		},
 		SeeAlso:  []string{"verify runs watch", "verify runs get", "verify runs list", "extract", "parse", "webhooks verify"},
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -316,10 +316,10 @@ func riskGate(run *extend.VerifyRun, failOn extend.VerifyRiskLevel) error {
 	return nil
 }
 
-// renderVerifyResult prints the risk, summary and signals in a terminal,
-// and the run's JSON otherwise.
+// renderVerifyResult prints the risk, summary and signals, or the run in
+// the format asked for.
 func renderVerifyResult(app *App, run *extend.VerifyRun) error {
-	if app.Format != "" || app.JQ != "" || !app.IO.IsStdoutTTY() {
+	if app.Format != "" || app.JQ != "" {
 		return renderWithDefault(app, run, output.FormatJSON)
 	}
 	pal := paletteFor(app.IO)
