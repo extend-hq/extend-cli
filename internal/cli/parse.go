@@ -83,7 +83,7 @@ knobs in the same forms.
 			"Parse runs cannot be cancelled once submitted (unlike extract/classify/split).",
 		},
 		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get"},
-		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
 		Args:     cobra.ExactArgs(1),

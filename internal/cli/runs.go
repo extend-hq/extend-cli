@@ -279,6 +279,15 @@ run is currently in. To wait for a terminal state, use 'extend %s'.`,
 	}
 }
 
+// watchOutput is how watch prints the finished run: as the originating
+// command does, which for parse is markdown whether piped or not.
+func (s runsGroupSpec) watchOutput() OutputSpec {
+	if s.kind == extendx.KindParse {
+		return OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown}
+	}
+	return OutputSpec{TTY: OutputPretty, Pipe: OutputJSON}
+}
+
 func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
@@ -314,7 +323,7 @@ works as expected.`, statusListProse(s.watchFailures), s.path("runs watch")),
 		},
 		Gotchas:  gotchas,
 		SeeAlso:  s.seeAlso("watch"),
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:   s.watchOutput(),
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: s.watchFailures,
 		Args:     cobra.ExactArgs(1),

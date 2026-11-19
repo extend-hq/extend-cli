@@ -98,15 +98,11 @@ func TestAPIKeyEnvVar(t *testing.T) {
 	}
 }
 
-// TestRenderListDefault_TableEvenWhenPiped guards the format-default
-// flip: with no -o flag and no --jq, rendering MUST produce the
-// human-readable table even when stdout isn't a TTY (i.e. when the
-// process is being driven by an agent harness that captures stdout).
-// JSON is only chosen when explicitly requested via -o or implied by
-// --jq.
-func TestRenderListDefault_TableEvenWhenPiped(t *testing.T) {
+// TestRenderListDefault_Table: with no format chosen and no --jq, a list
+// renders as the table. Choosing JSON for piped output happens earlier,
+// in the root command (see TestPipedOutputDefaultsToJSON).
+func TestRenderListDefault_Table(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
-	// Both streams left as non-TTY (the default), simulating a pipe.
 	app := &App{IO: ios}
 
 	pages := []any{fakePage{NextPageToken: ""}}
@@ -118,7 +114,7 @@ func TestRenderListDefault_TableEvenWhenPiped(t *testing.T) {
 	// Table output contains the column names (uppercased by the table
 	// renderer) and the row values.
 	if !strings.Contains(strings.ToLower(got), "id") || !strings.Contains(got, "ex_abc") {
-		t.Errorf("expected table output even when stdout is piped, got: %q", got)
+		t.Errorf("expected table output, got: %q", got)
 	}
 	// JSON output would start with {. Make sure we did NOT fall back to JSON.
 	if strings.HasPrefix(strings.TrimSpace(got), "{") {
@@ -127,8 +123,7 @@ func TestRenderListDefault_TableEvenWhenPiped(t *testing.T) {
 }
 
 // TestRenderListDefault_JQImpliesJSON confirms that passing --jq
-// switches the default to JSON (because jq operates on JSON), even
-// though the format-default flip otherwise picks the table form.
+// switches the default to JSON (because jq operates on JSON).
 func TestRenderListDefault_JQImpliesJSON(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	app := &App{IO: ios, JQ: ".[].id"}
@@ -169,11 +164,11 @@ func TestRenderListDefault_ExplicitJSON(t *testing.T) {
 	}
 }
 
-// TestRenderListDefault_EmptyMessageWhenPiped guards that an empty
-// list renders the human-friendly emptyMsg even when stdout is piped
-// (the same path TestWebhooksEndpointsList_Empty exercises through
-// the full command tree).
-func TestRenderListDefault_EmptyMessageWhenPiped(t *testing.T) {
+// TestRenderListDefault_EmptyMessage guards that an empty list renders
+// the human-friendly emptyMsg in place of a header-only table (the same
+// path TestWebhooksEndpointsList_Empty exercises through the full
+// command tree).
+func TestRenderListDefault_EmptyMessage(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	app := &App{IO: ios}
 

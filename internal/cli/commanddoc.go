@@ -313,6 +313,9 @@ func validateCommandLeaf(e Entry) []error {
 	if d.Output.Pipe != "" && !validOutputMode(string(d.Output.Pipe)) {
 		errs = append(errs, fmt.Errorf("%s: Output.Pipe %q not a valid OutputMode", e.Path, d.Output.Pipe))
 	}
+	if d.Output.Pipe != OutputJSON && d.Output.Pipe != d.Output.TTY {
+		errs = append(errs, fmt.Errorf("%s: Output.Pipe %q must be json or the same as Output.TTY %q; JSON is the only piped default the root command applies", e.Path, d.Output.Pipe, d.Output.TTY))
+	}
 	if d.Wait != nil {
 		if !validWaitProfile(string(d.Wait.Profile)) {
 			errs = append(errs, fmt.Errorf("%s: Wait.Profile %q not valid", e.Path, d.Wait.Profile))

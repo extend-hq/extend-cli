@@ -77,7 +77,12 @@ workflows runs list --batch <id>' instead."
 
 **`Output`** — required for command leaves. `TTY` is the default when
 stdout is a terminal; `Pipe` is the default when piped. Both must be
-members of `OutputModes`.
+members of `OutputModes`. The root command applies `Pipe`: when stdout
+isn't a terminal and no format was chosen, a `Pipe` of `json` sets the
+format to JSON before `RunE` runs, so a command only has to honor
+`app.Format`. `Pipe` must therefore be `json`, or the same as `TTY` for a
+command that prints the same thing either way (`parse`'s markdown, a
+download's bytes).
 
 **`Wait` and `Failures`** — set together. `Wait` describes the polling
 profile and default behaviour; `Failures` lists the run statuses that

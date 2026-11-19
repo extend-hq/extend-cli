@@ -147,7 +147,7 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	var b strings.Builder
 	b.WriteString("Output\n\n")
 	b.WriteString("The --output (-o) flag selects the rendering format:\n\n")
-	b.WriteString("  json       Pretty-printed JSON (script-friendly default for piped output)\n")
+	b.WriteString("  json       JSON: indented on a terminal, one line when piped\n")
 	b.WriteString("  yaml       YAML\n")
 	b.WriteString("  raw        Unformatted strings (typically used with --jq)\n")
 	b.WriteString("  id         Single ID per result (composes with xargs / shell pipes)\n")
@@ -159,6 +159,11 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	b.WriteString("Streams: data goes to stdout, status/log lines go to stderr.\n")
 	b.WriteString("Color: NO_COLOR=1 disables; CLICOLOR_FORCE=1 forces.\n\n")
 	b.WriteString("Per-command default (when --output is not set):\n\n")
+	b.WriteString("  On a terminal, commands print a summary or a table. When stdout is\n")
+	b.WriteString("  not a terminal (a pipe, a file, an agent's shell), most print JSON\n")
+	b.WriteString("  instead, so the output can be parsed without asking for it; parse\n")
+	b.WriteString("  prints its markdown either way. Pass -o table to get a list's table\n")
+	b.WriteString("  when piped, or set EXTEND_OUTPUT to choose a format for every call.\n\n")
 
 	type row struct{ path, tty, pipe string }
 	var rows []row

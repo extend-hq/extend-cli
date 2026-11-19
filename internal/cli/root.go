@@ -157,7 +157,10 @@ respective env vars.`,
 // flags, version metadata, the NewClient closure on App, the help template,
 // and the version subcommand.
 func NewRoot() *cobra.Command {
-	io := iostreams.System()
+	return newRoot(iostreams.System())
+}
+
+func newRoot(io *iostreams.IOStreams) *cobra.Command {
 	app := &App{IO: io}
 
 	root := RootDoc(app).Build()
@@ -172,6 +175,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		formatFromEnv := app.Format == ""
 		applyEnvDefaults(app)
+		applyPipedDefault(app, cmd)
 		app.cmdContext = cmd.Context()
 		return checkOutputFlags(app, formatFromEnv)
 	}
@@ -283,6 +287,19 @@ func applyEnvDefaults(app *App) {
 	}
 	if app.Env == "" {
 		app.Env = os.Getenv(envEnv)
+	}
+}
+
+// applyPipedDefault selects JSON when stdout isn't a terminal (a pipe, a
+// file, an agent's shell) and cmd declares JSON as its piped default, so
+// the output can be parsed without asking for it. A format chosen with
+// --output or EXTEND_OUTPUT is left alone.
+func applyPipedDefault(app *App, cmd *cobra.Command) {
+	if app.Format != "" || app.IO.IsStdoutTTY() {
+		return
+	}
+	if cmd.Annotations[AnnotOutputPipe] == string(OutputJSON) {
+		app.Format = string(output.FormatJSON)
 	}
 }
 

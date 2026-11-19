@@ -356,6 +356,33 @@ func TestValidateRejectsDuplicateTriggers(t *testing.T) {
 	}
 }
 
+// The root command applies only one piped default, JSON. A leaf that
+// declares another one would document output it never prints.
+func TestValidateRejectsPipeDefaultTheRootCannotApply(t *testing.T) {
+	leaf := func(use string, out OutputSpec) *CommandDoc {
+		return &CommandDoc{Use: use, Summary: "Leaf for the piped-default rule", RunE: noopRun, Output: out, Triggers: triplet(use), Examples: oneExample("extend " + use), Details: "x"}
+	}
+	root := &CommandDoc{
+		Use:     "extend",
+		Summary: "Root for piped-default validation test",
+		Details: "x",
+		Subcommands: []*CommandDoc{
+			leaf("alpha", OutputSpec{TTY: OutputPretty, Pipe: OutputTable}),
+			leaf("beta", OutputSpec{TTY: OutputPretty, Pipe: OutputJSON}),
+			leaf("gamma", OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown}),
+		},
+	}
+	var got []string
+	for _, e := range Validate(root) {
+		if strings.Contains(e.Error(), "must be json or the same as Output.TTY") {
+			got = append(got, e.Error())
+		}
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "alpha") {
+		t.Errorf("piped-default errors = %v, want exactly one, for alpha", got)
+	}
+}
+
 // TestValidateRejectsUnresolvedSeeAlso asserts SeeAlso entries pointing
 // at non-existent commands are caught.
 func TestValidateRejectsUnresolvedSeeAlso(t *testing.T) {
