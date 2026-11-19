@@ -109,8 +109,9 @@ type Example struct {
 	Note string
 }
 
-// OutputSpec declares which OutputMode a command renders by default for
-// each stream type.
+// OutputSpec declares which OutputMode a command renders by default.
+// Piping doesn't change a command's format (only styling: no color, raw
+// markdown), so both fields hold the same mode; Validate enforces it.
 type OutputSpec struct {
 	// TTY is the default when stdout is a terminal.
 	TTY OutputMode
@@ -312,6 +313,9 @@ func validateCommandLeaf(e Entry) []error {
 	}
 	if d.Output.Pipe != "" && !validOutputMode(string(d.Output.Pipe)) {
 		errs = append(errs, fmt.Errorf("%s: Output.Pipe %q not a valid OutputMode", e.Path, d.Output.Pipe))
+	}
+	if d.Output.Pipe != d.Output.TTY {
+		errs = append(errs, fmt.Errorf("%s: Output.Pipe %q must match Output.TTY %q: commands print the same format piped or not, and JSON only with -o json or --jq", e.Path, d.Output.Pipe, d.Output.TTY))
 	}
 	if d.Wait != nil {
 		if !validWaitProfile(string(d.Wait.Profile)) {

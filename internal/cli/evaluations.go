@@ -75,7 +75,7 @@ processor accuracy via 'extend evaluations runs get'.
 			{Label: "Next page", Cmd: "extend evaluations list --page-token <token-from-previous-response>"},
 		},
 		SeeAlso: []string{"evaluations get", "evaluations create"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -281,7 +281,7 @@ accuracy score.
 			{Label: "Next page", Cmd: "extend evaluations items list evs_abc --page-token <token-from-previous-response>"},
 		},
 		SeeAlso: []string{"evaluations get", "evaluations items get", "evaluations items create"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()

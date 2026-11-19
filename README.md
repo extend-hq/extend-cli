@@ -141,6 +141,8 @@ Run `extend <command> --help` for flags.
 ## Output
 
 `-o json|yaml|raw|id|table|markdown` overrides the per-command default.
+Piping doesn't change the format, so scripts that parse output should pass
+`-o json`.
 `--jq '<expr>'` filters structured payloads before `json`, `yaml`, `raw`, or
 `id` formatting. Data goes to stdout, status to stderr. Honors `NO_COLOR` and
 `CLICOLOR_FORCE`.

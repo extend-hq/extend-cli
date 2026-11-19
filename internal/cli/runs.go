@@ -342,6 +342,18 @@ run is currently in. To wait for a terminal state, use 'extend %s'.`,
 	}
 }
 
+// watchOutput is how watch prints the finished run: the way the
+// originating command does.
+func (s runsGroupSpec) watchOutput() OutputSpec {
+	switch s.kind {
+	case extendx.KindExtract, extendx.KindDetectForm:
+		return OutputSpec{TTY: OutputJSON, Pipe: OutputJSON}
+	case extendx.KindParse:
+		return OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown}
+	}
+	return OutputSpec{TTY: OutputPretty, Pipe: OutputPretty}
+}
+
 func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
@@ -410,7 +422,7 @@ passes it.`, statusListProse(s.watchFailures), s.path("runs watch"))
 		Examples:  examples,
 		Gotchas:   gotchas,
 		SeeAlso:   s.seeAlso("watch"),
-		Output:    OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:    s.watchOutput(),
 		Wait:      &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures:  s.watchFailures,
 		Args:      cobra.ExactArgs(1),
@@ -551,7 +563,7 @@ completed. Workflow runs are the only run type with an update endpoint.`,
 			"Pass at least one of --from-file, --name, --metadata, or --tag; otherwise the command rejects with 'nothing to update'.",
 		},
 		SeeAlso: s.seeAlso("update"),
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]

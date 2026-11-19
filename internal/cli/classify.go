@@ -85,7 +85,7 @@ JSON, a path, a file:// URI, or '-' to read from stdin.
 			"--patch requires --using; for a standalone config use --config instead.",
 		},
 		SeeAlso:  []string{"extract", "parse", "classify batch", "classify runs watch", "classify runs get"},
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     oneInput("classify", true),

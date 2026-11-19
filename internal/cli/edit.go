@@ -140,7 +140,7 @@ the output must remain editable.
 			"--schema with --template replaces the template's saved values too; edit a copy of the template's schema rather than writing a new one.",
 		},
 		SeeAlso:  []string{"detect-form", "edit templates list", "edit runs watch", "edit runs get", "files download"},
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed},
 		// Schema scaffolding used to live under this verb ('edit schema
@@ -455,7 +455,7 @@ template's config and schema.
 			"--name-contains also matches an exact edt_ ID.",
 		},
 		SeeAlso: []string{"edit templates get", "edit"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {

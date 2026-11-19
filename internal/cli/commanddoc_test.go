@@ -356,6 +356,32 @@ func TestValidateRejectsDuplicateTriggers(t *testing.T) {
 	}
 }
 
+// Piping doesn't change a command's format, so a leaf that declares a
+// different piped default documents output it never prints.
+func TestValidateRejectsAPipedDefaultThatDiffers(t *testing.T) {
+	leaf := func(use string, out OutputSpec) *CommandDoc {
+		return &CommandDoc{Use: use, Summary: "Leaf for the piped-default rule", RunE: noopRun, Output: out, Triggers: triplet(use), Examples: oneExample("extend " + use), Details: "x"}
+	}
+	root := &CommandDoc{
+		Use:     "extend",
+		Summary: "Root for piped-default validation test",
+		Details: "x",
+		Subcommands: []*CommandDoc{
+			leaf("alpha", OutputSpec{TTY: OutputTable, Pipe: OutputJSON}),
+			leaf("beta", OutputSpec{TTY: OutputTable, Pipe: OutputTable}),
+		},
+	}
+	var got []string
+	for _, e := range Validate(root) {
+		if strings.Contains(e.Error(), "must match Output.TTY") {
+			got = append(got, e.Error())
+		}
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "alpha") {
+		t.Errorf("piped-default errors = %v, want exactly one, for alpha", got)
+	}
+}
+
 // TestValidateRejectsUnresolvedSeeAlso asserts SeeAlso entries pointing
 // at non-existent commands are caught.
 func TestValidateRejectsUnresolvedSeeAlso(t *testing.T) {

@@ -65,7 +65,7 @@ subscriptions list' to see what each endpoint is subscribed to.
 			{Label: "Next page", Cmd: "extend webhooks endpoints list --page-token <token-from-previous-response>"},
 		},
 		SeeAlso: []string{"webhooks endpoints get", "webhooks endpoints create", "webhooks subscriptions list"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {

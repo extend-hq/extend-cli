@@ -67,7 +67,7 @@ classifier, splitter, or workflow) and a set of event types. Use
 			{Label: "Next page", Cmd: "extend webhooks subscriptions list --page-token <token-from-previous-response>"},
 		},
 		SeeAlso: []string{"webhooks subscriptions get", "webhooks subscriptions create", "webhooks endpoints list"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {

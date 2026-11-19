@@ -23,7 +23,7 @@ const (
 	// --output flag is set. Value must be a member of OutputModes.
 	AnnotOutputTTY = "output.tty"
 	// AnnotOutputPipe: format rendered when stdout is not a terminal and no
-	// --output flag is set. Value must be a member of OutputModes.
+	// --output flag is set; always the same mode as AnnotOutputTTY.
 	AnnotOutputPipe = "output.pipe"
 	// AnnotWaitProfile: which extendx.WaitProfile this command's wait loop
 	// uses. Value must be a member of WaitProfileNames.

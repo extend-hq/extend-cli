@@ -77,7 +77,10 @@ workflows runs list --batch <id>' instead."
 
 **`Output`** — required for command leaves. `TTY` is the default when
 stdout is a terminal; `Pipe` is the default when piped. Both must be
-members of `OutputModes`.
+members of `OutputModes`, and they must be the same mode: piping doesn't
+change a command's format, only its styling (no color, raw markdown).
+JSON comes from `-o json` or `--jq`, never from the pipe, so agent
+harnesses, which always pipe, get the same compact output a person sees.
 
 **`Wait` and `Failures`** — set together. `Wait` describes the polling
 profile and default behaviour; `Failures` lists the run statuses that

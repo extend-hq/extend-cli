@@ -165,7 +165,7 @@ The %s ID column is the input for `+"`extend %s get <id>`"+`.`,
 			fmt.Sprintf("%s create", a.pluralNoun),
 			a.runVerb,
 		},
-		Output: OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output: OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {
@@ -295,7 +295,7 @@ is the editable working copy.
 			fmt.Sprintf("%s get", a.pluralNoun),
 			fmt.Sprintf("%s versions get", a.pluralNoun),
 		},
-		Output: OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output: OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
