@@ -374,12 +374,12 @@ func writeSkillWorkflows(b *strings.Builder) {
 
 ### Configure a webhook for workflow completions
 
-1. Create the receiving endpoint and capture the signing secret
-   (returned only once — store it):
+1. Create the receiving endpoint with no global events (` + "`workflow_run.*`" + `
+   events live on subscriptions, not endpoints) and capture the signing
+   secret (returned only once — store it):
 
        extend webhooks endpoints create --url https://x.com/hook \
-           --name prod \
-           --events workflow_run.completed,workflow_run.failed -o json \
+           --name prod -o json \
            | jq -r '.signingSecret' > webhook.secret
 
 2. Bind the endpoint to a specific workflow:

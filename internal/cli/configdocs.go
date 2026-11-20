@@ -34,13 +34,16 @@ const splitConfigFields = `  - baseProcessor (string) — "splitting_performance
         be merged (splitting_light >= 1.3.0 / splitting_performance >= 1.5.0).
   - splitRules (string) — natural-language guidance on where to split and how to group pages.
   - advancedOptions (object) — splitExcelDocumentsBySheetEnabled, pageOverlapEnabled,
-    pageRanges. (Legacy splitIdentifierRules/splitMethod are accepted but ignored on
+    pageRanges, strictIdentifierModeEnabled (only merge segments whose identifierKey
+    values match; default on for splitting_performance >= 1.6.2 and splitting_light
+    >= 1.4.1). (Legacy splitIdentifierRules/splitMethod are accepted but ignored on
     current base versions.)
   - parseConfig (object) — parsing options applied before splitting; see ` + "`extend parse --help`" + `.`
 
 // extractConfigFields documents the ExtractConfigJSON object (extract
 // --config and the `config` of an extractors create/update body).
-const extractConfigFields = `  - schema (object, required) - JSON Schema of the data to extract. The root
+const extractConfigFields = `  - schema (object) - JSON Schema of the data to extract (optional on --patch or an
+    empty draft; required to define fields). The root
     must be an object. Allowed types: string, number, integer, boolean, object,
     array. Primitive fields must be nullable, e.g. "type": ["string", "null"];
     primitive array items are not nullable. Enums must contain only strings plus
@@ -111,7 +114,8 @@ const extractConfigFields = `  - schema (object, required) - JSON Schema of the 
 
 // classifyConfigFields documents the ClassifyConfig object (classify
 // --config and the `config` of a classifiers create/update body).
-const classifyConfigFields = `  - baseProcessor (string) — "classification_performance" (default) or "classification_light".
+const classifyConfigFields = `  - baseProcessor (string) — "classification_performance" (default), "classification_standard",
+    or "classification_light".
   - baseVersion (string) — pin a base-processor version; defaults to the latest stable.
   - classifications (array, required) — the categories. Provide at least one entry, and
     at least one entry must have type "other". Each entry: id, type, description.
@@ -156,6 +160,9 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - Simple steps use next entries shaped as { "step": "target_step" }.
       - CLASSIFY and SPLIT route with classificationId values. These must match
         classification IDs from the classifier/splitter config, not type labels.
+      - ROUTER routes with branchId values matching config.branches[].id, plus
+        branchId "otherwise" for the fall-through route when no branch matches.
+      - VALIDATION routes with result values: "pass" or "fail".
       - CONDITIONAL routes with conditionId values matching config.conditions[].id.
       - RULE_VALIDATION and VALIDATION route with result values: "pass" or "fail".
       - ROUTER routes with branchId values matching config.branches[].id, plus the
@@ -210,8 +217,23 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - SPLIT - splits a multi-document file and routes each sub-document by classificationId.
       - MERGE_EXTRACT - combines multiple upstream extract outputs; config.mergeOrder
         controls overlapping-field priority.
-      - CONDITIONAL - routes by IF/ELSE conditions over upstream output values, for
-        example leftOperand "{{ extract.output.value.total }}" with operation GTE.
+      - VALIDATION - runs config.blocks in order; routes "fail" if any block fails,
+        "pass" if all pass. Each block has a name and a blockType:
+          { "name": "Total within limit", "blockType": "code",
+            "code": { "language": "javascript",
+                      "code": "return context.outputs.extract.total.value <= 10000;" } }
+          { "name": "Vendor plausible", "blockType": "semantic",
+            "semantic": { "promptText": "{{ outputs.extract.vendor_name.value }} should be a registered company." } }
+        Code blocks are JavaScript only and must end with return true, false, or
+        [boolean, "reason"]; they read context.outputs.<stepName>.<field>.value,
+        context.files, and context.metadata. Semantic promptText is evaluated by an
+        LLM and embeds data with {{ jmespath }} references.
+      - ROUTER - routes to the first branch in config.branches whose predicate block
+        returns true, else to the "otherwise" route. Each branch is
+        { "id": "high_value", "name": "High value", "block": { <VALIDATION block> } }.
+      - CONDITIONAL - legacy; prefer ROUTER for new workflows. Routes by IF/ELSE
+        conditions over upstream output values, for example leftOperand
+        "{{ extract.output.value.total }}" with operation GTE.
         Supported operation/operator values: EQUALS, GTE, LTE, IS_NULL, CONTAINS,
         and NO_OP for a branch with no comparison. Use conditionId in next routes.
         Extraction confidence can be referenced with "{{ extract.avgConfidence }}",
@@ -224,11 +246,12 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
         can use previous step outputs, external validation outputs, and run metadata;
         each rule points to an extractor reference. Include a final rule with formula
         "TRUE" as the default fallback so unmatched documents do not fail at runtime.
-      - RULE_VALIDATION - checks boolean formulas against extracted data; route on
-        result "pass" or "fail". Rules have name, optional description, and formula;
-        the formula must evaluate to a boolean and may reference any earlier step
-        output, including data fetched with EXTERNAL_DATA_VALIDATION. A common
-        topology routes pass to WEBHOOK_RESPONSE and fail to HUMAN_REVIEW.
+      - RULE_VALIDATION - legacy; prefer VALIDATION for new workflows. Checks boolean
+        formulas against extracted data; route on result "pass" or "fail". Rules have
+        name, optional description, and formula; the formula must evaluate to a boolean
+        and may reference any earlier step output, including data fetched with
+        EXTERNAL_DATA_VALIDATION. A common topology routes pass to WEBHOOK_RESPONSE
+        and fail to HUMAN_REVIEW.
       - VALIDATION - checks workflow data with config.blocks, all of which must pass;
         route on result "pass" or "fail". A block is code or natural language:
           { "name": "totals_match", "blockType": "code",
@@ -257,8 +280,8 @@ const workflowStepsFields = `  - steps (array) - the workflow's processing graph
       - Human-in-the-loop: trigger -> parse -> extract -> review -> webhook.
       - Classify and route: trigger -> parse -> classify -> extractor branches -> review/webhook.
       - Split and collect: trigger -> parse -> split -> extractor/review branches -> collect -> webhook.
-      - Conditional review: trigger -> parse -> extract -> conditional -> review or webhook.
-      - Validation gate: trigger -> parse -> extract -> rule validation -> pass webhook or fail review.`
+      - Conditional review: trigger -> parse -> extract -> router -> review or webhook.
+      - Validation gate: trigger -> parse -> extract -> validation -> pass webhook or fail review.`
 
 // actionConfigDoc wraps a bare field catalog with the lead-in shown under
 // an action verb's --config flag (extract/classify/split). The object is
@@ -397,8 +420,8 @@ each field. Populate the value keys; leave detected structural keys as generated
   - extend_edit:page_index (int) — zero-based page index where the field sits.
   - extend_edit:image (object) — signature image fill: {"image_url":"https://..."};
     PNG or JPEG only.
-  - extend_edit:text_edit_options (object) — text styling: combing, maxLength,
-    fontSize, fontColor (RGB 0-255), font.
+  - extend_edit:text_edit_options (object) — text styling: combing, maxLength, multiLine,
+    fontSize, color (RGB 0-255; fontColor is a deprecated alias), opacity (0-1), font.
   - extend_edit:column_width (number) — column width percentage for table fields.
   - extend_edit:row_heights (array) — row height percentages for array/table fields.
   - extend_edit:source_acroform (object) — the PDF's own form field behind this property:
@@ -416,7 +439,7 @@ extend_edit:* keys.`
 
 // editAdvancedOptionsFields documents the EditConfigAdvancedOptions object
 // (edit --advanced-options).
-const editAdvancedOptionsFields = `  flattenPdf                       bool  Make the filled form non-editable (server default: true).
+const editAdvancedOptionsFields = `  flattenPdf                       bool  Make the filled form non-editable (server default: true, false on 1.0.0-beta).
   nativeFieldsOnly                 bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
   tableParsingEnabled              bool  Parse table regions as arrays of objects so their cells can be filled.
   radioEnumsEnabled                bool  Model a radio-button group as a single-choice enum so only one option fills.

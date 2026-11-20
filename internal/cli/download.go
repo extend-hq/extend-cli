@@ -222,6 +222,14 @@ func stepRunFiles(step *extend.StepRun) []*extend.FileSummary {
 		if step.ExternalDataValidation != nil {
 			return step.ExternalDataValidation.Files
 		}
+	case "VALIDATION":
+		if step.Validation != nil {
+			return step.Validation.Files
+		}
+	case "ROUTER":
+		if step.Router != nil {
+			return step.Router.Files
+		}
 	}
 	return nil
 }

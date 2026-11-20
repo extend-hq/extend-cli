@@ -450,6 +450,9 @@ func renderParseResult(app *App, run *extend.ParseRun, target string) error {
 func renderMarkdown(app *App, run *extend.ParseRun) error {
 	md := concatChunks(run)
 	if md == "" {
+		if run.Status != extend.ParseRunStatusEnumProcessed {
+			fmt.Fprintf(app.IO.ErrOut, "Run %s is %s; no parsed content.\n", run.ID, run.Status)
+		}
 		return nil
 	}
 	if app.IO.IsStdoutTTY() && app.IO.ColorEnabled() {
