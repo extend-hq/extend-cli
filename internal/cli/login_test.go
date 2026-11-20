@@ -124,8 +124,9 @@ type fakeAuthServer struct {
 	// meHandler, when set, serves GET /me; unset answers 404 so tests
 	// exercise the generic-success fallback by default.
 	meHandler http.HandlerFunc
-	// meAuth records the Authorization header of the last /me call.
-	meAuth string
+	// meAuth and meWorkspace record the headers of the last /me call.
+	meAuth      string
+	meWorkspace string
 }
 
 func newFakeAuthServer(t *testing.T) *fakeAuthServer {
@@ -160,6 +161,7 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 	})
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
 		f.meAuth = r.Header.Get("Authorization")
+		f.meWorkspace = r.Header.Get("X-Extend-Workspace-Id")
 		if f.meHandler != nil {
 			f.meHandler(w, r)
 			return
@@ -576,6 +578,78 @@ func TestRunWhoami(t *testing.T) {
 		}
 		if got := out.String(); !strings.Contains(got, "API key") {
 			t.Errorf("stdout should name the API key method: %q", got)
+		}
+	})
+
+	t.Run("org-wide api key sends workspace header and shows key scope and environment", func(t *testing.T) {
+		f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"object":"me","organization":{"id":"org_1","name":"Acme"},"workspace":{"id":"ws_eu","name":"Acme EU"},"apiKey":{"name":"ci-deploy","scope":"organization","environment":"PRODUCTION"}}`)
+		}
+		t.Setenv("EXTEND_API_KEY", "sk_org")
+		ios, _, out, _ := iostreams.Test()
+		if err := runWhoami(context.Background(), &App{IO: ios, Workspace: "ws_eu"}); err != nil {
+			t.Fatalf("runWhoami: %v", err)
+		}
+		if f.meWorkspace != "ws_eu" {
+			t.Errorf("/me X-Extend-Workspace-Id = %q, want ws_eu", f.meWorkspace)
+		}
+		got := out.String()
+		for _, want := range []string{"Workspace  Acme EU (Production)", "Key        ci-deploy (organization-wide)", "Auth       API key"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("stdout missing %q:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("workspace-scoped key in test environment and -o json", func(t *testing.T) {
+		f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"object":"me","workspace":{"id":"ws_1","name":"Acme"},"apiKey":{"name":"dev-key","scope":"workspace","environment":"TEST"}}`)
+		}
+		t.Setenv("EXTEND_API_KEY", "sk_ws")
+		ios, _, out, _ := iostreams.Test()
+		if err := runWhoami(context.Background(), &App{IO: ios}); err != nil {
+			t.Fatalf("runWhoami: %v", err)
+		}
+		got := out.String()
+		for _, want := range []string{"Workspace  Acme (Test)", "Key        dev-key (workspace-scoped)"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("stdout missing %q:\n%s", want, got)
+			}
+		}
+
+		ios2, _, out2, _ := iostreams.Test()
+		if err := runWhoami(context.Background(), &App{IO: ios2, Format: "json", JQ: ".apiKey.name"}); err != nil {
+			t.Fatalf("runWhoami -o json: %v", err)
+		}
+		if got := strings.TrimSpace(out2.String()); got != `"dev-key"` {
+			t.Errorf("-o json --jq = %q, want \"dev-key\"", got)
+		}
+	})
+
+	t.Run("api error surfaces in standard format", func(t *testing.T) {
+		f.meHandler = func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"code":"INVALID_REQUEST","message":"X-Extend-Workspace-Id header is required for organization-level API keys.","requestId":"req_me_400","retryable":false}`)
+		}
+		t.Setenv("EXTEND_API_KEY", "sk_org")
+		ios, _, _, _ := iostreams.Test()
+		err := runWhoami(context.Background(), &App{IO: ios})
+		apiErr, ok := extendx.AsAPIError(err)
+		if !ok {
+			t.Fatalf("err = %v, want *extendx.APIError", err)
+		}
+		var formatted strings.Builder
+		formatError(&formatted, palette{}, err)
+		for _, want := range []string{"Error: INVALID_REQUEST", "organization-level API keys", "request: req_me_400"} {
+			if !strings.Contains(formatted.String(), want) {
+				t.Errorf("formatted error missing %q:\n%s", want, formatted.String())
+			}
+		}
+		if apiErr.StatusCode != 400 {
+			t.Errorf("StatusCode = %d, want 400", apiErr.StatusCode)
 		}
 	})
 }

@@ -136,9 +136,10 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 	}
 	httpClient := &http.Client{
 		Transport: &headerTransport{
-			next:       http.DefaultTransport,
-			userAgent:  ua,
-			apiVersion: cfg.APIVersion,
+			next:        http.DefaultTransport,
+			userAgent:   ua,
+			apiVersion:  cfg.APIVersion,
+			workspaceID: cfg.WorkspaceID,
 		},
 		Timeout:       DefaultHTTPTimeout,
 		CheckRedirect: oauth.CheckSameOriginRedirect(pinnedBase),
@@ -374,12 +375,33 @@ func populateFromBodyString(out *APIError, bodyErr error) {
 	out.Retryable = src.Retryable
 }
 
-// headerTransport sets the CLI's User-Agent, and the API version when
-// one is configured, on every request.
+// ParseAPIErrorResponse decodes a non-2xx HTTP response from a direct
+// API call (such as GET /me, which has no SDK binding yet) into the
+// CLI's standard APIError shape.
+func ParseAPIErrorResponse(status int, header http.Header, body []byte) *APIError {
+	out := &APIError{StatusCode: status}
+	if header != nil {
+		out.RequestID = header.Get("x-extend-request-id")
+	}
+	if len(body) > 0 {
+		populateFromBodyString(out, errors.New(string(body)))
+	}
+	if out.Message == "" {
+		out.Message = http.StatusText(status)
+	}
+	return sanitized(out)
+}
+
+// headerTransport sets the CLI's User-Agent, API version, and workspace
+// header on every request. Workspaces endpoints in the SDK also call
+// headers.Add("x-extend-workspace-id", req.ExtendWorkspaceID) unconditionally,
+// which would append a second (possibly empty) header value unless we
+// normalize it here.
 type headerTransport struct {
-	next       http.RoundTripper
-	userAgent  string
-	apiVersion string
+	next        http.RoundTripper
+	userAgent   string
+	apiVersion  string
+	workspaceID string
 }
 
 func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -387,6 +409,21 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", t.userAgent)
 	if t.apiVersion != "" {
 		req.Header.Set("x-extend-api-version", t.apiVersion)
+	}
+	if t.workspaceID != "" {
+		req.Header.Set("X-Extend-Workspace-Id", t.workspaceID)
+	} else if vals := req.Header.Values("X-Extend-Workspace-Id"); len(vals) > 0 {
+		var nonEmpty []string
+		for _, v := range vals {
+			if v != "" {
+				nonEmpty = append(nonEmpty, v)
+			}
+		}
+		if len(nonEmpty) == 0 {
+			req.Header.Del("X-Extend-Workspace-Id")
+		} else {
+			req.Header["X-Extend-Workspace-Id"] = nonEmpty
+		}
 	}
 	return t.next.RoundTrip(req)
 }
