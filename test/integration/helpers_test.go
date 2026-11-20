@@ -211,8 +211,13 @@ func rememberCleanup(t *testing.T, env envSetup, op string, args ...string) {
 // the caller's requireOK to report.
 func skipIfUnavailable(t *testing.T, res extendResult, marker, feature string) {
 	t.Helper()
-	if res.ExitCode != 0 && strings.Contains(string(res.Stderr), marker) {
-		t.Skipf("%s is not available to this API key; skipping", feature)
+	if res.ExitCode == 0 {
+		return
+	}
+	for _, line := range strings.Split(string(res.Stderr), "\n") {
+		if strings.Contains(line, marker) {
+			t.Skipf("%s is not available to this API key; skipping (%s)", feature, strings.TrimSpace(line))
+		}
 	}
 }
 
