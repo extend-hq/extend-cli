@@ -1247,20 +1247,20 @@
       "id": "Q-1",
       "category": "run-type-quirk",
       "path": "B",
-      "prompt": "List all my edit runs from this week.",
+      "prompt": "Cancel edit run edr_demo_w9 for me.",
       "files": [],
-      "expected_output": "Agent recognizes edit runs are not listable (there is no `edit runs list` command). Suggests `extend edit runs get edr_xxx` for individual edit runs.",
+      "expected_output": "Agent recognizes edit runs cannot be cancelled (there is no `edit runs cancel` command) and explains rather than retrying.",
       "expectations": [
         {
           "type": "stable_answer",
-          "text": "answer mentions edit not listable or runs get edr_",
-          "answer_pattern": "not listable|cannot list|no list endpoint|runs\\s+get\\s+edr_|edit\\s+runs?\\s+(?:are not|aren't|cannot)"
+          "text": "answer acknowledges edit runs cannot be cancelled",
+          "answer_pattern": "(edit|edr_).{0,40}(?:cannot|can't|can not|not).{0,20}(cancel|cancell)"
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT loop on the rejected command (max 2 attempts)",
+          "text": "agent did NOT loop on the rejected command",
           "count_under": {
-            "edit.runs.list": 3
+            "edit.runs.cancel": 3
           }
         }
       ]
@@ -1916,6 +1916,46 @@
       ]
     },
     {
+      "id": "S-11",
+      "category": "single-command",
+      "path": "B",
+      "prompt": "List my recent edit runs and tell me which ones failed.",
+      "files": [],
+      "expected_output": "Agent runs `extend edit runs list` (optionally with --status FAILED) and names edr_demo_nda as the failed run. Does NOT claim edit runs can't be listed.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent ran `extend edit runs list`",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit",
+                "runs",
+                "list"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer names the failed edit run from the listing",
+          "answer_pattern": "edr_demo_nda"
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer does not claim edit runs can't be listed",
+          "answer_must_not_match": "edit runs? (?:are not|aren't|cannot be|can't be|can not be) list"
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate edit run IDs",
+          "patterns": [
+            "edr_[a-zA-Z0-9_-]+"
+          ]
+        }
+      ]
+    },
+    {
       "id": "H-8",
       "category": "help-discovery",
       "path": "B",
@@ -2022,6 +2062,60 @@
           "type": "stable_answer",
           "text": "answer points the user at the searchable copy",
           "answer_pattern": "invoice-searchable\\.pdf"
+        }
+      ]
+    },
+    {
+      "id": "W-10",
+      "category": "workflow",
+      "path": "B",
+      "prompt": "Fill our saved 'W-9 (2024)' edit template for Acme Corp, TIN 12-3456789, and save the filled PDF to acme-w9.pdf. I don't have the template's ID handy.",
+      "files": [],
+      "expected_output": "Agent finds the template's ID with `extend edit templates list` (optionally --name-contains), then runs `extend edit --template edt_demo_w9` with the values in --instructions and --output-file acme-w9.pdf, without also passing an input file.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent looked the template up with `extend edit templates list`",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit",
+                "templates",
+                "list"
+              ],
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "extend_call",
+          "text": "agent filled edt_demo_w9 by template ID and saved it to acme-w9.pdf",
+          "must_contain": [
+            {
+              "argv_prefix": [
+                "edit"
+              ],
+              "flag_value": {
+                "template": "edt_demo_w9"
+              },
+              "flag_value_suffix": {
+                "output-file": "acme-w9.pdf"
+              },
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "type": "judge",
+          "text": "agent filled the template with the given values only",
+          "criterion": "The `extend edit --template` call supplies Acme Corp as the name and 12-3456789 as the TIN (in --instructions, or in a values or schema file the final message says it wrote), and the agent does not invent values for any other field."
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate the template ID",
+          "patterns": [
+            "edt_[a-zA-Z0-9_-]+"
+          ]
         }
       ]
     }
