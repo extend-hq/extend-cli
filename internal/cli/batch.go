@@ -12,6 +12,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -269,10 +270,13 @@ contained runs with ` + "`extend extract runs list --batch <id>`" + `.`,
 				}
 				extractor.OverrideConfig = &override
 			}
-			br, err := prep.Client.ExtractRuns.CreateBatch(cmd.Context(), &extend.ExtractRunsCreateBatchRequest{
+			req := &extend.ExtractRunsCreateBatchRequest{
 				Extractor: extractor,
 				Inputs:    items,
 				Priority:  priorityPtr(f.priority),
+			}
+			br, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.BatchRun, error) {
+				return prep.Client.ExtractRuns.CreateBatch(cmd.Context(), req, opts...)
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -347,10 +351,13 @@ contained runs with ` + "`extend classify runs list --batch <id>`" + `.`,
 				}
 				classifier.OverrideConfig = &override
 			}
-			br, err := prep.Client.ClassifyRuns.CreateBatch(cmd.Context(), &extend.ClassifyRunsCreateBatchRequest{
+			req := &extend.ClassifyRunsCreateBatchRequest{
 				Classifier: classifier,
 				Inputs:     items,
 				Priority:   priorityPtr(f.priority),
+			}
+			br, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.BatchRun, error) {
+				return prep.Client.ClassifyRuns.CreateBatch(cmd.Context(), req, opts...)
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -423,10 +430,13 @@ contained runs with ` + "`extend split runs list --batch <id>`" + `.`,
 				}
 				splitter.OverrideConfig = &override
 			}
-			br, err := prep.Client.SplitRuns.CreateBatch(cmd.Context(), &extend.SplitRunsCreateBatchRequest{
+			req := &extend.SplitRunsCreateBatchRequest{
 				Splitter: splitter,
 				Inputs:   items,
 				Priority: priorityPtr(f.priority),
+			}
+			br, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.BatchRun, error) {
+				return prep.Client.SplitRuns.CreateBatch(cmd.Context(), req, opts...)
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -523,10 +533,13 @@ contained runs with ` + "`extend parse runs list --batch <id>`" + `.`,
 					Metadata: metadataPtr(prep.Metadata),
 				}
 			}
-			br, err := prep.Client.ParseRuns.CreateBatch(cmd.Context(), &extend.ParseRunsCreateBatchRequest{
+			req := &extend.ParseRunsCreateBatchRequest{
 				Inputs:   items,
 				Config:   cfg,
 				Priority: priorityPtr(priority),
+			}
+			br, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.BatchRun, error) {
+				return prep.Client.ParseRuns.CreateBatch(cmd.Context(), req, opts...)
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)
@@ -536,7 +549,7 @@ contained runs with ` + "`extend parse runs list --batch <id>`" + `.`,
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().StringVar(&filesFrom, "files-from", "", "Path to a file with one input per line (- for stdin)")
 			cmd.Flags().StringVar(&target, "target", "markdown", "Parse target: markdown or spatial")
-			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_performance or parse_light (default: server default)")
+			cmd.Flags().StringVar(&engine, "engine", "", "Engine: parse_auto, parse_performance, or parse_light (default: server default)")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Engine version (e.g. latest, 1.0.1, 2.0.0-beta)")
 			cmd.Flags().StringVar(&chunkStrategy, "chunk-strategy", "", "Chunking strategy: page|document|section (none omits chunkingStrategy)")
 			cmd.Flags().IntVar(&chunkMinChars, "chunk-min-chars", 0, "Minimum characters per chunk (server default if 0)")
@@ -630,12 +643,15 @@ no 'workflows batches' commands. Track progress with:
 				}
 				items[i] = &extend.WorkflowRunsCreateBatchRequestInputsItem{File: file, Secrets: secretsPtr}
 			}
-			resp, err := prep.Client.WorkflowRuns.CreateBatch(cmd.Context(), &extend.WorkflowRunsCreateBatchRequest{
+			req := &extend.WorkflowRunsCreateBatchRequest{
 				Workflow: &extend.WorkflowReference{
 					ID:      f.using,
 					Version: versionPtr(f.version),
 				},
 				Inputs: items,
+			}
+			resp, err := extendx.StartOnce(cmd.Context(), func(opts ...option.RequestOption) (*extend.WorkflowRunsCreateBatchResponse, error) {
+				return prep.Client.WorkflowRuns.CreateBatch(cmd.Context(), req, opts...)
 			})
 			if err != nil {
 				return fmt.Errorf("submit batch: %w", err)

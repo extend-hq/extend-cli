@@ -12,6 +12,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -96,10 +97,7 @@ Config fields:
     version). Pass through --engine-version; omitted runs use the server
     default. The run object reports the resolved exact version under config.
 
-  flattenPdf           bool  Make the filled form non-editable (server default: true).
-  nativeFieldsOnly     bool  Only use embedded AcroForm fields; set false to also detect fields via vision.
-  tableParsingEnabled  bool  Parse table regions as arrays of objects so their cells can be filled.
-  radioEnumsEnabled    bool  Model a radio-button group as a single-choice enum so only one option fills.
+` + editAdvancedOptionsFields + `
 
 Prefer schema-driven fills for production/repeated forms. Natural-language
 instructions are fastest for prototypes; schemas with extend_edit:value are
@@ -122,7 +120,7 @@ the output must remain editable.
 			"--schema and --instructions can be combined; for simple fills, --instructions alone is enough.",
 			"Populate values per the shape emitted by 'extend detect-form' — do not invent field names; inspect the generated schema first.",
 			"--output-file '-' streams the filled PDF to stdout; combine with redirection.",
-			"Detection toggles (flattenPdf/nativeFieldsOnly/tableParsingEnabled/radioEnumsEnabled) go in --advanced-options JSON; omitted fields use the server default.",
+			"Options such as flattenPdf, nativeFieldsOnly and preserveSignatureValidity go in --advanced-options JSON; omitted fields use the server default.",
 			"Edit runs cannot have a CANCELLED status; only FAILED or PROCESSED.",
 		},
 		SeeAlso:  []string{"detect-form", "edit runs watch", "edit runs get", "files download"},
@@ -156,7 +154,7 @@ the output must remain editable.
 			cmd.Flags().StringVar(&schemaPath, "schema", "", "Inline JSON, path, file:// URI, or '-' for a schema with values populated per the shape emitted by 'extend detect-form'. Omit to let the server auto-detect form fields.")
 			cmd.Flags().StringVar(&instructions, "instructions", "", "Free-form prose values and rules (e.g. \"name is Acme Corp; format dates as MM/DD/YYYY\"). Use alone for simple fills, or alongside --schema for fills that need conditional or formatting guidance the schema cannot express.")
 			cmd.Flags().StringVar(&schemaGenInstructions, "schema-instructions", "", "Free-form prose applied only to the schema-generation step when --schema is omitted (which fields to include, how to interpret ambiguous layouts).")
-			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Detection options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
+			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "Edit options as a JSON object: flattenPdf, nativeFieldsOnly, tableParsingEnabled, radioEnumsEnabled, conditionalGenerationEnabled, advancedSchemaRefinementEnabled, preserveSignatureValidity. Source: inline JSON, path, file:// URI, or '-' for stdin. Omitted fields use the server default.")
 			cmd.Flags().StringVar(&engineVersion, "engine-version", "", "Edit engine version (e.g. latest, 0.0.1, 1.0.0-beta). Omit for the server default; the run reports the resolved exact version.")
 			cmd.Flags().StringVarP(&outputFile, "output-file", "O", "", "Path to write the filled PDF to (auto-downloads); '-' for stdout. Default: leave the PDF on the server; fetch later with 'extend files download <file-id>'.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
@@ -234,7 +232,9 @@ func runEdit(ctx context.Context, app *App, p editParams) error {
 		Config: cfg,
 	}
 
-	run, err := cli.EditRuns.Create(ctx, req)
+	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.EditRun, error) {
+		return cli.EditRuns.Create(ctx, req, opts...)
+	})
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	extend "github.com/extend-hq/extend-go-sdk"
 	sdkclient "github.com/extend-hq/extend-go-sdk/client"
+	"github.com/extend-hq/extend-go-sdk/option"
 
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/output"
@@ -195,7 +196,9 @@ func runSplit(ctx context.Context, app *App, p splitParams) error {
 		req.Priority = &pr
 	}
 
-	run, err := cli.SplitRuns.Create(ctx, req)
+	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.SplitRun, error) {
+		return cli.SplitRuns.Create(ctx, req, opts...)
+	})
 	if err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}

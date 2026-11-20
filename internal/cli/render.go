@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -20,10 +21,37 @@ func renderWithDefault(app *App, payload any, defaultFormat output.Format) error
 		}
 		f = parsed
 	}
-	return output.Render(app.IO.Out, f, payload,
+	return output.Render(app.IO.Out, f, apiJSON(payload),
 		output.WithJQ(app.JQ),
 		output.WithPretty(app.IO.IsStdoutTTY()),
 	)
+}
+
+// sdkObject matches the types the SDK decodes API responses into. Their
+// String method returns the JSON the API sent.
+type sdkObject interface {
+	GetExtraProperties() map[string]interface{}
+	String() string
+}
+
+// apiJSON swaps an SDK response object for the JSON the API sent, so
+// fields the SDK doesn't model still reach -o json, -o yaml and --jq.
+// Other values, and objects the CLI built itself, come back unchanged.
+func apiJSON(payload any) any {
+	switch v := payload.(type) {
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = apiJSON(item)
+		}
+		return out
+	case sdkObject:
+		var decoded any
+		if err := json.Unmarshal([]byte(v.String()), &decoded); err == nil {
+			return decoded
+		}
+	}
+	return payload
 }
 
 // renderList picks the right renderer for a paginated list result based on
