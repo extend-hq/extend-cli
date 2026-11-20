@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -63,6 +65,10 @@ func apiJSON(payload any) any {
 //	no -o           -> tabwriter table (regardless of TTY); pass -o json for
 //	                   machine-readable output
 //
+// In both tables a terminal gets dates as relative times and, where a
+// command asks (fitCell), long values shortened; piped output gets the
+// timestamps and the full values.
+//
 // Format selection deliberately ignores stdout-TTY state so agent
 // harnesses (which always pipe stdout) get the same human-readable
 // defaults a user would see in a terminal. Color is gated separately
@@ -104,7 +110,7 @@ func renderListForCmd(cmd *cobra.Command, app *App, pages []any, headers []strin
 			// JSON output regardless of the TTY default.
 			renderErr = renderWithDefault(app, raw, output.FormatJSON)
 		default:
-			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
+			renderErr = renderTableOrEmpty(app, headers, terminalRows(app, headers, rows), emptyMsg)
 		}
 	default:
 		parsed, err := output.ParseFormat(app.Format)
@@ -113,12 +119,12 @@ func renderListForCmd(cmd *cobra.Command, app *App, pages []any, headers []strin
 		}
 		switch parsed {
 		case output.FormatTable:
-			renderErr = renderTableOrEmpty(app, headers, rows, emptyMsg)
+			renderErr = renderTableOrEmpty(app, headers, terminalRows(app, headers, rows), emptyMsg)
 		case output.FormatMarkdown:
 			if len(rows) == 0 {
 				fmt.Fprintln(app.IO.Out, emptyMsg)
 			} else {
-				renderErr = output.RenderMarkdownTable(app.IO.Out, headers, rows)
+				renderErr = output.RenderMarkdownTable(app.IO.Out, headers, terminalRows(app, headers, rows))
 			}
 		case output.FormatID:
 			if app.JQ != "" {
@@ -282,6 +288,54 @@ func indexOfHeader(headers []string, name string) int {
 		}
 	}
 	return -1
+}
+
+// timeCell is a list's cell for a timestamp: RFC 3339, in UTC. A terminal
+// shows it as a relative time (see terminalRows); piped, it's printed as
+// is, so it can be sorted and compared.
+func timeCell(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// fitCell shortens s to max characters on a terminal, where a long value
+// would push the table's other columns off the screen. Piped, the value
+// is printed in full: a shortened name or URL can't be matched or used.
+func fitCell(app *App, s string, max int) string {
+	if !app.IO.IsStdoutTTY() {
+		return s
+	}
+	return truncate(s, max)
+}
+
+// terminalRows returns a list's rows as a terminal shows them, with the
+// timestamps of its date columns as relative times ("3d ago"). When
+// stdout isn't a terminal the rows are returned unchanged.
+func terminalRows(app *App, headers []string, rows [][]string) [][]string {
+	if !app.IO.IsStdoutTTY() {
+		return rows
+	}
+	var dates []int
+	for i, h := range headers {
+		if strings.EqualFold(h, "created") || strings.EqualFold(h, "updated") {
+			dates = append(dates, i)
+		}
+	}
+	if len(dates) == 0 {
+		return rows
+	}
+	out := make([][]string, len(rows))
+	for i, row := range rows {
+		out[i] = slices.Clone(row)
+		for _, col := range dates {
+			if col < len(row) {
+				out[i][col] = relTimeFromISO(row[col])
+			}
+		}
+	}
+	return out
 }
 
 func renderTableOrEmpty(app *App, headers []string, rows [][]string, emptyMsg string) error {

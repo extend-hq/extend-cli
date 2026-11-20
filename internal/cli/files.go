@@ -188,9 +188,9 @@ func runFilesList(cmd *cobra.Command, app *App, nameContains string, limit, max 
 		for _, f := range page.Data {
 			rows = append(rows, []string{
 				f.ID,
-				truncate(f.Name, 40),
+				fitCell(app, f.Name, 40),
 				string(deref(f.Type)),
-				relTime(f.CreatedAt),
+				timeCell(f.CreatedAt),
 			})
 		}
 		next := deref(page.NextPageToken)

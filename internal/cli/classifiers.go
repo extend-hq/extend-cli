@@ -21,7 +21,7 @@ func classifierAccessor() processorAccessor[*extend.Classifier, *extend.Classifi
 		runVerb:    "classify",
 		bodyDoc:    processorBodyDoc(classifyConfigFields),
 		rowFields: func(c *extend.ClassifierSummary) []string {
-			return []string{c.ID, c.Name, relTime(c.CreatedAt)}
+			return []string{c.ID, c.Name, timeCell(c.CreatedAt)}
 		},
 		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.ClassifierSummary, string, error) {
 			sb, sd, ps, np, err := processorListReqOpts(opts)
@@ -56,7 +56,7 @@ func classifierAccessor() processorAccessor[*extend.Classifier, *extend.Classifi
 			return c.ClassifierVersions.Retrieve(ctx, id, ver, &extend.ClassifierVersionsRetrieveRequest{})
 		},
 		verRowFn: func(v *extend.ClassifierVersionSummary) []string {
-			return []string{v.Version, v.ID, relTime(v.CreatedAt)}
+			return []string{v.Version, v.ID, timeCell(v.CreatedAt)}
 		},
 		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Classifier, error) {
 			var req extend.ClassifiersCreateRequest

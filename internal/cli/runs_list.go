@@ -465,7 +465,7 @@ func extractSummaryRow(r *extend.ExtractRunSummary) []string {
 	if r.Extractor != nil {
 		name = r.Extractor.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, timeCell(r.CreatedAt)}
 }
 
 func listEditPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
@@ -496,7 +496,7 @@ func listEditPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, 
 		if r.File != nil {
 			name = r.File.Name
 		}
-		rows = append(rows, []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)})
+		rows = append(rows, []string{r.ID, string(r.Status), name, timeCell(r.CreatedAt)})
 	}
 	return rows, resp, deref(resp.NextPageToken), nil
 }
@@ -539,7 +539,7 @@ func listVerifyPage(ctx context.Context, cli *sdkclient.Client, p runsListParams
 		if r.File != nil {
 			name = r.File.Name
 		}
-		rows = append(rows, []string{r.ID, string(r.Status), risk, name, relTime(r.CreatedAt)})
+		rows = append(rows, []string{r.ID, string(r.Status), risk, name, timeCell(r.CreatedAt)})
 	}
 	return rows, resp, deref(resp.NextPageToken), nil
 }
@@ -549,7 +549,7 @@ func parseRow(r *extend.ParseRunSummary) []string {
 	if r.File != nil {
 		name = r.File.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, timeCell(r.CreatedAt)}
 }
 
 func classifySummaryRow(r *extend.ClassifyRunSummary) []string {
@@ -557,7 +557,7 @@ func classifySummaryRow(r *extend.ClassifyRunSummary) []string {
 	if r.Classifier != nil {
 		name = r.Classifier.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, timeCell(r.CreatedAt)}
 }
 
 func splitSummaryRow(r *extend.SplitRunSummary) []string {
@@ -565,7 +565,7 @@ func splitSummaryRow(r *extend.SplitRunSummary) []string {
 	if r.Splitter != nil {
 		name = r.Splitter.Name
 	}
-	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
+	return []string{r.ID, string(r.Status), name, timeCell(r.CreatedAt)}
 }
 
 func workflowSummaryRow(r *extend.WorkflowRunSummary) []string {
@@ -575,11 +575,11 @@ func workflowSummaryRow(r *extend.WorkflowRunSummary) []string {
 	}
 	// WorkflowRunSummary has no CreatedAt; InitialRunAt is the
 	// closest proxy and matches what the old hand-rolled client
-	// rendered. It's *time.Time; relTime tolerates the zero value
+	// rendered. It's *time.Time; timeCell tolerates the zero value
 	// so we can dereference unconditionally with a nil guard.
 	var created time.Time
 	if r.InitialRunAt != nil {
 		created = *r.InitialRunAt
 	}
-	return []string{r.ID, string(r.Status), name, relTime(created)}
+	return []string{r.ID, string(r.Status), name, timeCell(created)}
 }

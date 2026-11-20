@@ -21,7 +21,7 @@ func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSumm
 		runVerb:    "split",
 		bodyDoc:    processorBodyDoc(splitConfigFields),
 		rowFields: func(s *extend.SplitterSummary) []string {
-			return []string{s.ID, s.Name, relTime(s.CreatedAt)}
+			return []string{s.ID, s.Name, timeCell(s.CreatedAt)}
 		},
 		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.SplitterSummary, string, error) {
 			sb, sd, ps, np, err := processorListReqOpts(opts)
@@ -56,7 +56,7 @@ func splitterAccessor() processorAccessor[*extend.Splitter, *extend.SplitterSumm
 			return c.SplitterVersions.Retrieve(ctx, id, ver, &extend.SplitterVersionsRetrieveRequest{})
 		},
 		verRowFn: func(v *extend.SplitterVersionSummary) []string {
-			return []string{v.Version, v.ID, relTime(v.CreatedAt)}
+			return []string{v.Version, v.ID, timeCell(v.CreatedAt)}
 		},
 		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Splitter, error) {
 			var req extend.SplittersCreateRequest

@@ -122,6 +122,41 @@ func TestFilesList_TableFormatRendersTable(t *testing.T) {
 	}
 }
 
+// A piped table prints names in full and dates as timestamps, so its
+// values can be matched and sorted; a terminal shortens both.
+func TestFilesList_PipedTableKeepsWholeValues(t *testing.T) {
+	longName := "2026-10 statement for the operating account ending 4471.pdf"
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"data": []map[string]any{
+				{"id": "file_a", "name": longName, "type": "PDF", "createdAt": "2025-01-01T08:30:00Z"},
+			},
+		})
+	})
+	list := func(tty bool, format string) string {
+		ta := newTestApp(t, srv)
+		ta.app.IO.SetStdoutTTY(tty)
+		ta.app.Format = format
+		if err := runFilesList(stubCmdWithCtx(context.Background(), "list"), ta.app, "", 20, 0, false, "", "desc"); err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		return ta.out.String()
+	}
+	for _, format := range []string{"", "table", "markdown"} {
+		piped := list(false, format)
+		if !strings.Contains(piped, longName) || !strings.Contains(piped, "2025-01-01T08:30:00Z") {
+			t.Errorf("piped, -o %q: want the whole name and the timestamp:\n%s", format, piped)
+		}
+		onTerminal := list(true, format)
+		if strings.Contains(onTerminal, longName) || !strings.Contains(onTerminal, "2026-10 statement for the operating acc…") {
+			t.Errorf("on a terminal, -o %q: want the name shortened:\n%s", format, onTerminal)
+		}
+		if strings.Contains(onTerminal, "T08:30:00Z") || !strings.Contains(onTerminal, "2025-01-01") {
+			t.Errorf("on a terminal, -o %q: want a short date:\n%s", format, onTerminal)
+		}
+	}
+}
+
 // TestFilesList_MarkdownFormatRendersTable is a regression test for the bug
 // where `extend files list -o markdown` returned "unsupported format"
 // because the renderWithDefault path delegated to output.Render which only

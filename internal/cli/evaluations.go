@@ -116,7 +116,7 @@ processor accuracy via 'extend evaluations runs get'.
 				}
 				pages = append(pages, page)
 				for _, s := range page.Data {
-					rows = append(rows, []string{s.ID, s.Name, relTime(s.CreatedAt)})
+					rows = append(rows, []string{s.ID, s.Name, timeCell(s.CreatedAt)})
 				}
 				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {

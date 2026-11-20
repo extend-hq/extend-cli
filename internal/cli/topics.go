@@ -160,8 +160,10 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	b.WriteString("Color: NO_COLOR=1 disables; CLICOLOR_FORCE=1 forces.\n\n")
 	b.WriteString("Piping doesn't change the format: a command prints the same table,\n")
 	b.WriteString("summary or markdown to a pipe or a file as to a terminal, without\n")
-	b.WriteString("color or styling. Scripts that parse the output should pass -o json\n")
-	b.WriteString("(or set EXTEND_OUTPUT=json once); --jq implies it.\n\n")
+	b.WriteString("color or styling. A piped table also prints every value in full and\n")
+	b.WriteString("dates as timestamps, where a terminal shortens long names and URLs\n")
+	b.WriteString("and shows \"3d ago\". Scripts that parse the output should pass\n")
+	b.WriteString("-o json (or set EXTEND_OUTPUT=json once); --jq implies it.\n\n")
 	b.WriteString("Per-command default (when --output is not set):\n\n")
 
 	type row struct{ path, mode string }

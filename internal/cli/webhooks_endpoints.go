@@ -103,7 +103,7 @@ subscriptions list' to see what each endpoint is subscribed to.
 				}
 				pages = append(pages, page)
 				for _, ep := range page.Data {
-					rows = append(rows, []string{ep.ID, ep.Name, truncate(ep.URL, 40), relTime(ep.CreatedAt)})
+					rows = append(rows, []string{ep.ID, ep.Name, fitCell(app, ep.URL, 40), timeCell(ep.CreatedAt)})
 				}
 				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {

@@ -104,7 +104,7 @@ classifier, splitter, or workflow) and a set of event types. Use
 				}
 				pages = append(pages, page)
 				for _, s := range page.Data {
-					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), relTime(s.CreatedAt)})
+					rows = append(rows, []string{s.ID, s.WebhookEndpointID, string(s.ResourceType), s.ResourceID, fmt.Sprintf("%d events", len(s.EnabledEvents)), timeCell(s.CreatedAt)})
 				}
 				next := deref(page.NextPageToken)
 				if paginationDone(all, maxN, len(rows), next) {

@@ -25,7 +25,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 		runVerb:    "workflows run",
 		bodyDoc:    workflowBodyDoc,
 		rowFields: func(w *extend.WorkflowSummary) []string {
-			return []string{w.ID, w.Name, relTime(w.CreatedAt)}
+			return []string{w.ID, w.Name, timeCell(w.CreatedAt)}
 		},
 		listFn: func(ctx context.Context, c *sdkclient.Client, opts listProcessorsOptions) (any, []*extend.WorkflowSummary, string, error) {
 			sb, sd, ps, np, err := processorListReqOpts(opts)
@@ -63,7 +63,7 @@ func workflowAccessor() processorAccessor[*extend.Workflow, *extend.WorkflowSumm
 			return c.WorkflowVersions.Retrieve(ctx, id, ver)
 		},
 		verRowFn: func(v *extend.WorkflowVersionSummary) []string {
-			return []string{v.Version, v.ID, relTime(v.CreatedAt)}
+			return []string{v.Version, v.ID, timeCell(v.CreatedAt)}
 		},
 		createFn: func(ctx context.Context, c *sdkclient.Client, body json.RawMessage) (*extend.Workflow, error) {
 			var req extend.WorkflowsCreateRequest
