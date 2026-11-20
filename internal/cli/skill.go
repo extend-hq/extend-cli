@@ -225,7 +225,7 @@ func RenderSkill(root *CommandDoc) string {
 // instead.
 func writeSkillActiveBehaviour(b *strings.Builder) {
 	b.WriteString("## When this skill is active\n\n")
-	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking. Real users say \"this PDF\" when there's exactly one in cwd.\n")
+	b.WriteString("- **Documents come from disk, not from messages.** When the user references a document (\"this contract\", \"these invoices\", \"the PDF\") without giving a path, glance at the current working directory for matching files (`*.pdf`, `*.png`, `*.jpg`, `*.tif`) before asking.\n")
 	b.WriteString("- **File uploads always go through `extend files upload`.** Never substitute a host-tool File API (e.g. an inline file upload tool that returns its own `file_xxx` ID). The skill's file IDs are only legitimate when produced by `extend files upload` or returned in another `extend` response.\n")
 	b.WriteString("- **Run IDs (`exr_`/`pr_`/`clr_`/`splr_`/`edr_`/`workflow_run_`) are Extend's, not the host's.** When the user mentions one, reach for the typed runs commands (`extend <verb> runs get|watch|cancel`) — not a host-tool task tracker.\n")
 	b.WriteString("- **\"OCR\" alone is ambiguous; the user's intent disambiguates.** If they want specific values out (totals, line items, dates, names) → `extract` with a configured extractor. If they want raw text or markdown of the page → `parse`. \"OCR this receipt and grab the total\" is `extract`, not `parse`.\n\n")
@@ -281,7 +281,7 @@ func writeSkillPickActions(b *strings.Builder, root *CommandDoc) {
 		}
 	}
 
-	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. For batches of up to 1,000 inputs, use `<verb> batch` or `workflows run batch`.\n\n")
+	b.WriteString("\n`<input>` is a local file path (auto-uploaded), a `file_xxx` ID, or an `https://` URL. Several files: `<verb> batch` or `workflows run batch` give each its own run (up to 1,000); `--package` on `extract` or `workflows run` reads 2 to 50 together into one result.\n\n")
 	b.WriteString("Every action verb that needs a processor takes `--using <id>` — the ID prefix tells you the type: `ex_*` (extractors), `cl_*` (classifiers), `spl_*` (splitters), `workflow_*` (workflows). `parse` and `detect-form` run alone (no processor); `edit` takes `--instructions` (free-form prose).\n\n")
 }
 
@@ -294,7 +294,7 @@ func writeSkillWait(b *strings.Builder) {
 	b.WriteString("A wrong-type ID fails fast, naming the right command. Use `--exit-status` to gate downstream scripts on success:\n\n")
 	b.WriteString("    extend extract runs watch exr_xxx --exit-status && downstream-script.sh\n\n")
 	b.WriteString("To inspect state without polling: `extend <verb> runs get <id>`.\n\n")
-	b.WriteString("**Run-type quirks** (the things that defy reasonable assumptions):\n\n")
+	b.WriteString("**Run-type quirks:**\n\n")
 	b.WriteString("- **Edit runs** (`edr_*`) can't be cancelled, and **form detection runs** (`sgr_*`) support only get and watch. Other runs support best-effort cancel.\n")
 	b.WriteString("- **Workflow batches** have **no GET endpoint** (hence no `workflows batches` commands); track them with `extend workflows runs list --batch <id>`.\n\n")
 	b.WriteString("For the per-command wait/profile/failure-status table: `extend help lifecycle`.\n\n")

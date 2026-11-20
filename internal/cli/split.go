@@ -85,7 +85,7 @@ path, a file:// URI, or '-' to read from stdin.
 		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
-		Args:     cobra.ExactArgs(1),
+		Args:     oneInput("split", false),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
 			if err != nil {

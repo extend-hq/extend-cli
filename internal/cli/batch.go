@@ -128,6 +128,22 @@ func (f *batchFlags) attach(cmd *cobra.Command, processorFlag string, withPatch 
 }
 
 func collectBatchInputs(args []string, filesFrom string) ([]string, error) {
+	inputs, err := readInputList(args, filesFrom)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return nil, errors.New("no inputs provided (pass file paths/URLs/file_ids as args, or use --files-from)")
+	}
+	if len(inputs) > 1000 {
+		return nil, fmt.Errorf("too many inputs (%d); maximum is 1000 per batch", len(inputs))
+	}
+	return inputs, nil
+}
+
+// readInputList returns the positional inputs followed by the non-empty
+// lines of filesFrom ("-" for stdin).
+func readInputList(args []string, filesFrom string) ([]string, error) {
 	inputs := append([]string(nil), args...)
 	if filesFrom != "" {
 		var r *bufio.Scanner
@@ -150,12 +166,6 @@ func collectBatchInputs(args []string, filesFrom string) ([]string, error) {
 		if err := r.Err(); err != nil {
 			return nil, fmt.Errorf("read --files-from: %w", err)
 		}
-	}
-	if len(inputs) == 0 {
-		return nil, errors.New("no inputs provided (pass file paths/URLs/file_ids as args, or use --files-from)")
-	}
-	if len(inputs) > 1000 {
-		return nil, fmt.Errorf("too many inputs (%d); maximum is 1000 per batch", len(inputs))
 	}
 	return inputs, nil
 }

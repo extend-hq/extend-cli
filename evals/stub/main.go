@@ -31,7 +31,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	extendcli "github.com/extend-hq/extend-cli/internal/cli"
 )
@@ -248,6 +252,7 @@ func matchTypedGroup(args []string) bool {
 }
 
 func positional(args []string) []string {
+	boolLong, boolShort := boolFlags()
 	out := make([]string, 0, len(args))
 	skip := false
 	for _, a := range args {
@@ -256,14 +261,15 @@ func positional(args []string) []string {
 			continue
 		}
 		if strings.HasPrefix(a, "--") {
-			// `--flag=val` is one token; `--flag val` is two.
-			if !strings.Contains(a, "=") {
+			// `--flag=val` is one token; `--flag val` is two, unless the
+			// flag is boolean (`--package`, `--wait`).
+			if !strings.Contains(a, "=") && !boolLong[a[2:]] {
 				skip = true
 			}
 			continue
 		}
 		if strings.HasPrefix(a, "-") && len(a) > 1 {
-			if !strings.Contains(a, "=") && len(a) == 2 {
+			if !strings.Contains(a, "=") && len(a) == 2 && !boolShort[a[1:]] {
 				skip = true // short flag with separate value, e.g. `-o json`
 			}
 			continue
@@ -271,6 +277,38 @@ func positional(args []string) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+var (
+	boolFlagsOnce        sync.Once
+	boolLong, boolShorts map[string]bool
+)
+
+// boolFlags returns the long names and shorthands of the real CLI's
+// boolean flags, which take no value.
+func boolFlags() (long, short map[string]bool) {
+	boolFlagsOnce.Do(func() {
+		boolLong, boolShorts = map[string]bool{}, map[string]bool{}
+		var walk func(*cobra.Command)
+		walk = func(c *cobra.Command) {
+			for _, fs := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags()} {
+				fs.VisitAll(func(f *pflag.Flag) {
+					if f.NoOptDefVal == "" {
+						return
+					}
+					boolLong[f.Name] = true
+					if f.Shorthand != "" {
+						boolShorts[f.Shorthand] = true
+					}
+				})
+			}
+			for _, sub := range c.Commands() {
+				walk(sub)
+			}
+		}
+		walk(extendcli.NewRoot())
+	})
+	return boolLong, boolShorts
 }
 
 func isHelpOnly(args []string) bool {
