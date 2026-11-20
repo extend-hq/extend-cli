@@ -59,36 +59,16 @@ type descriptionVerb struct {
 var descriptionVerbs = []descriptionVerb{
 	{"extracting structured data from PDFs or images", "extract"},
 	{"parsing documents to text or markdown", "parse"},
-	{"classifying or identifying the type of a document (e.g. telling MSA from SOW from NDA)", "classify"},
-	{"splitting multi-document bundles into segments", "split"},
-	{"filling PDF forms via a values schema", "edit"},
-	{"detecting form fields to scaffold an edit schema", "detect-form"},
-	{"checking whether a document is genuine or was tampered with, forged or AI-generated", "verify"},
-	{"running multi-step document AI workflows", "workflows"},
+	{"classifying document types", "classify"},
+	{"splitting multi-document PDFs", "split"},
+	{"filling PDF forms", "edit"},
+	{"detecting form fields", "detect-form"},
+	{"checking documents for tampering or forgery", "verify"},
+	{"running document AI workflows", "workflows"},
 	// Run inspection is typed per verb (extract runs, workflows runs, ...);
 	// the guard maps to the primary verb whose runs subgroup carries the shape.
-	{"inspecting, watching, or listing Extend runs by ID (exr_, pr_, clr_, splr_, edr_, sgr_, vr_, workflow_run_)", "extract"},
-	{"uploading documents to an Extend workspace and managing the resulting file_xxx IDs", "files"},
-}
-
-// disambiguationExamples are concrete user-phrasings the description
-// surfaces to push the agent into triggering even when the user hasn't
-// said "Extend" by name. Per agentskills.io's "be pushy" guidance: the
-// most useful negative-failure case is the user describing the task
-// without the brand name.
-//
-// IMPORTANT: do not paste eval-set prompts (or paraphrases of them) in
-// here. Doing so overfits the description to the test set. The
-// `descriptionVerbs` table already covers run inspection by enumerating
-// the ID prefixes; the agent gets the run-watching coverage from there
-// without seeing a near-verbatim copy of the S-3 prompt.
-var disambiguationExamples = []string{
-	`pull line items from these invoices`,
-	`OCR these receipts`,
-	`categorize this contract`,
-	`fill out this PDF form`,
-	`split this combined PDF into individual statements`,
-	`is this pay stub real?`,
+	{"inspecting or listing Extend runs", "extract"},
+	{"uploading workspace files", "files"},
 }
 
 // resourceFamily captures one of the four processor families (extractors,
@@ -167,21 +147,17 @@ var paginationExampleCommand = []string{"extract", "runs", "list"}
 var paginationExampleFlags = []string{"using", "status", "page-token", "all", "max", "output"}
 
 // renderDescription assembles the YAML `description` field from
-// descriptionVerbs and the disambiguation examples. Public via tests so
-// the rendering can be inspected without invoking the full renderer.
+// descriptionVerbs. Opt-in by design: only trigger when the user asks
+// for Extend or references Extend resources/IDs, so generic local PDF
+// tasks aren't silently uploaded to Extend.
 func renderDescription() string {
 	verbs := make([]string, len(descriptionVerbs))
 	for i, v := range descriptionVerbs {
 		verbs[i] = v.Phrase
 	}
-	examples := make([]string, len(disambiguationExamples))
-	for i, e := range disambiguationExamples {
-		examples[i] = `"` + e + `"`
-	}
 	return fmt.Sprintf(
-		`Use when %s — even if the user describes the task without naming Extend (e.g. %s).`,
-		joinSerial(verbs, "or"),
-		joinSerial(examples, "or"),
+		`Run the Extend document AI CLI (extend) when the user explicitly asks to use Extend or references Extend resources or IDs (ex_, cl_, spl_, workflow_, edt_, evs_, file_, exr_, pr_, clr_, splr_, edr_, sgr_, vr_, workflow_run_). Covers %s. Do not invoke for generic local PDF requests that do not mention Extend.`,
+		joinSerial(verbs, "and"),
 	)
 }
 
