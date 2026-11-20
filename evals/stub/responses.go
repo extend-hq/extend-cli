@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"os"
@@ -12,22 +13,75 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/extend-hq/extend-cli/internal/output"
 )
 
-// emitJSON marshals v to stdout as compact JSON. The real CLI mostly
-// emits TTY-styled output; we emit JSON unconditionally because graders
-// parse stdout directly. Real CLI behaviour differences (TTY vs pipe)
-// don't affect what the agent's harness sees.
+// emitJSON writes v to stdout, honoring --output/-o (json, yaml, raw,
+// id) and --jq via the real CLI's output package so scripted pipelines
+// (`--jq .id -o raw`, `-o id`) behave the same as the real binary.
+// Without those flags, or with table/markdown, it emits indented JSON.
 //
 // Writes go through the package-level `stdout` writer (a MultiWriter
 // to real stdout + the recording buffer) so the response is captured
 // in the recording.
 func emitJSON(v any) {
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(stderr, "stub: encode response: %v\n", err)
+	rawFmt := flagValue(currentArgs, "output")
+	if rawFmt == "" {
+		rawFmt = shortFlagValue(currentArgs, "o")
 	}
+	jqExpr := flagValue(currentArgs, "jq")
+	if rawFmt == "" && jqExpr == "" {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(v); err != nil {
+			fmt.Fprintf(stderr, "stub: encode response: %v\n", err)
+		}
+		return
+	}
+	if rawFmt == "id" && jqExpr == "" && emitListIDs(v) {
+		return
+	}
+	format := output.FormatJSON
+	switch strings.ToLower(strings.TrimSpace(rawFmt)) {
+	case "", "json", "table", "markdown":
+		format = output.FormatJSON
+	default:
+		parsed, err := output.ParseFormat(rawFmt)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			exitCode = 1
+			return
+		}
+		format = parsed
+	}
+	if err := output.Render(stdout, format, v, output.WithJQ(jqExpr), output.WithPretty(format == output.FormatJSON)); err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		exitCode = 1
+	}
+}
+
+// emitListIDs mirrors renderListForCmd's `-o id` behavior on list
+// envelopes (`{"data": [{"id": ...}, ...]}`), printing one ID per line.
+func emitListIDs(v any) bool {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return false
+	}
+	var env struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(b, &env) != nil || env.Data == nil {
+		return false
+	}
+	for _, item := range env.Data {
+		if item.ID != "" {
+			fmt.Fprintln(stdout, item.ID)
+		}
+	}
+	return true
 }
 
 // jsonOutput reports whether the agent asked for JSON output. Affects
@@ -115,6 +169,11 @@ func emitExtract(args []string, mode string) {
 		exitCode = 1
 		return
 	}
+	if exID := flagValue(args, "using"); exID != "" && flagValue(args, "version") != "draft" && isUnpublishedDraftExtractor(exID) {
+		fmt.Fprintf(stderr, "Error: INVALID_REQUEST\n       Extractor %s has no published version; publish one with 'extend extractors versions create %s --release-type major' or pass '--version draft'\n", exID, exID)
+		exitCode = 1
+		return
+	}
 	var files []map[string]any
 	if pkg {
 		for _, in := range inputs {
@@ -158,12 +217,111 @@ func emitExtractBatch(args []string, mode string) {
 	// Processor batches carry the bpr_ prefix; the real CLI's
 	// ValidateBatchID rejects anything else on `extract batches
 	// get|watch`, so the fixture ID must be followable.
+	inputs := batchSubmittedInputs(args, true)
+	count := len(inputs)
+	if count == 0 {
+		count = 1
+	}
 	id := nowID("bpr_")
 	emitJSON(map[string]any{
-		"id":     id,
-		"status": "PROCESSING",
-		"counts": map[string]any{"submitted": 1, "processed": 0, "failed": 0},
+		"object":    "batch_run",
+		"id":        id,
+		"status":    "PENDING",
+		"runCount":  count,
+		"createdAt": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// batchSubmittedInputs collects the files passed to `extract batch` as
+// positional arguments and via --files-from. readStdin is true only for
+// the live invocation (not when reconstructing from the call log).
+func batchSubmittedInputs(args []string, readStdin bool) []string {
+	var out []string
+	if pos := positional(args); len(pos) > 2 {
+		out = append(out, pos[2:]...)
+	}
+	if ff := flagValue(args, "files-from"); ff != "" {
+		var data []byte
+		if ff == "-" {
+			if readStdin {
+				data, _ = io.ReadAll(os.Stdin)
+			}
+		} else {
+			data, _ = os.ReadFile(ff)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if s := strings.TrimSpace(line); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// priorBatchInputs finds the files submitted to batchID in an earlier
+// `extract batch` call recorded in EXTEND_EVAL_RECORD.
+func priorBatchInputs(batchID string) ([]string, bool) {
+	if batchID == "" {
+		return nil, false
+	}
+	data, err := os.ReadFile(os.Getenv("EXTEND_EVAL_RECORD"))
+	if err != nil {
+		return nil, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		var rec struct {
+			Argv   []string `json:"argv"`
+			Stdout string   `json:"stdout"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil || !match(rec.Argv, "extract", "batch") {
+			continue
+		}
+		matched := strings.TrimSpace(rec.Stdout) == batchID
+		if !matched {
+			var obj map[string]any
+			if json.Unmarshal([]byte(rec.Stdout), &obj) == nil && obj["id"] == batchID {
+				matched = true
+			}
+		}
+		if matched {
+			return batchSubmittedInputs(rec.Argv, false), true
+		}
+	}
+	return nil, false
+}
+
+// batchRunsFor synthesizes one Run per submitted file in a batch. In
+// batch_has_failure mode (used by W-1), the last file fails so the
+// agent has a real failure to find via `extract runs list --batch`.
+func batchRunsFor(batchID string, inputs []string, mode string) []Run {
+	if len(inputs) == 0 {
+		return nil
+	}
+	tag := strings.TrimPrefix(batchID, "bpr_")
+	if len(tag) > 8 {
+		tag = tag[len(tag)-8:]
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	out := make([]Run, 0, len(inputs))
+	for i, in := range inputs {
+		r := Run{
+			ID:          fmt.Sprintf("exr_%s_%d", tag, i+1),
+			Type:        "extract",
+			Status:      "PROCESSED",
+			CreatedAt:   now,
+			ProcessedAt: now,
+			File:        map[string]any{"object": "file", "id": fmt.Sprintf("file_%s_%d", tag, i+1), "name": filepath.Base(in)},
+		}
+		if mode == "batch_has_failure" && len(inputs) >= 2 && i == len(inputs)-1 {
+			r.Status = "FAILED"
+			r.Failure = &RunFailure{
+				Reason:  "EXTRACTOR_ERROR",
+				Message: "Schema field 'total' not found",
+			}
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // writePDF stands in for a PDF the real CLI downloads to a local path.
@@ -229,20 +387,61 @@ func emitParse(args []string, mode string) {
 		exitCode = 1
 		return
 	}
+	wait := !equalsFalse(flagValue(args, "wait"))
+	if !wait {
+		emitJSON(terminalRun("pr_", "PROCESSING"))
+		return
+	}
 	r := terminalRun("pr_", "PROCESSED")
 	// Asked only for the PDF, the real CLI says where it went instead of
 	// printing the document.
-	if pdf := flagValue(args, "searchable-pdf"); pdf != "" && pdf != "-" &&
-		flagValue(args, "output") == "" && shortFlagValue(args, "o") == "" && flagValue(args, "jq") == "" {
+	rawFmt := flagValue(args, "output")
+	if rawFmt == "" {
+		rawFmt = shortFlagValue(args, "o")
+	}
+	jqExpr := flagValue(args, "jq")
+	if pdf := flagValue(args, "searchable-pdf"); pdf != "" && pdf != "-" && rawFmt == "" && jqExpr == "" {
 		fmt.Fprintf(stdout, "✓ %s (PROCESSED): searchable PDF saved to %s\n", r.ID, pdf)
+		return
+	}
+	input := ""
+	if pos := positional(args); len(pos) > 1 {
+		input = pos[1]
+	}
+	md := parseMarkdownFor(input)
+	if (rawFmt == "" || strings.EqualFold(rawFmt, "markdown")) && jqExpr == "" {
+		fmt.Fprintln(stdout, md)
 		return
 	}
 	r.Output = map[string]any{
 		"chunks": []map[string]any{
-			{"type": "text", "content": "# Document\n\nStub-generated markdown body."},
+			{"type": "page", "content": md},
 		},
 	}
 	emitJSON(r)
+}
+
+// parseMarkdownFor returns markdown matching the repo's fixture PDFs so
+// agents running `extend parse` see real document content instead of a
+// placeholder that triggers fallback to local PDF tools.
+func parseMarkdownFor(input string) string {
+	base := strings.ToLower(filepath.Base(input))
+	switch {
+	case strings.HasPrefix(base, "contract"):
+		return "# Master Service Agreement\n\nThis Master Service Agreement ('Agreement') is entered into on April 15, 2026, between Acme Industries ('Provider') and Wile E. Coyote ('Customer'). Provider agrees to deliver services subject to the terms herein."
+	case strings.HasPrefix(base, "invoice"):
+		return "# Acme Industries — Invoice INV-1024\n\nBill to: Wile E. Coyote  \nDate: 2026-04-15\n\n| Description | Qty | Amount |\n| --- | --- | --- |\n| Widget | 2 | 29.99 |\n| Sprocket | 1 | 14.50 |\n| Cog (large) | 3 | 9.50 |\n\n**Total: 102.97**"
+	case strings.HasPrefix(base, "receipt"):
+		return "# Acme Cafe\n\n2026-04-15 14:32\n\n- Coffee: $3.50\n- Bagel: $4.25\n- Tax: $0.62\n- **Total: $8.37**"
+	case strings.HasPrefix(base, "statement"):
+		return "# First Example Bank — Account Statement\n\nAccount holder: Wile E. Coyote  \nStatement period: 2026-09-01 to 2026-09-30  \n**Closing balance: 12,480.15**"
+	case strings.HasPrefix(base, "w2"):
+		return "# Form W-2 — Wage and Tax Statement (2025)\n\nEmployee: Wile E. Coyote  \nEmployer: Acme Industries  \nBox 1 (Wages): 67,500.00  \nBox 2 (Federal tax): 9,800.00"
+	case strings.HasPrefix(base, "form1040"):
+		return "# Form 1040 — U.S. Individual Income Tax Return (Draft)\n\nName: ___  \nLine 1a (Wages from Form W-2 Box 1): ___  \nLine 25a (Federal tax withheld): ___"
+	default:
+		return "# Document\n\nParsed document content."
+	}
 }
 
 func emitClassify(args []string, mode string) {
@@ -253,6 +452,12 @@ func emitClassify(args []string, mode string) {
 			"type":       "Master Service Agreement",
 			"confidence": 0.94,
 		},
+		"insights": []map[string]any{
+			{
+				"type":    "reasoning",
+				"content": "The document is titled 'Master Service Agreement' and establishes services between Provider and Customer.",
+			},
+		},
 	}
 	emitJSON(r)
 }
@@ -262,8 +467,9 @@ func emitSplit(args []string, mode string) {
 	r.Output = map[string]any{
 		"value": map[string]any{
 			"splits": []map[string]any{
-				{"pages": "1-3", "type": "statement"},
-				{"pages": "4-6", "type": "statement"},
+				{"id": "split_1", "startPage": 1, "endPage": 1, "type": "statement", "identifier": "Acme Industries"},
+				{"id": "split_2", "startPage": 2, "endPage": 2, "type": "statement", "identifier": "Globex Corp"},
+				{"id": "split_3", "startPage": 3, "endPage": 3, "type": "statement", "identifier": "Initech Inc"},
 			},
 		},
 	}
@@ -393,6 +599,15 @@ func emitRunsList(args []string, mode string) {
 		emitJSON(map[string]any{"data": priorVerifyRuns(args), "nextPageToken": nil})
 		return
 	}
+	if batchID := flagValue(args, "batch"); batchID != "" {
+		if inputs, ok := priorBatchInputs(batchID); ok {
+			emitJSON(map[string]any{
+				"data":          filterRuns(args, batchRunsFor(batchID, inputs, mode)),
+				"nextPageToken": nil,
+			})
+			return
+		}
+	}
 	runs := fixtureFailedRuns
 	if verb == "edit" {
 		runs = fixtureEditRuns
@@ -401,16 +616,27 @@ func emitRunsList(args []string, mode string) {
 	if pageSize == 0 {
 		pageSize = 3
 	}
-	if mode != "paginated" {
-		// Single-page mode: return all matching runs at once.
+	all := filterRuns(args, runs)
+	if mode != "paginated" || hasFlag(args, "all") {
 		emitJSON(map[string]any{
-			"data":          filterRuns(args, runs),
+			"data":          all,
 			"nextPageToken": nil,
 		})
 		return
 	}
+	if maxN := atoiOr(flagValue(args, "max"), 0); maxN > 0 {
+		next := any(nil)
+		if maxN < len(all) {
+			all = all[:maxN]
+			next = "page-1"
+		}
+		emitJSON(map[string]any{
+			"data":          all,
+			"nextPageToken": next,
+		})
+		return
+	}
 	pageToken := flagValue(args, "page-token")
-	all := filterRuns(args, runs)
 	pages := chunk(all, pageSize)
 	if len(pages) == 0 {
 		emitJSON(map[string]any{"data": []Run{}, "nextPageToken": nil})
@@ -510,7 +736,43 @@ func emitRunsGet(args []string, mode string) {
 		emitJSON(r)
 		return
 	}
+	if r, ok := priorBatchRunByID(id, mode); ok {
+		emitJSON(r)
+		return
+	}
 	emitJSON(synthesizeRun(id, "PROCESSED"))
+}
+
+// priorBatchRunByID resolves an exr_<tag>_<n> ID produced by
+// `extract runs list --batch`, so follow-up `extract runs get` sees the
+// same status and failure details.
+func priorBatchRunByID(id, mode string) (Run, bool) {
+	data, err := os.ReadFile(os.Getenv("EXTEND_EVAL_RECORD"))
+	if err != nil {
+		return Run{}, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		var rec struct {
+			Argv   []string `json:"argv"`
+			Stdout string   `json:"stdout"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil || !match(rec.Argv, "extract", "batch") {
+			continue
+		}
+		batchID := strings.TrimSpace(rec.Stdout)
+		var obj map[string]any
+		if json.Unmarshal([]byte(rec.Stdout), &obj) == nil {
+			if s, _ := obj["id"].(string); s != "" {
+				batchID = s
+			}
+		}
+		for _, r := range batchRunsFor(batchID, batchSubmittedInputs(rec.Argv, false), mode) {
+			if r.ID == id {
+				return r, true
+			}
+		}
+	}
+	return Run{}, false
 }
 
 func emitRunsCancel(args []string, mode string) {
@@ -789,10 +1051,16 @@ func emitBatchesStatus(args []string, mode string) {
 	if len(pos) >= 4 {
 		id = pos[3]
 	}
+	count := 1
+	if inputs, ok := priorBatchInputs(id); ok && len(inputs) > 0 {
+		count = len(inputs)
+	}
 	emitJSON(map[string]any{
-		"id":     id,
-		"status": "PROCESSED",
-		"counts": map[string]any{"submitted": 1, "processed": 1, "failed": 0},
+		"object":    "batch_run",
+		"id":        id,
+		"status":    "PROCESSED",
+		"runCount":  count,
+		"createdAt": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -819,8 +1087,18 @@ func synthesizeRun(id, status string) Run {
 }
 
 func emitExtractorsList(args []string, mode string) {
-	if mode != "paginated" {
+	if mode != "paginated" || hasFlag(args, "all") {
 		emitJSON(map[string]any{"data": fixtureExtractors, "nextPageToken": nil})
+		return
+	}
+	if maxN := atoiOr(flagValue(args, "max"), 0); maxN > 0 {
+		items := fixtureExtractors
+		next := any(nil)
+		if maxN < len(items) {
+			items = items[:maxN]
+			next = "page-1"
+		}
+		emitJSON(map[string]any{"data": items, "nextPageToken": next})
 		return
 	}
 	emitPaginatedExtractors(args)
@@ -867,8 +1145,67 @@ func emitExtractorsGet(args []string, mode string) {
 			return
 		}
 	}
+	// Prompt-supplied extractor IDs (e.g. W-8's ex_receiptsQ3) aren't in
+	// fixtureExtractors so `extractors list` stays compact for pagination
+	// evals, but `extractors get` should resolve them.
+	if id == "ex_receiptsQ3" {
+		emitJSON(Extractor{ID: id, Name: "Q3 receipts", Description: "Merchant, date, and totals from receipt images."})
+		return
+	}
 	fmt.Fprintf(stderr, "Error: extractor %q not found\n", id)
 	exitCode = 1
+}
+
+// isUnpublishedDraftExtractor reports whether id was created earlier in
+// this run by `extractors create` and has not yet had a version
+// published via `extractors versions create`.
+func isUnpublishedDraftExtractor(id string) bool {
+	data, err := os.ReadFile(os.Getenv("EXTEND_EVAL_RECORD"))
+	if err != nil {
+		return false
+	}
+	created, published := false, false
+	for _, line := range strings.Split(string(data), "\n") {
+		var rec struct {
+			Argv     []string `json:"argv"`
+			Stdout   string   `json:"stdout"`
+			ExitCode int      `json:"exit_code"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil || rec.ExitCode != 0 {
+			continue
+		}
+		if match(rec.Argv, "extractors", "create") {
+			if strings.TrimSpace(rec.Stdout) == id {
+				created = true
+			}
+			var obj map[string]any
+			if json.Unmarshal([]byte(rec.Stdout), &obj) == nil && obj["id"] == id {
+				created = true
+			}
+		}
+		if match(rec.Argv, "extractors", "versions", "create") && containsArg(rec.Argv, id) {
+			published = true
+		}
+	}
+	return created && !published
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func emitWhoami(args []string, mode string) {
+	emitJSON(map[string]any{
+		"authenticated": true,
+		"source":        "EXTEND_API_KEY",
+		"region":        "us",
+		"workspace":     map[string]any{"id": "ws_demo", "name": "Demo Workspace"},
+	})
 }
 
 func emitExtractorsCreate(args []string, mode string) {
@@ -985,6 +1322,16 @@ func emitWorkflowsList(args []string, mode string) {
 
 func emitWorkflowsCreate(args []string, mode string) {
 	name := flagValue(args, "name")
+	if name == "" {
+		if body, err := readWorkflowJSONSource(flagValue(args, "from-file")); err == nil {
+			var m struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(body, &m) == nil && m.Name != "" {
+				name = m.Name
+			}
+		}
+	}
 	if name == "" {
 		name = "Stub workflow"
 	}
@@ -1567,7 +1914,11 @@ func emitWorkflowVersionCreate(args []string, mode string) {
 }
 
 func emitFilesUpload(args []string, mode string) {
-	emitJSON(File{ID: nowID("file_"), Name: "uploaded.pdf", MIMEType: "application/pdf"})
+	name := "uploaded.pdf"
+	if pos := positional(args); len(pos) > 2 {
+		name = filepath.Base(pos[2])
+	}
+	emitJSON(File{ID: nowID("file_"), Name: name, MIMEType: "application/pdf"})
 }
 
 func emitFilesList(args []string, mode string) {

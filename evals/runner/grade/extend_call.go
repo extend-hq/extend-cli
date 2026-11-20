@@ -61,6 +61,8 @@ func anyCallMatches(calls []CallRecord, p spec.ExtendCallPredicate) bool {
 
 // countCalls counts recorded calls whose positional verb path begins
 // with the given dotted path (e.g. "extract" or "extract.runs.list").
+// Help invocations (--help/-h) are excluded when verbPath is non-empty
+// so reading docs doesn't count as running the verb.
 func countCalls(calls []CallRecord, verbPath string) int {
 	want := strings.Split(verbPath, ".")
 	if verbPath == "" {
@@ -68,6 +70,9 @@ func countCalls(calls []CallRecord, verbPath string) int {
 	}
 	n := 0
 	for _, c := range calls {
+		if hasFlag(c.Argv, "help") {
+			continue
+		}
 		pos := positional(c.Argv)
 		if hasVerbPrefix(pos, want) {
 			n++
@@ -82,6 +87,11 @@ func predicateMatches(p spec.ExtendCallPredicate, c CallRecord) bool {
 
 	if len(p.ArgvPrefix) > 0 {
 		if !hasVerbPrefix(pos, p.ArgvPrefix) {
+			return false
+		}
+	}
+	for _, excl := range p.NotArgvPrefix {
+		if len(excl) > 0 && hasVerbPrefix(pos, excl) {
 			return false
 		}
 	}
@@ -168,6 +178,9 @@ func hasFlag(args []string, name string) bool {
 	prefix := "--" + name
 	for _, a := range args {
 		if a == prefix || strings.HasPrefix(a, prefix+"=") {
+			return true
+		}
+		if name == "help" && a == "-h" {
 			return true
 		}
 	}

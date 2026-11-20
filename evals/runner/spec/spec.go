@@ -46,7 +46,7 @@ const (
 type StubConfig struct {
 	// DefaultMode selects the stub's response strategy for unmatched
 	// commands. One of "real_responses" (default), "paginated",
-	// "auth_error".
+	// "auth_error", "batch_has_failure".
 	DefaultMode string `json:"default_mode,omitempty"`
 
 	// Pages is the number of pages the stub should split list responses
@@ -103,6 +103,11 @@ type ExtendCallPredicate struct {
 	// (e.g. ["extract"], ["runs", "list"]). Flags are skipped during
 	// the prefix check.
 	ArgvPrefix []string `json:"argv_prefix,omitempty"`
+
+	// NotArgvPrefix excludes calls whose positional tokens start with any
+	// of these prefixes (e.g. matching bare `extract <input>` while
+	// excluding `extract batch`, `extract batches`, `extract runs`).
+	NotArgvPrefix [][]string `json:"not_argv_prefix,omitempty"`
 
 	// Args lists strings that must appear anywhere in the argv (after
 	// the prefix). Use this for required flag values like

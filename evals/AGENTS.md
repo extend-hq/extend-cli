@@ -21,7 +21,11 @@ agent judgement) or **Path B** (explicit context — tests command shape).
 Path A prompts deliberately omit IDs an agent could not know. The
 correct behaviour is multi-step: ask, run a `list`, or use an inline
 config. Asserting `--using ex_abc` on a Path-A case is a bug — the
-agent had no way to know that ID. Path B prompts carry every ID;
+agent had no way to know that ID. Because the `extend-cli` skill is
+opt-in (it should not silently upload local PDFs when the user didn't
+ask for Extend), `T+*` and `D-*` prompts name Extend without naming
+subcommands, flags, or IDs, while `T-*` verifies that generic local
+document requests do not invoke `extend`. Path B prompts carry every ID;
 "agent emits exactly this argv" is fair game.
 
 ## Expectation types
@@ -33,8 +37,10 @@ agent had no way to know that ID. Path B prompts carry every ID;
   cases to confirm the skill activated at all.
 - **`extend_call`** — mechanical. Walks `extend-calls.jsonl` for argv
   predicates: `must_contain`, `must_not_contain`, `count_under`,
-  `count_at_least`. Flags, positional args, exact/suffix flag values,
-  and exit codes are matchable.
+  `count_at_least`. Flags, positional args, excluded subcommand prefixes
+  (`not_argv_prefix`), exact/suffix flag values, and exit codes are
+  matchable. `count_under` and `count_at_least` ignore `--help`/`-h`
+  when matching a named verb.
 - **`stable_answer`** — deterministic match against the agent's final
   message. Substring or regex. Cheap; no LLM judge.
 - **`must_not_fabricate_ids`** — scans every recorded `extend` call for
@@ -88,6 +94,9 @@ via `stub_config.default_mode`:
   count.
 - **`auth_error`** — every call returns a 401 with the actual auth
   error envelope. Used for `E-*` cases that test recovery.
+- **`batch_has_failure`** — `extract runs list --batch <id>` returns
+  one run per submitted file with the last file `FAILED` so batch
+  failure-inspection workflows (`W-1`) have a real failure to find.
 
 Modes are layered: a `paginated` case can still get the standard
 fixture set on get/upload calls.

@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 // Go-struct fixtures backing the stub's canned responses. These are the
 // only IDs that may appear in agent-emitted commands without being
 // flagged as fabricated. Adding a new fixture here = giving the agent
@@ -69,7 +71,9 @@ type Run struct {
 	ID          string         `json:"id"`
 	Type        string         `json:"type"`
 	Status      string         `json:"status"`
+	CreatedAt   string         `json:"createdAt,omitempty"`
 	ProcessedAt string         `json:"processedAt"`
+	File        map[string]any `json:"file,omitempty"`
 	Output      map[string]any `json:"output,omitempty"`
 	Failure     *RunFailure    `json:"failure,omitempty"`
 	// Files lists a --package run's input files, in order.
@@ -79,6 +83,34 @@ type Run struct {
 type RunFailure struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
+}
+
+func daysAgo(days int) string {
+	return time.Now().UTC().AddDate(0, 0, -days).Truncate(time.Second).Format(time.RFC3339)
+}
+
+func init() {
+	// Keep fixture timestamps within the last 30 days so time-window
+	// queries (e.g. "FAILED runs from the last 30 days") never rot.
+	for id, r := range fixtureRuns {
+		r.CreatedAt = daysAgo(1)
+		r.ProcessedAt = daysAgo(1)
+		fixtureRuns[id] = r
+	}
+	for i := range fixtureFailedRuns {
+		ts := daysAgo(i + 1)
+		fixtureFailedRuns[i].CreatedAt = ts
+		fixtureFailedRuns[i].ProcessedAt = ts
+	}
+	for i := range fixtureEditRuns {
+		ts := daysAgo(i + 1)
+		fixtureEditRuns[i].CreatedAt = ts
+		fixtureEditRuns[i].ProcessedAt = ts
+	}
+	for i := range fixtureEditTemplates {
+		fixtureEditTemplates[i]["createdAt"] = daysAgo(20 + i*10)
+		fixtureEditTemplates[i]["updatedAt"] = daysAgo(5 + i*10)
+	}
 }
 
 // fixtureRuns covers a few canned terminal-state runs callable by ID.
