@@ -396,7 +396,7 @@ func testAppForDocs() *App { return &App{} }
 // TestGroupsRejectUnknownSubcommands pins the exit contract for argv
 // shapes that don't resolve to a runnable leaf: removed top-level
 // groups (runs/run/batches), typed subcommands a kind doesn't have
-// (parse runs cancel, edit runs list, workflows batches), and any
+// (edit runs cancel, edit runs list, workflows batches), and any
 // other unknown subcommand of a group. Each must surface an error
 // (non-zero exit) rather than printing help and exiting 0 — scripts
 // gate on exit status, and a silent success here means a watch or
@@ -409,7 +409,7 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 		{[]string{"runs", "watch", "exr_x"}, "extend <extract|parse|classify|split|edit|workflows> runs"},
 		{[]string{"run", "in.pdf"}, "extend workflows run"},
 		{[]string{"batches", "get", "bpr_x"}, "extend <extract|parse|classify|split> batches"},
-		{[]string{"parse", "runs", "cancel", "pr_x"}, `unknown command "cancel" for "extend parse runs"`},
+		{[]string{"edit", "runs", "cancel", "edr_x"}, `unknown command "cancel" for "extend edit runs"`},
 		{[]string{"edit", "runs", "list"}, `unknown command "list" for "extend edit runs"`},
 		{[]string{"extract", "runs", "update", "exr_x"}, `unknown command "update" for "extend extract runs"`},
 		{[]string{"workflows", "batches", "get", "b_x"}, `unknown command "batches" for "extend workflows"`},

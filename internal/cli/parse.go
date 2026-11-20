@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ func newParseDoc(app *App) *CommandDoc {
 		blockOptionsPath    string
 		advancedOptionsPath string
 		password            string
+		zeroRetention       bool
+		searchablePDF       string
 		wait                bool
 		timeout             time.Duration
 		meta                metaFlags
@@ -67,6 +70,25 @@ For finer-grained block detection (figures, tables, barcodes, etc.), pass
 or '-' to read from stdin. --advanced-options accepts the remaining tuning
 knobs in the same forms.
 
+Zero data retention (--zero-retention): Extend deletes the run's data once
+its result has been read. The result can be read once: by the first fetch
+after the run finishes, and only within 60 minutes. With --wait (the
+default) the CLI prints it, so save it then; a later 'extend parse runs get'
+returns an empty output. With --wait=false, fetch it once with
+'extend parse runs get <id>' within the hour.
+  - A URL input becomes a file that Extend deletes with the run.
+  - A file_xxx ID keeps its file; only the run's data is deleted.
+  - A local file is uploaded, then deleted by the CLI once the run ends,
+    so --wait=false can't be used with a local file.
+Available on the Scale plan and above, or when Extend enables it.
+
+Searchable PDF (--searchable-pdf <path>): adds the recognized words to the
+PDF as an invisible text layer, so it can be searched and copied, and saves
+the PDF to <path> ('-' writes the PDF to stdout). The command then prints
+where the PDF went, not the parsed text; pass -o markdown or -o json to
+print the text as well. Pages that already have text are left as they are.
+PDF inputs only; it sets advancedOptions.embedOcrInPdf.
+
 ` + parseOptionsDoc(),
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend parse contract.pdf"},
@@ -77,16 +99,19 @@ knobs in the same forms.
 			{Label: "Inline advanced options", Cmd: `extend parse contract.pdf --advanced-options '{"pageRanges":"1-3"}'`},
 			{Label: "Block options from file", Cmd: "extend parse contract.pdf --block-options block-opts.json"},
 			{Label: "Absolute file URI", Cmd: "extend parse contract.pdf --advanced-options file:///absolute/path/advanced.json"},
+			{Label: "Zero data retention", Cmd: "extend parse lab-report.pdf --zero-retention -o markdown > lab-report.md"},
+			{Label: "Searchable PDF", Cmd: "extend parse scan.pdf --searchable-pdf scan-searchable.pdf"},
 		},
 		Gotchas: []string{
 			"--target spatial does not support --chunk-strategy section.",
 			"--jq cannot be combined with -o markdown; use -o json --jq and select the markdown chunk paths.",
-			"Parse runs cannot be cancelled once submitted (unlike extract/classify/split).",
+			"With --zero-retention the output can be read only once, so save what the command prints.",
+			"--searchable-pdf adds the text layer to the stored file itself, so a file_xxx input is changed in place.",
 		},
-		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get"},
+		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get", "parse runs cancel"},
 		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
-		Failures: []extendx.RunStatus{extendx.StatusFailed},
+		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			md, err := meta.build()
@@ -104,6 +129,8 @@ knobs in the same forms.
 				blockOptionsPath:    blockOptionsPath,
 				advancedOptionsPath: advancedOptionsPath,
 				password:            password,
+				zeroRetention:       zeroRetention,
+				searchablePDF:       searchablePDF,
 				wait:                wait,
 				timeout:             timeout,
 				metadata:            md,
@@ -119,6 +146,8 @@ knobs in the same forms.
 			cmd.Flags().StringVar(&blockOptionsPath, "block-options", "", "blockOptions for fine-grained block detection (figures/tables/text/barcodes/keyValue/formulas). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&advancedOptionsPath, "advanced-options", "", "advancedOptions for parse tuning (returnOcr, pageRanges, etc.). Source: inline JSON, path, file:// URI, or '-' for stdin.")
 			cmd.Flags().StringVar(&password, "password", "", "Password for a password-protected PDF (URL inputs only)")
+			cmd.Flags().BoolVar(&zeroRetention, "zero-retention", false, "Have Extend delete the run's data once the result is read (dataRetention mode zero); a local file's upload is deleted when the run ends")
+			cmd.Flags().StringVar(&searchablePDF, "searchable-pdf", "", "Add a searchable text layer to the PDF and save it to this path ('-' for stdout)")
 			cmd.Flags().BoolVar(&wait, "wait", true, "Wait for the run to reach a terminal state (--wait=false returns the run ID immediately)")
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			meta.attach(cmd)
@@ -138,12 +167,34 @@ type parseParams struct {
 	blockOptionsPath    string
 	advancedOptionsPath string
 	password            string
+	zeroRetention       bool
+	searchablePDF       string
 	wait                bool
 	timeout             time.Duration
 	metadata            map[string]any
 }
 
 func runParse(ctx context.Context, app *App, p parseParams) error {
+	inputRef, localPath, err := extendx.ResolveInput(p.input)
+	if err != nil {
+		return err
+	}
+	localUpload := localPath != "" && localPath != "-"
+	if p.zeroRetention && localUpload && !p.wait {
+		return errors.New("--wait=false can't be used with a local file and --zero-retention, because the CLI deletes the upload when the run ends; pass a URL or file ID instead")
+	}
+	if p.searchablePDF != "" && !p.wait {
+		return errors.New("--searchable-pdf needs the run to finish; drop --wait=false, or set advancedOptions.embedOcrInPdf and download the run's file later with 'extend files download <file-id>'")
+	}
+	if p.searchablePDF != "" && p.zeroRetention && inputRef.URL != "" {
+		return errors.New("--searchable-pdf with --zero-retention needs a local file or file ID; Extend deletes a URL input's file with the run, so the PDF can't be downloaded")
+	}
+
+	cfg, err := buildParseConfig(p)
+	if err != nil {
+		return err
+	}
+
 	cli, err := app.NewClient()
 	if err != nil {
 		return err
@@ -153,15 +204,15 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	if err != nil {
 		return err
 	}
-
-	cfg, err := buildParseConfig(p)
-	if err != nil {
-		return err
+	// With --zero-retention the CLI's own upload must not outlive the run.
+	uploadToDelete := ""
+	if p.zeroRetention && localUpload {
+		uploadToDelete = ref.ID
 	}
 
 	file, err := extendx.BuildParseFile(ref)
 	if err != nil {
-		return err
+		return errors.Join(err, deleteRunUpload(ctx, app, cli, uploadToDelete))
 	}
 
 	req := &extend.ParseRunsCreateRequest{
@@ -172,12 +223,15 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 		md := extend.RunMetadata(p.metadata)
 		req.Metadata = &md
 	}
+	if p.zeroRetention {
+		req.DataRetention = &extend.DataRetention{Mode: extend.DataRetentionModeZero.Ptr()}
+	}
 
 	run, err := extendx.StartOnce(ctx, func(opts ...option.RequestOption) (*extend.ParseRun, error) {
 		return cli.ParseRuns.Create(ctx, req, opts...)
 	})
 	if err != nil {
-		return fmt.Errorf("create run: %w", err)
+		return errors.Join(fmt.Errorf("create run: %w", err), deleteRunUpload(ctx, app, cli, uploadToDelete))
 	}
 
 	if !p.wait {
@@ -190,15 +244,80 @@ func runParse(ctx context.Context, app *App, p parseParams) error {
 	})
 	sp.Stop("")
 	if err != nil {
+		if uploadToDelete != "" {
+			fmt.Fprintf(app.IO.ErrOut, "Left %s in place because run %s hasn't finished; delete it with 'extend files delete %s' once it ends\n", uploadToDelete, run.ID, uploadToDelete)
+		}
 		return formatActionWaitError(err, run.ID, "extend parse runs watch")
 	}
 
-	if err := renderParseResult(app, final, p.target); err != nil {
-		return err
+	status := extendx.RunStatus(final.Status)
+	shown, resultErr := writeParseResult(ctx, app, cli, final, p)
+	if resultErr != nil && !shown && p.zeroRetention && status == extendx.StatusProcessed {
+		// The result can't be fetched again, so it mustn't be lost to a
+		// failure in showing it (a --jq runtime error, say).
+		fmt.Fprintln(app.IO.ErrOut, "The result can't be fetched again, so it is printed as JSON instead.")
+		resultErr = errors.Join(resultErr, output.Render(app.IO.Out, output.FormatJSON, apiJSON(final), output.WithPretty(app.IO.IsStdoutTTY())))
 	}
-	if extendx.RunStatus(final.Status) == extendx.StatusFailed {
-		return runFailureError(final.ID, final.FailureReason, final.FailureMessage)
+	cleanupErr := deleteRunUpload(ctx, app, cli, uploadToDelete)
+	switch {
+	case status == extendx.StatusFailed:
+		return errors.Join(runFailureError(final.ID, final.FailureReason, final.FailureMessage), cleanupErr)
+	case status == extendx.StatusCancelled:
+		return errors.Join(fmt.Errorf("run %s was cancelled", final.ID), cleanupErr)
 	}
+	return errors.Join(resultErr, cleanupErr)
+}
+
+// writeParseResult prints the finished run and, with --searchable-pdf,
+// saves the processed PDF. shown reports whether what was asked for
+// reached stdout or the PDF's path.
+//
+// A PDF sent to stdout replaces the printed run. A PDF saved to a path
+// with no -o or --jq does too: the caller asked for the PDF, so the
+// command says where it went instead of printing the whole document.
+func writeParseResult(ctx context.Context, app *App, cli *sdkclient.Client, run *extend.ParseRun, p parseParams) (shown bool, err error) {
+	if p.searchablePDF == "" || extendx.RunStatus(run.Status) != extendx.StatusProcessed {
+		err := renderParseResult(app, run, p.target)
+		return err == nil, err
+	}
+	if run.File == nil || run.File.ID == "" {
+		return false, fmt.Errorf("run %s has no file to save as a searchable PDF", run.ID)
+	}
+	if run.File.Type == nil || *run.File.Type != extend.FileTypePdf {
+		fileType := "unknown"
+		if run.File.Type != nil {
+			fileType = string(*run.File.Type)
+		}
+		return false, fmt.Errorf("--searchable-pdf only works on PDFs; %s is type %s, so no text layer was added", run.File.Name, fileType)
+	}
+	if p.searchablePDF == "-" {
+		n, err := extendx.DownloadFile(ctx, cli, run.File.ID, app.IO.Out)
+		return n > 0, err
+	}
+	if app.Format == "" && app.JQ == "" {
+		if err := writeFileFromExtend(ctx, app, cli, run.File.ID, p.searchablePDF); err != nil {
+			return false, err
+		}
+		fmt.Fprintf(app.IO.Out, "%s %s (%s): searchable PDF saved to %s\n",
+			statusIcon(paletteFor(app.IO), extendx.StatusProcessed), run.ID, run.Status, p.searchablePDF)
+		return true, nil
+	}
+	if err := renderParseResult(app, run, p.target); err != nil {
+		return false, err
+	}
+	return true, writeFileFromExtend(ctx, app, cli, run.File.ID, p.searchablePDF)
+}
+
+// deleteRunUpload deletes a file the CLI uploaded for a single run. An
+// empty id is a no-op.
+func deleteRunUpload(ctx context.Context, app *App, cli *sdkclient.Client, id string) error {
+	if id == "" {
+		return nil
+	}
+	if _, err := cli.Files.Delete(ctx, id, &extend.FilesDeleteRequest{}); err != nil {
+		return fmt.Errorf("delete uploaded file %s: %w; delete it with 'extend files delete %s'", id, err, id)
+	}
+	printUploadProgress(app, "Deleted %s (uploaded for this run)\n", id)
 	return nil
 }
 
@@ -290,6 +409,15 @@ func buildParseConfig(p parseParams) (*extend.ParseConfig, error) {
 			return nil, fmt.Errorf("--advanced-options: %w", err)
 		}
 		cfg.AdvancedOptions = &ao
+	}
+	if p.searchablePDF != "" {
+		if cfg.AdvancedOptions == nil {
+			cfg.AdvancedOptions = &extend.ParseConfigAdvancedOptions{}
+		}
+		if e := cfg.AdvancedOptions.EmbedOcrInPdf; e != nil && !*e {
+			return nil, errors.New(`--searchable-pdf conflicts with "embedOcrInPdf": false in --advanced-options`)
+		}
+		cfg.AdvancedOptions.EmbedOcrInPdf = extend.Bool(true)
 	}
 	return cfg, nil
 }

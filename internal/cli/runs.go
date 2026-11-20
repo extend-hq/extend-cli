@@ -33,9 +33,12 @@ type runsGroupSpec struct {
 	// ("form detection run" instead of "detect-form run"). Empty means
 	// the kind string reads fine as prose.
 	proseName string
-	// cancellable: extract/classify/split/workflow. Parse, edit, and
-	// detect-form runs have no cancel endpoint.
+	// cancellable: everything except edit and detect-form (no cancel
+	// endpoint for either).
 	cancellable bool
+	// cancelGotchas are appended to the generated cancel gotchas for
+	// type-specific cancel rules.
+	cancelGotchas []string
 	// listable: everything except edit and detect-form (no LIST
 	// endpoint for either).
 	listable bool
@@ -50,6 +53,9 @@ type runsGroupSpec struct {
 	usingFlag string
 	// usingExample is a processor ID for list examples (ex_abc, ...).
 	usingExample string
+	// listColumn heads list's third column: "processor" by default,
+	// "file" for kinds without a processor.
+	listColumn string
 	// sourceFilters: --source/--source-id on list. Workflow runs have
 	// no source filters at the server.
 	sourceFilters bool
@@ -82,13 +88,16 @@ func parseRunsSpec() runsGroupSpec {
 	return runsGroupSpec{
 		kind:          extendx.KindParse,
 		exampleID:     "pr_pJDa8iX",
+		cancellable:   true,
 		listable:      true,
 		deletable:     true,
 		responseType:  true,
+		listColumn:    "file",
 		sourceFilters: true,
-		watchFailures: []extendx.RunStatus{extendx.StatusFailed},
-		watchGotchas: []string{
-			"Parse runs cannot be cancelled; a watched parse run only ends in PROCESSED or FAILED.",
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
+		cancelGotchas: []string{
+			"Only PROCESSING parse runs can be cancelled; a PENDING run (a batch run waiting its turn) or a finished one returns an error, and cancelling an already-cancelled run is a no-op.",
+			"No webhook fires when a parse run is cancelled, and a cancelled run in a batch doesn't make the batch fail.",
 		},
 	}
 }
@@ -249,6 +258,8 @@ originating command.`, s.name())
 --response-type url returns a presigned URL to the parsed output
 instead of the inline payload (useful for large documents).`
 		examples = append(examples, Example{Label: "URL response", Cmd: fmt.Sprintf("extend %s %s --response-type url -o json", s.path("runs get"), s.exampleID)})
+		gotchas = append(gotchas,
+			"A zero data retention run (parse --zero-retention) returns its output once: the first get after it finishes, within 60 minutes; later gets show an empty output and dataRetention.status purged. --response-type url doesn't work on these runs.")
 	}
 	return &CommandDoc{
 		Use:     "get <run-id>",
@@ -350,10 +361,10 @@ record. Use 'extend %s' for that.`, s.path("runs delete")),
 			{Label: "With prompt", Cmd: fmt.Sprintf("extend %s %s", s.path("runs cancel"), s.exampleID)},
 			{Label: "Skip confirmation", Cmd: fmt.Sprintf("extend %s %s --yes", s.path("runs cancel"), s.exampleID)},
 		},
-		Gotchas: []string{
+		Gotchas: append([]string{
 			"Cancellation is best-effort; an in-flight run may complete first.",
 			fmt.Sprintf("Cancel does not delete the run record; use 'extend %s' to remove the history.", s.path("runs delete")),
-		},
+		}, s.cancelGotchas...),
 		SeeAlso: s.seeAlso("cancel"),
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
@@ -787,12 +798,15 @@ func deleteRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, i
 }
 
 // cancelRun calls the per-kind cancel endpoint. Only kinds with a
-// cancel endpoint have a cancel command, so parse/edit never reach
-// this switch.
+// cancel endpoint have a cancel command, so edit and detect-form never
+// reach this switch.
 func cancelRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) error {
 	switch kind {
 	case extendx.KindExtract:
 		_, err := c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
+		return err
+	case extendx.KindParse:
+		_, err := c.ParseRuns.Cancel(ctx, id, &extend.ParseRunsCancelRequest{})
 		return err
 	case extendx.KindClassify:
 		_, err := c.ClassifyRuns.Cancel(ctx, id, &extend.ClassifyRunsCancelRequest{})

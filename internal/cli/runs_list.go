@@ -105,7 +105,11 @@ run-list endpoint.
 			if err != nil {
 				return err
 			}
-			return renderListForCmd(cmd, app, pages, []string{"id", "status", "processor", "created"}, rows, "No runs.")
+			column := s.listColumn
+			if column == "" {
+				column = "processor"
+			}
+			return renderListForCmd(cmd, app, pages, []string{"id", "status", column, "created"}, rows, "No runs.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			statusHelp := "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED"
@@ -421,9 +425,11 @@ func extractSummaryRow(r *extend.ExtractRunSummary) []string {
 }
 
 func parseRow(r *extend.ParseRunSummary) []string {
-	// Parse runs have no processor reference, so the "processor"
-	// column is always empty (matches the old client).
-	return []string{r.ID, string(r.Status), "", relTime(r.CreatedAt)}
+	name := ""
+	if r.File != nil {
+		name = r.File.Name
+	}
+	return []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)}
 }
 
 func classifySummaryRow(r *extend.ClassifyRunSummary) []string {

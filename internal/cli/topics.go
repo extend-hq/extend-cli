@@ -278,7 +278,7 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 		case extendx.StatusFailed:
 			fmt.Fprintf(&b, "  %-13s  Run failed (server-side error or processing failure).\n", s)
 		case extendx.StatusCancelled:
-			fmt.Fprintf(&b, "  %-13s  Run was cancelled (parse runs cannot be cancelled).\n", s)
+			fmt.Fprintf(&b, "  %-13s  Run was cancelled (edit and form detection runs cannot be cancelled).\n", s)
 		case extendx.StatusRejected:
 			fmt.Fprintf(&b, "  %-13s  Run was rejected (workflow runs only).\n", s)
 		}
