@@ -69,9 +69,10 @@ func RootDoc(app *App) *CommandDoc {
 		WhenToUse: `Use this CLI when working with the Extend document AI platform: extracting
 structured data from PDFs and images, parsing documents to text or
 markdown, classifying or splitting multi-document bundles, filling PDF
-forms, and running multi-step workflows. The CLI is the agent-native
-surface for these operations and integrates with the same Extend
-extractors/classifiers/splitters/workflows you configure in the dashboard.`,
+forms, checking documents for tampering or forgery, and running multi-step
+workflows. The CLI is the agent-native surface for these operations and
+integrates with the same Extend extractors/classifiers/splitters/workflows
+you configure in the dashboard.`,
 		Details: `Authenticate by setting EXTEND_API_KEY in your environment:
 
     export EXTEND_API_KEY=sk_xxx

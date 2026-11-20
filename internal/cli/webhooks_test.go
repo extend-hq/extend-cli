@@ -105,6 +105,21 @@ func TestWebhooksEndpointsCreate_ParsesCSVAndRepeatedEvents(t *testing.T) {
 	}
 }
 
+func TestWebhooksEndpointsCreate_OmittingEventsSendsEmptyArray(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"id": "whe_test", "object": "webhook_endpoint"})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "webhooks", "endpoints", "create")
+	cmd.SetArgs([]string{"--url", "https://x.com/hook", "--name", "workflow-only"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("create without --events: %v", err)
+	}
+	if body := string(srv.lastRequest().Body); !strings.Contains(body, `"enabledEvents":[]`) {
+		t.Errorf("expected enabledEvents:[], got: %s", body)
+	}
+}
+
 func TestWebhooksEndpointsCreate_DisabledFlagSendsStatus(t *testing.T) {
 	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"id": "whe_test"})

@@ -239,11 +239,13 @@ returned signing secret.
 ` + webhookEventsDoc,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend webhooks endpoints create --url https://x.com/hook --name prod --events extract_run.processed,extract_run.failed"},
+			{Label: "Subscription-only endpoint (no global events)", Cmd: "extend webhooks endpoints create --url https://x.com/hook --name prod"},
 			{Label: "With custom headers", Cmd: "extend webhooks endpoints create --url https://x.com/hook --name prod --events extract_run.processed --header X-Tenant=acme --header X-Token=$WT"},
 		},
 		Gotchas: []string{
 			"The signing secret in the response is shown ONLY ONCE; store it securely.",
-			"--url, --name, and --events are all required.",
+			"--url and --name are required; omit --events to create an endpoint with no global events (for example, when attaching workflow_run.* subscriptions).",
+			"workflow_run.* events are not accepted on endpoints; attach them with 'extend webhooks subscriptions create'.",
 			"--url-threshold-bytes only applies when --payload-format=url.",
 		},
 		SeeAlso: []string{"webhooks endpoints list", "webhooks subscriptions create", "webhooks verify"},
@@ -255,9 +257,6 @@ returned signing secret.
 			if name == "" {
 				return errors.New("--name is required")
 			}
-			if len(events) == 0 {
-				return errors.New("--events is required")
-			}
 			adv, err := advanced.build()
 			if err != nil {
 				return err
@@ -266,10 +265,14 @@ returned signing secret.
 			if err != nil {
 				return err
 			}
+			enabledEvents := toWebhookEventTypes(splitCSV(events))
+			if enabledEvents == nil {
+				enabledEvents = []extend.WebhookEndpointEventType{}
+			}
 			req := &extend.WebhookEndpointsCreateRequest{
 				URL:             url,
 				Name:            name,
-				EnabledEvents:   toWebhookEventTypes(splitCSV(events)),
+				EnabledEvents:   enabledEvents,
 				APIVersion:      apiVersion,
 				AdvancedOptions: adv,
 			}
@@ -294,7 +297,7 @@ returned signing secret.
 			cmd.Flags().StringVar(&url, "url", "", "Receiving URL (required)")
 			cmd.Flags().StringVar(&name, "name", "", "Display name (required)")
 			cmd.Flags().BoolVar(&disable, "disabled", false, "Create the endpoint in 'disabled' state (defaults to 'enabled')")
-			cmd.Flags().StringArrayVar(&events, "events", nil, "Enabled events (comma-separated or repeated; required)")
+			cmd.Flags().StringArrayVar(&events, "events", nil, "Global enabled events (comma-separated or repeated; omit for subscription-only endpoints)")
 			cmd.Flags().StringVar(&apiVersion, "api-version", defaultAPIVersion, "API version for events")
 			advanced.attach(cmd)
 		},

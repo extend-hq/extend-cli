@@ -113,17 +113,20 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
 ## Commands
 
     extract | classify | split  <input> --using <id>
-    parse <input>
-    edit <input> --schema schema.json
+    parse <input> [--zero-retention] [--searchable-pdf out.pdf]
+    edit <input> --schema schema.json | edit --template <edt_id>
     detect-form <input>
+    verify <input> [--fail-on medium|high]
     workflows run <input> --using <id>
+    extract | workflows run <inputs>... --package --using <id>
     <action> batch <inputs>... [--files-from list.txt]
 
-    extract|classify|split|parse runs   get | list | watch | cancel | delete
-    workflows runs                      get | list | watch | cancel | delete | update
-    edit runs                           get | watch | delete
-    detect-form runs                    get | watch
-    <action> batches                    get | watch
+    extract|classify|split|parse|verify runs   get | list | watch | cancel | delete
+    workflows runs                             get | list | watch | cancel | delete | update
+    edit runs                                  get | list | watch | delete
+    edit templates                             list | get
+    detect-form runs                           get | watch
+    <action> batches                           get | watch
     files   upload | list | get | delete | download
 
     extractors  | classifiers | splitters | workflows
@@ -131,10 +134,12 @@ Inputs can be a local path (auto-uploads), a `file_xxx` ID, or an
 
     evaluations         list | get | create
     evaluations items   list | get | create | update | delete
-    evaluations runs    get
+    evaluations runs    create | get
 
     webhooks endpoints     | subscriptions   list | get | create | update | delete
     webhooks verify
+
+    workspaces          list | get | create
 
 Run `extend <command> --help` for flags.
 

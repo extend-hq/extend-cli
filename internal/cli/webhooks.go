@@ -158,7 +158,7 @@ const webhookEventsDoc = `Valid --events values:
   Batch completion:
     batch_parse_run.processed, batch_parse_run.failed,
     batch_processor_run.processed, batch_processor_run.failed
-  Workflow runs:
+  Workflow runs (subscriptions only — bind via 'extend webhooks subscriptions create', not on endpoints):
     workflow_run.completed, workflow_run.failed, workflow_run.needs_review,
     workflow_run.rejected, workflow_run.cancelled, workflow_run.step_run.processed
   Extractor lifecycle:

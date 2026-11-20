@@ -645,18 +645,15 @@ func newEvaluationRunsGetDoc(app *App) *CommandDoc {
 			"fetch evaluation run by id",
 		},
 		WhenToUse: `Use to inspect the per-item results, accuracy metrics, and any diffs
-an evaluation run produced. Runs are created via the dashboard.`,
+an evaluation run produced.`,
 		Details: `The server route is /evaluation_set_runs/{run-id} (no eval-set ID
-needed in the path).
-
-Evaluation runs are read-only here; create them via the dashboard. This
-command surfaces the per-item results, accuracy metrics, and any diffs
-the run produced.`,
+needed in the path). Start a run with 'extend evaluations runs create
+<set-id>', then poll its results here.`,
 		Examples: []Example{
 			{Label: "Basic", Cmd: "extend evaluations runs get esr_abc"},
 			{Label: "Just accuracy", Cmd: "extend evaluations runs get esr_abc --jq '.accuracy' -o raw"},
 		},
-		SeeAlso: []string{"evaluations get", "evaluations items list"},
+		SeeAlso: []string{"evaluations runs create", "evaluations get", "evaluations items list"},
 		Output:  OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

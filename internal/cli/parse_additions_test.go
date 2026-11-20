@@ -322,3 +322,21 @@ func TestParseRunsList_ShowsFileNames(t *testing.T) {
 		t.Errorf("table = %q, want a FILE column with scan.pdf", got)
 	}
 }
+
+func TestRenderMarkdown_UnfinishedRunExplainsEmptyOutput(t *testing.T) {
+	srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{"object": "parse_run", "id": "pr_1", "status": "CANCELLED", "file": pdfFile})
+	})
+	ta := newTestApp(t, srv)
+	cmd := findCmd(t, ta.app, "parse", "runs", "get")
+	cmd.SetArgs([]string{"pr_1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("parse runs get: %v", err)
+	}
+	if ta.out.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", ta.out.String())
+	}
+	if got := ta.errOut.String(); !strings.Contains(got, "Run pr_1 is CANCELLED; no parsed content.") {
+		t.Errorf("stderr = %q, want unfinished-run explanation", got)
+	}
+}
