@@ -13,6 +13,7 @@ func TestHarnessFamily(t *testing.T) {
 		"claude_code:claude-sonnet-4-6": "claude_code",
 		"claude_code:claude-opus-4-7":   "claude_code",
 		"codex":                         "codex",
+		"codex:gpt-6.1-sol":             "codex",
 	}
 	for in, want := range cases {
 		if got := harnessFamily(in); got != want {
@@ -63,31 +64,29 @@ func TestPathSafe(t *testing.T) {
 	}
 }
 
-// TestClaudeModelCandidates verifies the candidate-expansion logic that
-// pickHarnesses uses: N models -> N pinned Claude drivers + Codex; no
-// models -> one unpinned Claude + Codex. We replicate the expansion
-// here (rather than call pickHarnesses) because pickHarnesses also runs
-// Available() PATH checks that aren't present in unit-test CI.
-func TestClaudeModelCandidates(t *testing.T) {
-	expand := func(models string) []string {
-		var names []string
-		if ms := splitCommaList(models); len(ms) > 0 {
-			for _, m := range ms {
-				names = append(names, (&harness.Claude{Model: m}).Name())
-			}
-		} else {
-			names = append(names, (&harness.Claude{}).Name())
+// TestHarnessCandidates covers the expansion pickHarnesses filters
+// (pickHarnesses itself also checks PATH): each pinned model becomes its
+// own harness, and a family with no models runs once on its default.
+func TestHarnessCandidates(t *testing.T) {
+	names := func(claudeModels, codexModels string) []string {
+		var out []string
+		for _, d := range harnessCandidates(claudeModels, codexModels) {
+			out = append(out, d.Name())
 		}
-		names = append(names, (&harness.Codex{}).Name())
-		return names
+		return out
 	}
 
-	if got := expand(""); !reflect.DeepEqual(got, []string{"claude_code", "codex"}) {
-		t.Errorf("no models -> %v; want [claude_code codex]", got)
+	if got, want := names("", ""), []string{"claude_code", "codex"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("no models -> %v; want %v", got, want)
 	}
-	got := expand("claude-opus-4-7,claude-sonnet-4-6")
-	want := []string{"claude_code:claude-opus-4-7", "claude_code:claude-sonnet-4-6", "codex"}
+	got := names("claude-opus-5-5,claude-sonnet-5-5", "")
+	want := []string{"claude_code:claude-opus-5-5", "claude_code:claude-sonnet-5-5", "codex"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("two models -> %v; want %v", got, want)
+		t.Errorf("two Claude models -> %v; want %v", got, want)
+	}
+	got = names("", "gpt-6.1-sol,gpt-5.5")
+	want = []string{"claude_code", "codex:gpt-6.1-sol", "codex:gpt-5.5"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("two Codex models -> %v; want %v", got, want)
 	}
 }

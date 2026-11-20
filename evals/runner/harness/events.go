@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -19,8 +20,8 @@ import (
 // translate them to harness-specific args.
 type TuneOptions struct {
 	// Effort is "minimal", "low", "medium", "high", "xhigh", "max".
-	// Empty means harness default. For evals "low" is recommended —
-	// the tasks are simple and benefit greatly from speed.
+	// Empty (the runner's default) leaves each harness on its own
+	// default effort for its model, as an out-of-the-box install runs.
 	Effort string
 
 	// FastMode enables fast/priority paths where available.
@@ -100,13 +101,33 @@ type Result struct {
 
 	// HarnessName is "claude_code" or "codex".
 	HarnessName string
+
+	// Model is the model the run used: the one the harness reported,
+	// else the pinned one. Empty when the harness picked its default
+	// and doesn't report it (Codex).
+	Model string
 }
 
 // Driver is the harness contract.
 type Driver interface {
 	Name() string
 	Available() error
+	// Version is the harness CLI's version line, or "" if unknown.
+	Version() string
 	Run(ctx context.Context, opts RunOptions) (*Result, error)
+}
+
+// cliVersion returns the first line of `<bin> --version`, or "" when
+// the binary can't be run.
+func cliVersion(bin string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return line
 }
 
 // streamWriter copies the subprocess stdout into the events file

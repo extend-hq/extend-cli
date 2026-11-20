@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/extend-hq/extend-cli/evals/runner/grade"
 	"github.com/extend-hq/extend-cli/evals/runner/harness"
@@ -16,10 +18,18 @@ import (
 // trends across iterations.
 type benchmark struct {
 	Iteration int                        `json:"iteration"`
+	Harnesses map[string]*harnessInfo    `json:"harnesses"`
 	Cases     []*caseAggregate           `json:"cases"`
 	Summary   benchmarkSummary           `json:"summary"`
 	byKey     map[benchKey]*runAggregate `json:"-"`
 	cases     map[string]*caseAggregate  `json:"-"`
+}
+
+// harnessInfo records what actually ran, since unpinned harnesses use
+// whatever default model the installed version picks.
+type harnessInfo struct {
+	Version string   `json:"version"`
+	Models  []string `json:"models"` // models reported across runs; empty when not reported
 }
 
 type caseAggregate struct {
@@ -63,12 +73,29 @@ type benchKey struct {
 
 func newBenchmark() *benchmark {
 	return &benchmark{
-		byKey: map[benchKey]*runAggregate{},
-		cases: map[string]*caseAggregate{},
+		Harnesses: map[string]*harnessInfo{},
+		byKey:     map[benchKey]*runAggregate{},
+		cases:     map[string]*caseAggregate{},
 	}
 }
 
+func (b *benchmark) harness(name string) *harnessInfo {
+	h, ok := b.Harnesses[name]
+	if !ok {
+		h = &harnessInfo{Models: []string{}}
+		b.Harnesses[name] = h
+	}
+	return h
+}
+
+func (b *benchmark) setVersion(harnessName, version string) {
+	b.harness(harnessName).Version = version
+}
+
 func (b *benchmark) add(e spec.Eval, harnessName, configName string, r *harness.Result, gr []grade.Result) {
+	if h := b.harness(harnessName); r.Model != "" && !slices.Contains(h.Models, r.Model) {
+		h.Models = append(h.Models, r.Model)
+	}
 	if _, ok := b.cases[e.ID]; !ok {
 		c := &caseAggregate{ID: e.ID, Category: e.Category, Path: string(e.Path)}
 		b.cases[e.ID] = c
@@ -172,7 +199,31 @@ func (b *benchmark) printSummary() {
 		delta := b.Summary.WithSkill.PassPct - b.Summary.WithoutSkill.PassPct
 		fmt.Printf("delta (with - without): %+.1fpp\n", delta)
 	}
+	b.printHarnesses()
 	b.printPerHarness()
+}
+
+// printHarnesses lists each harness's version and the models its runs
+// reported, so results from unpinned runs can still be compared.
+func (b *benchmark) printHarnesses() {
+	names := make([]string, 0, len(b.Harnesses))
+	for n := range b.Harnesses {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	fmt.Printf("\n=== Harnesses ===\n")
+	for _, n := range names {
+		h := b.Harnesses[n]
+		version := h.Version
+		if version == "" {
+			version = "version unknown"
+		}
+		models := "model not reported"
+		if len(h.Models) > 0 {
+			models = "model " + strings.Join(h.Models, ", ")
+		}
+		fmt.Printf("%-34s %s; %s\n", n, version, models)
+	}
 }
 
 // harnessCell accumulates pass/graded/token totals for one
@@ -187,8 +238,8 @@ func (c *harnessCell) pct() float64 {
 }
 
 // printPerHarness breaks the rollup down by harness so model-vs-model
-// comparisons (e.g. claude_code:claude-opus-4-7 vs
-// claude_code:claude-sonnet-4-6 vs codex) are legible at a glance. Only
+// comparisons (e.g. claude_code:claude-opus-5-5 vs
+// claude_code:claude-sonnet-5-5 vs codex) are legible at a glance. Only
 // printed when more than one harness ran; for a single harness the
 // headline numbers above already tell the whole story.
 func (b *benchmark) printPerHarness() {

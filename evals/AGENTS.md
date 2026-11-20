@@ -8,6 +8,17 @@ extraction" then a representative agent prompt should produce an
 `extend extract` invocation. The runner collects evidence; the
 expectations declare what evidence counts.
 
+## Harness defaults
+
+Keep harness model and effort defaults unpinned; use `-claude-models`,
+`-codex-models`, and `-effort` for controlled comparisons. Record harness
+versions and reported models in benchmark artifacts. Do not infer an
+unreported Codex default model from its version.
+
+The judge is separately pinned. A case without a `judge` expectation
+does not validate it. Ask before a full paid sweep; use a small case
+selection for smoke checks.
+
 ## Two prompt styles, picked deliberately per case
 
 Every case is either **Path A** (natural, incomplete prompt — tests
