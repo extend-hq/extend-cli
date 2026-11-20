@@ -3,6 +3,7 @@ package integration
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // firstEditTemplate returns the ID of the most recent saved edit template,
@@ -79,12 +80,20 @@ func TestEdit_FillsSavedTemplate(t *testing.T) {
 	}
 	rememberCleanup(t, env, "delete edit run", "edit", "runs", "delete", run.ID, "-y")
 
-	listRes := runExtend(t, env, "edit", "runs", "list", "--sort-by", "createdAt", "--limit", "20", "-o", "json")
-	listRes.requireOK(t, "edit", "runs", "list")
-	for _, item := range listItems(t, listRes) {
-		if item["id"] == run.ID {
-			return
+	// A run isn't always in the list the moment it is created.
+	start := time.Now()
+	for {
+		listRes := runExtend(t, env, "edit", "runs", "list", "--sort-by", "createdAt", "--limit", "20", "-o", "json")
+		listRes.requireOK(t, "edit", "runs", "list")
+		for _, item := range listItems(t, listRes) {
+			if item["id"] == run.ID {
+				t.Logf("run listed after %s", time.Since(start).Round(100*time.Millisecond))
+				return
+			}
 		}
+		if time.Since(start) > 20*time.Second {
+			t.Fatalf("edit runs list (20 newest) still doesn't include the new run %s after 20s: %s", run.ID, listRes.Stdout)
+		}
+		time.Sleep(time.Second)
 	}
-	t.Errorf("edit runs list (20 newest) doesn't include the new run %s", run.ID)
 }
