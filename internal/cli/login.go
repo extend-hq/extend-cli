@@ -17,6 +17,7 @@ import (
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/oauth"
+	"github.com/extend-hq/extend-cli/internal/output"
 )
 
 // loginWaitTimeout bounds how long `extend login` waits for the browser
@@ -129,8 +130,13 @@ and which credential supplies them (API key or a stored 'extend login'),
 before running anything that writes.`,
 		Examples: []Example{
 			{Label: "Show the current identity", Cmd: "extend whoami"},
+			{Label: "Organization-wide API key", Cmd: "extend whoami --workspace ws_abc"},
+			{Label: "Raw /me JSON", Cmd: "extend whoami -o json"},
 		},
-		SeeAlso: []string{"login", "logout", "config", "auth"},
+		Gotchas: []string{
+			"Organization-wide API keys require --workspace (or EXTEND_WORKSPACE_ID) on every call, including whoami.",
+		},
+		SeeAlso: []string{"login", "logout", "workspaces", "config", "auth"},
 		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -159,15 +165,24 @@ func runWhoami(ctx context.Context, app *App) error {
 		method = "OAuth login"
 	}
 
-	id, err := fetchIdentity(ctx, oauth.NewHTTPClient(base), base, bearer)
+	id, err := fetchIdentity(ctx, oauth.NewHTTPClient(base), base, bearer, s.workspaceID.val)
 	if err != nil {
+		if _, ok := extendx.AsAPIError(err); ok {
+			return err
+		}
 		return fmt.Errorf("fetch identity: %w", err)
+	}
+	if app.Format != "" || app.JQ != "" {
+		return renderWithDefault(app, id.raw, output.FormatJSON)
 	}
 	if ws := workspaceLabel(id); ws != "" {
 		fmt.Fprintf(app.IO.Out, "Workspace  %s\n", ws)
 	}
 	if id.email != "" {
 		fmt.Fprintf(app.IO.Out, "User       %s\n", id.email)
+	}
+	if key := keyLabel(id); key != "" {
+		fmt.Fprintf(app.IO.Out, "Key        %s\n", key)
 	}
 	fmt.Fprintf(app.IO.Out, "Auth       %s\n", method)
 	fmt.Fprintf(app.IO.Out, "Base URL   %s\n", base)
@@ -291,7 +306,7 @@ func runLogin(ctx context.Context, app *App, opts loginOptions) error {
 	// Personalize the success line from GET /me. Best-effort: the
 	// tokens are already stored, so a /me hiccup must never fail the
 	// login; the generic line is the fallback.
-	id, _ := fetchIdentity(ctx, httpc, base, tr.AccessToken)
+	id, _ := fetchIdentity(ctx, httpc, base, tr.AccessToken, "")
 	sp.Stop("")
 	fmt.Fprintf(app.IO.ErrOut, "%s %s\n", pal.Green("✓"), loginSuccessLine(base, id))
 	if s.key.val != "" {
@@ -451,18 +466,23 @@ func effectiveBaseURL(s resolved) (string, error) {
 	return base, nil
 }
 
-// loginIdentity is the slice of GET /me the success line needs: the
-// workspace and environment this login was granted, and who signed in.
+// loginIdentity is the slice of GET /me that `extend login` and
+// `extend whoami` render: workspace, environment, OAuth user, API key
+// name/scope, and the raw JSON payload for `-o json` / `--jq`.
 type loginIdentity struct {
 	workspace   string
 	environment string
 	email       string
+	keyName     string
+	keyScope    string
+	raw         json.RawMessage
 }
 
 // fetchIdentity calls GET /me with a bearer credential (an OAuth
-// access token or an API key; the endpoint accepts both). The SDK has
-// no /me binding yet, so this is a minimal direct call.
-func fetchIdentity(ctx context.Context, httpc *http.Client, base, bearer string) (*loginIdentity, error) {
+// access token or an API key; the endpoint accepts both). Organization-
+// wide API keys require X-Extend-Workspace-Id. The SDK has no /me
+// binding yet, so this is a minimal direct call.
+func fetchIdentity(ctx context.Context, httpc *http.Client, base, bearer, workspaceID string) (*loginIdentity, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/me", nil)
@@ -472,19 +492,31 @@ func fetchIdentity(ctx context.Context, httpc *http.Client, base, bearer string)
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("x-extend-api-version", defaultAPIVersion)
 	req.Header.Set("User-Agent", userAgent())
+	if workspaceID != "" {
+		req.Header.Set("X-Extend-Workspace-Id", workspaceID)
+	}
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read /me response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET /me: http %d", resp.StatusCode)
+		return nil, extendx.ParseAPIErrorResponse(resp.StatusCode, resp.Header, raw)
 	}
 	var body struct {
 		Workspace struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"workspace"`
+		APIKey *struct {
+			Name        string `json:"name"`
+			Scope       string `json:"scope"`
+			Environment string `json:"environment"`
+		} `json:"apiKey"`
 		User struct {
 			Email string `json:"email"`
 		} `json:"user"`
@@ -495,23 +527,53 @@ func fetchIdentity(ctx context.Context, httpc *http.Client, base, bearer string)
 			Environments []string `json:"environments"`
 		} `json:"grantedTargets"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, fmt.Errorf("parse /me response: %w", err)
 	}
 	id := &loginIdentity{
 		workspace: iostreams.SanitizeForTerminal(body.Workspace.Name),
 		email:     iostreams.SanitizeForTerminal(body.User.Email),
+		raw:       json.RawMessage(raw),
 	}
-	// The top-level workspace is the one this login resolved to; its
-	// granted target carries the environment. A login is scoped to one
-	// environment, so anything but a single entry stays unlabeled.
-	for _, t := range body.GrantedTargets {
-		if t.Workspace.ID == body.Workspace.ID && len(t.Environments) == 1 {
-			id.environment = t.Environments[0]
-			break
+	if body.APIKey != nil {
+		id.keyName = iostreams.SanitizeForTerminal(body.APIKey.Name)
+		id.keyScope = iostreams.SanitizeForTerminal(body.APIKey.Scope)
+		id.environment = body.APIKey.Environment
+	}
+	if id.environment == "" {
+		// OAuth logins carry the granted environment under grantedTargets.
+		// A login is scoped to one environment, so anything but a single
+		// entry stays unlabeled.
+		for _, t := range body.GrantedTargets {
+			if t.Workspace.ID == body.Workspace.ID && len(t.Environments) == 1 {
+				id.environment = t.Environments[0]
+				break
+			}
 		}
 	}
 	return id, nil
+}
+
+// keyLabel renders "ci-deploy (organization-wide)" from an API-key
+// identity, or "" when /me returned no apiKey block (OAuth logins).
+func keyLabel(id *loginIdentity) string {
+	if id == nil || (id.keyName == "" && id.keyScope == "") {
+		return ""
+	}
+	scope := id.keyScope
+	switch scope {
+	case "organization":
+		scope = "organization-wide"
+	case "workspace":
+		scope = "workspace-scoped"
+	}
+	if id.keyName == "" {
+		return scope
+	}
+	if scope == "" {
+		return id.keyName
+	}
+	return id.keyName + " (" + scope + ")"
 }
 
 // workspaceLabel renders "Acme (Production)" from an identity, or ""

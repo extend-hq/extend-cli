@@ -134,6 +134,7 @@ respective env vars.`,
 			newWorkflowsDoc(app),
 			newWebhooksDoc(app),
 			newEvaluationsDoc(app),
+			newWorkspacesDoc(app),
 			// Agent surface
 			newSkillDoc(app),
 			// Onboarding (ungrouped: shows under "Additional Commands")

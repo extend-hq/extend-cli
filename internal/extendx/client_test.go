@@ -464,3 +464,50 @@ func TestNewClient_SendsCLIHeaders(t *testing.T) {
 		})
 	}
 }
+
+// The SDK's Workspaces methods unconditionally append req.ExtendWorkspaceID
+// to x-extend-workspace-id; headerTransport must normalize that to one
+// clean header (or none when no workspace is configured).
+func TestNewClient_WorkspacesHeaderNotDuplicated(t *testing.T) {
+	var gotVals []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotVals = append([]string(nil), r.Header.Values("X-Extend-Workspace-Id")...)
+		fmt.Fprint(w, `{"object":"list","data":[]}`)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(Config{APIKey: "sk_test", BaseURL: srv.URL, WorkspaceID: "ws_abc"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.Workspaces.List(context.Background(), &extend.WorkspacesListRequest{}); err != nil {
+		t.Fatalf("Workspaces.List: %v", err)
+	}
+	if len(gotVals) != 1 || gotVals[0] != "ws_abc" {
+		t.Errorf("X-Extend-Workspace-Id = %q, want [ws_abc]", gotVals)
+	}
+
+	c2, err := NewClient(Config{APIKey: "sk_test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient (no ws): %v", err)
+	}
+	if _, err := c2.Workspaces.List(context.Background(), &extend.WorkspacesListRequest{}); err != nil {
+		t.Fatalf("Workspaces.List (no ws): %v", err)
+	}
+	if len(gotVals) != 0 {
+		t.Errorf("X-Extend-Workspace-Id without workspace = %q, want empty", gotVals)
+	}
+}
+
+func TestParseAPIErrorResponse(t *testing.T) {
+	hdr := http.Header{"X-Extend-Request-Id": []string{"req_hdr"}}
+	body := []byte(`{"code":"INVALID_REQUEST","message":"X-Extend-Workspace-Id header is required for organization-level API keys.","requestId":"req_body","retryable":false}`)
+	err := ParseAPIErrorResponse(http.StatusBadRequest, hdr, body)
+	apiErr, ok := AsAPIError(err)
+	if !ok {
+		t.Fatalf("AsAPIError returned false for %v", err)
+	}
+	if apiErr.StatusCode != 400 || apiErr.Code != "INVALID_REQUEST" || apiErr.RequestID != "req_body" || !strings.Contains(apiErr.Message, "organization-level") {
+		t.Errorf("unexpected APIError: %+v", apiErr)
+	}
+}

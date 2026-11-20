@@ -69,6 +69,7 @@ var descriptionVerbs = []descriptionVerb{
 	// the guard maps to the primary verb whose runs subgroup carries the shape.
 	{"inspecting or listing Extend runs", "extract"},
 	{"uploading workspace files", "files"},
+	{"managing organization workspaces", "workspaces"},
 }
 
 // resourceFamily captures one of the four processor families (extractors,
@@ -156,7 +157,7 @@ func renderDescription() string {
 		verbs[i] = v.Phrase
 	}
 	return fmt.Sprintf(
-		`Run the Extend document AI CLI (extend) when the user explicitly asks to use Extend or references Extend resources or IDs (ex_, cl_, spl_, workflow_, edt_, evs_, file_, exr_, pr_, clr_, splr_, edr_, sgr_, vr_, workflow_run_). Covers %s. Do not invoke for generic local PDF requests that do not mention Extend.`,
+		`Run the Extend document AI CLI (extend) when the user explicitly asks to use Extend or references Extend resources or IDs (ex_, cl_, spl_, workflow_, edt_, evs_, ws_, file_, exr_, pr_, clr_, splr_, edr_, sgr_, vr_, workflow_run_). Covers %s. Do not invoke for generic local PDF requests that do not mention Extend.`,
 		joinSerial(verbs, "and"),
 	)
 }
@@ -479,6 +480,7 @@ func writeSkillCatalog(b *strings.Builder, root *CommandDoc) {
 	writeCatalogProcessorFamilies(b)
 	writeCatalogSubtree(b, root, "Webhooks", "webhooks")
 	writeCatalogSubtree(b, root, "Evaluations", "evaluations")
+	writeCatalogSubtree(b, root, "Workspaces", "workspaces")
 }
 
 // writeCatalogSection emits all command leaves whose top-level ancestor
