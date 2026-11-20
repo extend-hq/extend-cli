@@ -252,7 +252,7 @@ contained runs with ` + "`extend extract runs list --batch <id>`" + `.`,
 			"Batch submission returns immediately; use 'extend extract batches watch <id>' to follow progress.",
 		},
 		SeeAlso: []string{"extract", "extract batches watch", "extract batches get", "extract runs list"},
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
 			if err != nil {
@@ -333,7 +333,7 @@ contained runs with ` + "`extend classify runs list --batch <id>`" + `.`,
 			"Batch submission returns immediately; use 'extend classify batches watch <id>' to follow progress.",
 		},
 		SeeAlso: []string{"classify", "classify batches watch", "classify batches get", "classify runs list"},
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
 			if err != nil {
@@ -412,7 +412,7 @@ contained runs with ` + "`extend split runs list --batch <id>`" + `.`,
 			"Batch submission returns immediately; use 'extend split batches watch <id>' to follow progress.",
 		},
 		SeeAlso: []string{"split", "split batches watch", "split batches get", "split runs list"},
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prep, err := prepBatchSubmit(cmd.Context(), app, args, f)
 			if err != nil {
@@ -510,7 +510,7 @@ contained runs with ` + "`extend parse runs list --batch <id>`" + `.`,
 			"There is no batch-level cancel; cancel individual runs with 'extend parse runs cancel <pr_id>' once they reach PROCESSING.",
 		},
 		SeeAlso: []string{"parse", "parse batches watch", "parse batches get", "parse runs list"},
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Build (and validate) the config before uploading, so a bad
 			// --chunk-strategy/--target combination fails fast rather than
@@ -609,7 +609,7 @@ no 'workflows batches' commands. Track progress with:
 			"Workflow batches have no get/watch endpoint; use 'extend workflows runs list --batch <id>' to follow progress.",
 		},
 		SeeAlso: []string{"workflows run", "workflows runs list"},
-		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Workflow batch has two CLI-level rejections that must
 			// fire BEFORE we open the API client / upload anything:

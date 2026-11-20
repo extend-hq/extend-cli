@@ -109,7 +109,7 @@ PDF inputs only; it sets advancedOptions.embedOcrInPdf.
 			"--searchable-pdf adds the text layer to the stored file itself, so a file_xxx input is changed in place.",
 		},
 		SeeAlso:  []string{"extract", "classify", "parse batch", "parse runs watch", "parse runs get", "parse runs cancel"},
-		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputMarkdown, Pipe: OutputMarkdown},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     oneInput("parse", false),

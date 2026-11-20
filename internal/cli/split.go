@@ -82,7 +82,7 @@ path, a file:// URI, or '-' to read from stdin.
 			"--patch requires --using; for a standalone config use --config instead.",
 		},
 		SeeAlso:  []string{"parse", "split batch", "split runs watch", "split runs get"},
-		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     oneInput("split", false),

@@ -136,7 +136,7 @@ passing the response's nextPageToken to --page-token.
 			{Label: "Just IDs", Cmd: "extend files list -o json --jq '.data[].id'"},
 		},
 		SeeAlso: []string{"files upload", "files get", "files delete"},
-		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:  OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFilesList(cmd, app, nameContains, limit, maxN, all, pageToken, sortDir)
 		},

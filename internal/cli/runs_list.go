@@ -101,7 +101,7 @@ run-list endpoint.
 		Examples: examples,
 		Gotchas:  s.listGotchas,
 		SeeAlso:  s.seeAlso("list"),
-		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputTable, Pipe: OutputTable},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cli, err := app.NewClient()
 			if err != nil {

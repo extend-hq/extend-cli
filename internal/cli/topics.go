@@ -147,7 +147,7 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	var b strings.Builder
 	b.WriteString("Output\n\n")
 	b.WriteString("The --output (-o) flag selects the rendering format:\n\n")
-	b.WriteString("  json       Pretty-printed JSON (script-friendly default for piped output)\n")
+	b.WriteString("  json       JSON: indented on a terminal, one line when piped\n")
 	b.WriteString("  yaml       YAML\n")
 	b.WriteString("  raw        Unformatted strings (typically used with --jq)\n")
 	b.WriteString("  id         Single ID per result (composes with xargs / shell pipes)\n")
@@ -158,9 +158,13 @@ func renderOutputTopicBody(root *CommandDoc) string {
 	b.WriteString("                 combined with -o markdown.\n\n")
 	b.WriteString("Streams: data goes to stdout, status/log lines go to stderr.\n")
 	b.WriteString("Color: NO_COLOR=1 disables; CLICOLOR_FORCE=1 forces.\n\n")
+	b.WriteString("Piping doesn't change the format: a command prints the same table,\n")
+	b.WriteString("summary or markdown to a pipe or a file as to a terminal, without\n")
+	b.WriteString("color or styling. Scripts that parse the output should pass -o json\n")
+	b.WriteString("(or set EXTEND_OUTPUT=json once); --jq implies it.\n\n")
 	b.WriteString("Per-command default (when --output is not set):\n\n")
 
-	type row struct{ path, tty, pipe string }
+	type row struct{ path, mode string }
 	var rows []row
 	pathLen := len("command")
 	for _, e := range Walk(root) {
@@ -176,14 +180,14 @@ func renderOutputTopicBody(root *CommandDoc) string {
 		if len(spaced) > pathLen {
 			pathLen = len(spaced)
 		}
-		rows = append(rows, row{path: spaced, tty: string(e.Doc.Output.TTY), pipe: string(e.Doc.Output.Pipe)})
+		rows = append(rows, row{path: spaced, mode: string(e.Doc.Output.TTY)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].path < rows[j].path })
 
-	fmt.Fprintf(&b, "  %-*s  %-9s  %s\n", pathLen, "command", "on tty", "when piped")
-	fmt.Fprintf(&b, "  %s  %s  %s\n", strings.Repeat("-", pathLen), strings.Repeat("-", 9), strings.Repeat("-", 10))
+	fmt.Fprintf(&b, "  %-*s  %s\n", pathLen, "command", "default")
+	fmt.Fprintf(&b, "  %s  %s\n", strings.Repeat("-", pathLen), strings.Repeat("-", 8))
 	for _, r := range rows {
-		fmt.Fprintf(&b, "  %-*s  %-9s  %s\n", pathLen, r.path, r.tty, r.pipe)
+		fmt.Fprintf(&b, "  %-*s  %s\n", pathLen, r.path, r.mode)
 	}
 
 	b.WriteString("\nPagination:\n\n")

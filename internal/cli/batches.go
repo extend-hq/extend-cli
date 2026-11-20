@@ -163,7 +163,7 @@ Polls every 2s, backing off to 30s.`, articleFor(s.verb), s.verb, s.verb, s.exam
 		},
 		Gotchas:  gotchas,
 		SeeAlso:  []string{s.verb + " batches get", s.verb + " runs list", s.verb + " runs watch"},
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputPretty},
 		Wait:     &WaitSpec{Profile: extendx.ProfileLong, DefaultsToWait: true},
 		Failures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 		Args:     cobra.ExactArgs(1),
