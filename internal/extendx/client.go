@@ -20,7 +20,8 @@ import (
 )
 
 // DefaultHTTPTimeout is applied to the HTTP client every API call goes
-// through, except uploads (see withUpload). Tuned for the common
+// through, except uploads and other long requests (see
+// WithoutHTTPTimeout). Tuned for the common
 // case of small JSON request/response payloads.
 const DefaultHTTPTimeout = 60 * time.Second
 
@@ -169,9 +170,9 @@ func NewClient(cfg Config) (*sdkclient.Client, error) {
 		}))
 		httpClient.Transport = newBearerTransport(httpClient.Transport, cfg.OAuth)
 	}
-	uploadClient := uploadHTTPClient()
-	uploadClient.Transport = httpClient.Transport
-	opts = append(opts, option.WithHTTPClient(&routingClient{api: httpClient, upload: uploadClient}))
+	untimedClient := untimedHTTPClient()
+	untimedClient.Transport = httpClient.Transport
+	opts = append(opts, option.WithHTTPClient(&routingClient{api: httpClient, untimed: untimedClient}))
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -390,41 +391,40 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.next.RoundTrip(req)
 }
 
-// routingClient sends requests made with a withUpload context through
-// the upload client and everything else through the API client. Both
-// share one transport chain.
+// routingClient sends requests made with a WithoutHTTPTimeout context
+// through the untimed client and everything else through the API
+// client. Both share one transport chain.
 type routingClient struct {
-	api    *http.Client
-	upload *http.Client
+	api     *http.Client
+	untimed *http.Client
 }
 
 func (c *routingClient) Do(req *http.Request) (*http.Response, error) {
-	if req.Context().Value(uploadKey{}) != nil {
-		return c.upload.Do(req)
+	if req.Context().Value(untimedKey{}) != nil {
+		return c.untimed.Do(req)
 	}
 	return c.api.Do(req)
 }
 
-type uploadKey struct{}
+type untimedKey struct{}
 
-// withUpload marks ctx so the request made with it goes through the
-// untimed upload client. Use on file uploads: end-to-end http.Client
-// timeouts are counterproductive for large multipart bodies — a
-// legitimate 100MB PDF over a flaky connection will exceed any
-// reasonable per-request budget and surface as a vague "context
-// deadline exceeded" rather than a fixable error. The caller's context
-// is the only deadline that remains in effect.
-func withUpload(ctx context.Context) context.Context {
-	return context.WithValue(ctx, uploadKey{}, true)
+// WithoutHTTPTimeout marks ctx so the request made with it goes through
+// the untimed client, for requests that legitimately outlast any
+// per-request budget: file uploads (a 100MB PDF over a slow connection
+// would otherwise fail as a vague "context deadline exceeded") and
+// calls the server answers only after minutes of work, such as
+// generating an extractor's schema. ctx's own deadline still applies.
+func WithoutHTTPTimeout(ctx context.Context) context.Context {
+	return context.WithValue(ctx, untimedKey{}, true)
 }
 
-// uploadHTTPClient is the untimed client uploads go through. It
-// refuses redirects outright: upload requests carry the Authorization
-// header, and following a redirect would replay it (and the multipart
-// body) to whatever host the Location header names. The upload
-// endpoint never redirects legitimately, so refusing is the safe
-// policy.
-func uploadHTTPClient() *http.Client {
+// untimedHTTPClient is the client WithoutHTTPTimeout requests go
+// through. It refuses redirects outright: those requests carry the
+// Authorization header, and following a redirect would replay it (and
+// an upload's multipart body) to whatever host the Location header
+// names. The endpoints never redirect legitimately, so refusing is the
+// safe policy.
+func untimedHTTPClient() *http.Client {
 	return &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return fmt.Errorf("refusing redirect to %s://%s on an upload request", req.URL.Scheme, req.URL.Host)

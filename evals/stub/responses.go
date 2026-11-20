@@ -684,11 +684,69 @@ func emitExtractorsGet(args []string, mode string) {
 }
 
 func emitExtractorsCreate(args []string, mode string) {
-	name := flagValue(args, "name")
-	if name == "" {
-		name = "Stub extractor"
+	// Mirror the real CLI's argument checks. Arguments after --sample
+	// are more samples, as a glob expands to.
+	extra := positional(args)[2:]
+	if len(extra) > 0 && !hasFlag(args, "sample") {
+		fmt.Fprintf(stderr, "Error: extractors create takes no arguments; to generate the schema from %s, pass --sample %s\n", extra[0], extra[0])
+		exitCode = 1
+		return
 	}
-	emitJSON(Extractor{ID: nowID("ex_"), Name: name})
+	name := flagValue(args, "name")
+	if !hasFlag(args, "sample") {
+		if name == "" && !hasFlag(args, "from-file") {
+			fmt.Fprintln(stderr, "Error: --name is required to create an extractor; add --sample <document> to generate its schema, or --from-file <body.json> to set its config")
+			exitCode = 1
+			return
+		}
+		if name == "" {
+			name = "Stub extractor"
+		}
+		emitJSON(Extractor{ID: nowID("ex_"), Name: name})
+		return
+	}
+	if name == "" {
+		fmt.Fprintln(stderr, "Error: --name is required to create an extractor")
+		exitCode = 1
+		return
+	}
+	samples := len(extra)
+	for _, a := range args {
+		if a == "--sample" || strings.HasPrefix(a, "--sample=") {
+			samples++
+		}
+	}
+	if samples > 5 {
+		fmt.Fprintf(stderr, "Error: schema generation takes 1 to 5 samples, got %d\n", samples)
+		exitCode = 1
+		return
+	}
+	// The real response carries the generated schema in the draft.
+	nullable := func(t string) map[string]any { return map[string]any{"type": []string{t, "null"}} }
+	id := nowID("ex_")
+	emitJSON(map[string]any{
+		"object": "extractor", "id": id, "name": name,
+		"draftVersion": map[string]any{
+			"object": "extractor_version", "id": nowID("exv_"), "extractorId": id, "version": "draft",
+			"config": map[string]any{"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"invoice_number": nullable("string"),
+					"invoice_date":   nullable("string"),
+					"bill_to":        nullable("string"),
+					"line_items": map[string]any{"type": "array", "items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"description": nullable("string"),
+							"quantity":    nullable("number"),
+							"amount":      nullable("number"),
+						},
+					}},
+					"total": nullable("number"),
+				},
+			}},
+		},
+	})
 }
 
 func emitExtractorVersionCreate(args []string, mode string) {

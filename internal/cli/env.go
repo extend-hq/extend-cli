@@ -60,7 +60,7 @@ var envVars = []envVarSpec{
 	{Name: envRegion, Description: "Region: us|eu. Selects the regional API endpoint."},
 	{Name: envWorkspaceID, Description: "Workspace ID for org-scoped API keys (sent as X-Extend-Workspace-Id)."},
 	{Name: envAPIVersion, Description: "Pin the API version sent with each request. Defaults to " + defaultAPIVersion + "."},
-	{Name: envHTTPTimeout, Description: "Per-HTTP-request timeout (e.g. 60s, 2m). Applies to each API call individually; uploads use a separate untimed client. Distinct from per-command --timeout (overall wait). Defaults to 60s."},
+	{Name: envHTTPTimeout, Description: "Per-HTTP-request timeout (e.g. 60s, 2m). Applies to each API call individually; uploads and extractor schema generation use a separate untimed client. Distinct from per-command --timeout (overall wait). Defaults to 60s."},
 	{Name: envWebhookSecret, Description: "Default signing secret used by 'extend webhooks verify'."},
 	{Name: envDebug, Description: "Set to 1 to log every HTTP request to stderr (method, URL, status, request ID, latency, error bodies)."},
 	{Name: envOutput, Description: "Default output format when --output is not set: json|yaml|raw|id|table|markdown."},

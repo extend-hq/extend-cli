@@ -100,8 +100,8 @@ func UploadFileWithOptions(ctx context.Context, c *client.Client, path string, o
 // wrap it with the filename and content-type metadata that the server
 // uses for type inference.
 //
-// The upload runs with a withUpload context so it uses an untimed
-// *http.Client. The CLI's default --http-timeout (60s) is hostile to
+// The upload runs with a WithoutHTTPTimeout context so it uses an
+// untimed *http.Client. The CLI's default --http-timeout (60s) is hostile to
 // large multipart bodies on slow connections — a legitimate 100MB
 // upload would surface as a vague "context deadline exceeded" instead
 // of completing. The caller's context remains the only deadline.
@@ -130,7 +130,7 @@ func UploadStreamWithOptions(ctx context.Context, c *client.Client, body io.Read
 	if filename != "" || contentType != "" {
 		reader = extend.NewFileParam(body, filename, contentType)
 	}
-	return c.Files.Upload(withUpload(ctx), reader, req)
+	return c.Files.Upload(WithoutHTTPTimeout(ctx), reader, req)
 }
 
 // DownloadFile fetches a file's contents by ID. It calls the SDK's
@@ -411,8 +411,9 @@ func BuildWorkflowBatchFile(ref FileRef) (*extend.WorkflowRunsCreateBatchRequest
 	}, nil
 }
 
-// packageFiles converts FileRefs into the URL-or-ID pairs a package's
-// files are made of; packages don't accept text inputs.
+// packageFiles converts FileRefs into the URL-or-ID pairs that package
+// files and extractor-generation samples are made of; neither accepts
+// text inputs.
 func packageFiles(refs []FileRef) ([]*extend.FileFromURL, []*extend.FileFromID, error) {
 	urls := make([]*extend.FileFromURL, len(refs))
 	ids := make([]*extend.FileFromID, len(refs))
@@ -422,7 +423,7 @@ func packageFiles(refs []FileRef) ([]*extend.FileFromURL, []*extend.FileFromID, 
 			return nil, nil, err
 		}
 		if fromURL == nil && fromID == nil {
-			return nil, nil, errors.New("packages only accept URL or file-ID inputs")
+			return nil, nil, errors.New("only file, file-ID or URL inputs are accepted here, not text")
 		}
 		urls[i], ids[i] = fromURL, fromID
 	}
@@ -455,4 +456,18 @@ func BuildWorkflowPackage(refs []FileRef) (*extend.WorkflowRunPackage, error) {
 		files[i] = &extend.WorkflowRunPackageFilesItem{FileFromURL: urls[i], FileFromID: ids[i]}
 	}
 	return &extend.WorkflowRunPackage{Files: files}, nil
+}
+
+// BuildGenerateFiles converts FileRefs into the sample files an
+// extractor's schema is generated from (POST /extractors with generate).
+func BuildGenerateFiles(refs []FileRef) ([]*extend.ExtractorsCreateRequestGenerateFilesItem, error) {
+	urls, ids, err := packageFiles(refs)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]*extend.ExtractorsCreateRequestGenerateFilesItem, len(refs))
+	for i := range refs {
+		files[i] = &extend.ExtractorsCreateRequestGenerateFilesItem{FileFromURL: urls[i], FileFromID: ids[i]}
+	}
+	return files, nil
 }
