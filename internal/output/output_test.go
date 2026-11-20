@@ -188,3 +188,17 @@ func TestRenderMarkdownTable_EmptyHeadersIsNoOp(t *testing.T) {
 		t.Errorf("expected empty output for nil headers, got %q", buf.String())
 	}
 }
+
+func TestCheckJQ(t *testing.T) {
+	for _, expr := range []string{"", ".output.value", ".data[] | select(.status == \"FAILED\") | .id", "[.data[].id] | length"} {
+		if err := CheckJQ(expr); err != nil {
+			t.Errorf("CheckJQ(%q) = %v, want nil", expr, err)
+		}
+	}
+	// The second one parses; only compiling it finds the unknown function.
+	for _, expr := range []string{".output.value[", ".output | nosuchfunction", "$undefined"} {
+		if err := CheckJQ(expr); err == nil || !strings.Contains(err.Error(), "invalid --jq expression") {
+			t.Errorf("CheckJQ(%q) = %v, want an invalid-expression error", expr, err)
+		}
+	}
+}

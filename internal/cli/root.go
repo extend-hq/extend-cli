@@ -20,6 +20,7 @@ import (
 	"github.com/extend-hq/extend-cli/internal/extendx"
 	"github.com/extend-hq/extend-cli/internal/iostreams"
 	"github.com/extend-hq/extend-cli/internal/oauth"
+	"github.com/extend-hq/extend-cli/internal/output"
 	"github.com/extend-hq/extend-cli/internal/version"
 )
 
@@ -166,12 +167,14 @@ func NewRoot() *cobra.Command {
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 
-	// PersistentPreRun fires after Cobra parses flags but before any
+	// PersistentPreRunE fires after Cobra parses flags but before any
 	// subcommand's RunE. Used to fall back to env-var defaults when
 	// the corresponding flag wasn't passed.
-	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		formatFromEnv := app.Format == ""
 		applyEnvDefaults(app)
 		app.cmdContext = cmd.Context()
+		return checkOutputFlags(app, formatFromEnv)
 	}
 
 	root.PersistentFlags().StringVarP(&app.Format, "output", "o", "", "Output format: json|yaml|raw|id|table|markdown (or EXTEND_OUTPUT; default: command-specific)")
@@ -282,6 +285,27 @@ func applyEnvDefaults(app *App) {
 	if app.Env == "" {
 		app.Env = os.Getenv(envEnv)
 	}
+}
+
+// checkOutputFlags rejects an --output format or --jq expression that
+// can't be used. It runs before the command does any work: found
+// afterwards, the mistake wastes a finished run. formatFromEnv says the
+// format wasn't given by --output, so a bad one came from EXTEND_OUTPUT.
+func checkOutputFlags(app *App, formatFromEnv bool) error {
+	format, err := output.ParseFormat(app.Format)
+	if err != nil {
+		if formatFromEnv {
+			return fmt.Errorf("%s: %w", envOutput, err)
+		}
+		return err
+	}
+	if err := output.CheckJQ(app.JQ); err != nil {
+		return err
+	}
+	if app.JQ != "" && format == output.FormatMarkdown {
+		return errors.New("--jq cannot be combined with -o markdown; use -o json with --jq")
+	}
+	return nil
 }
 
 // sourced is a resolved value paired with a short label saying where it
