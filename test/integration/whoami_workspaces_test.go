@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -43,35 +44,91 @@ func TestWhoami_APIKey(t *testing.T) {
 	}
 }
 
-// TestWorkspaces_ListAndGet lists the organization's workspaces and fetches
-// the first. `workspaces create` is not covered: the API has no delete, so
-// each run would leave a workspace behind.
-func TestWorkspaces_ListAndGet(t *testing.T) {
+// requireOrgKey returns the connection details for the organization-level
+// API key in EXTEND_ORG_API_KEY and the ID and name of a workspace in its
+// organization, skipping the test when the key isn't set. An
+// organization-level key must name a workspace on every request; the
+// regular key's workspace is in the same organization.
+func requireOrgKey(t *testing.T) (orgEnv envSetup, workspaceID, workspaceName string) {
+	t.Helper()
 	env := requireEnv(t)
+	orgKey := os.Getenv("EXTEND_ORG_API_KEY")
+	if orgKey == "" {
+		t.Skip("EXTEND_ORG_API_KEY not set; skipping test that needs an organization-level API key")
+	}
+	res := runExtend(t, env, "whoami", "-o", "json")
+	res.requireOK(t, "whoami", "-o", "json")
+	var me struct {
+		Workspace struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"workspace"`
+	}
+	res.decodeJSON(t, &me)
+	return envSetup{BaseURL: env.BaseURL, APIKey: orgKey}, me.Workspace.ID, me.Workspace.Name
+}
 
-	listRes := runExtend(t, env, "workspaces", "list", "--limit", "5", "-o", "json")
-	skipIfUnavailable(t, listRes, "Workspace management", "workspace management (an organization-level API key on an enabled organization)")
+// TestWhoami_OrganizationKey checks that an organization-level key is
+// refused without a workspace and identified with one.
+func TestWhoami_OrganizationKey(t *testing.T) {
+	orgEnv, workspaceID, _ := requireOrgKey(t)
+
+	bare := runExtend(t, orgEnv, "whoami")
+	if bare.ExitCode == 0 {
+		t.Fatalf("whoami with an organization-level key and no workspace succeeded: %s", bare.Stdout)
+	}
+	if !strings.Contains(string(bare.Stderr), "X-Extend-Workspace-Id header is required") {
+		t.Errorf("stderr doesn't say a workspace is required: %s", bare.Stderr)
+	}
+
+	res := runExtend(t, orgEnv, "whoami", "--workspace", workspaceID, "-o", "json")
+	res.requireOK(t, "whoami", "--workspace", workspaceID)
+	var me struct {
+		Workspace struct {
+			ID string `json:"id"`
+		} `json:"workspace"`
+		APIKey struct {
+			Scope string `json:"scope"`
+		} `json:"apiKey"`
+	}
+	res.decodeJSON(t, &me)
+	if me.Workspace.ID != workspaceID {
+		t.Errorf("workspace.id = %q, want %q", me.Workspace.ID, workspaceID)
+	}
+	if me.APIKey.Scope != "organization" {
+		t.Errorf("apiKey.scope = %q, want organization", me.APIKey.Scope)
+	}
+}
+
+// TestWorkspaces_ListAndGet lists the organization's workspaces and fetches
+// one. `workspaces create` is not covered: the API has no delete, so each
+// run would leave a workspace behind.
+func TestWorkspaces_ListAndGet(t *testing.T) {
+	orgEnv, workspaceID, workspaceName := requireOrgKey(t)
+
+	listRes := runExtend(t, orgEnv, "workspaces", "list", "--workspace", workspaceID, "--limit", "5", "-o", "json")
 	listRes.requireOK(t, "workspaces", "list")
 	items := listItems(t, listRes)
 	if len(items) == 0 {
 		t.Fatalf("workspaces list returned no workspaces; an organization always has one: %s", listRes.Stdout)
 	}
-	id, _ := items[0]["id"].(string)
-	if !strings.HasPrefix(id, "ws_") {
-		t.Fatalf("workspace id = %q, want a ws_ prefix", id)
+	for i, item := range items {
+		if id, _ := item["id"].(string); !strings.HasPrefix(id, "ws_") {
+			t.Errorf("item %d id = %q, want a ws_ prefix", i, id)
+		}
 	}
 
-	getRes := runExtend(t, env, "workspaces", "get", id, "-o", "json")
-	getRes.requireOK(t, "workspaces", "get", id)
+	getRes := runExtend(t, orgEnv, "workspaces", "get", workspaceID, "--workspace", workspaceID, "-o", "json")
+	getRes.requireOK(t, "workspaces", "get", workspaceID)
 	var got struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
 	getRes.decodeJSON(t, &got)
-	if got.ID != id {
-		t.Errorf("get.id = %q, want %q", got.ID, id)
+	if got.ID != workspaceID {
+		t.Errorf("get.id = %q, want %q", got.ID, workspaceID)
 	}
-	if want, _ := items[0]["name"].(string); got.Name != want {
-		t.Errorf("get.name = %q, want %q", got.Name, want)
+	if got.Name != workspaceName {
+		t.Errorf("get.name = %q, want %q", got.Name, workspaceName)
 	}
 }
