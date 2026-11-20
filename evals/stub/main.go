@@ -45,8 +45,9 @@ import (
 // response is captured into the recording entry. Tests that exercise
 // emit functions directly default to the real fds.
 var (
-	stdout io.Writer = os.Stdout
-	stderr io.Writer = os.Stderr
+	stdout      io.Writer = os.Stdout
+	stderr      io.Writer = os.Stderr
+	currentArgs []string
 )
 
 // exitCode is set by emit functions that need to fail (e.g. parse-run
@@ -56,6 +57,7 @@ var exitCode int
 
 func main() {
 	args := os.Args[1:]
+	currentArgs = args
 	mode := os.Getenv("EXTEND_EVAL_MODE")
 	if mode == "" {
 		mode = "real_responses"
@@ -95,6 +97,8 @@ func main() {
 	case len(args) == 0, isHelpOnly(args):
 		emitHelp(args)
 		return
+	case match(args, "whoami"):
+		emitWhoami(args, mode)
 	case match(args, "workflows", "run", "batch"):
 		emitWorkflowRunBatch(args, mode)
 	case match(args, "workflows", "run"):

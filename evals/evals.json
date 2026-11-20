@@ -5,7 +5,7 @@
       "id": "T+1",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "I have a few invoice PDFs in this directory. Pull the line items out of them into a CSV.",
+      "prompt": "Use Extend to pull the line items out of the invoice PDFs in this directory into a CSV.",
       "files": [
         "invoice.pdf"
       ],
@@ -61,7 +61,7 @@
       "id": "T+2",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "OCR these receipt images and grab the totals.",
+      "prompt": "Use Extend to OCR these receipt images and grab the totals.",
       "files": [
         "receipt.pdf"
       ],
@@ -74,7 +74,7 @@
         },
         {
           "type": "extend_call",
-          "text": "agent ran `extend extract` (not parse — totals are typed fields)",
+          "text": "agent ran `extend extract` (not parse \u2014 totals are typed fields)",
           "must_contain": [
             {
               "argv_prefix": [
@@ -117,7 +117,7 @@
       "id": "T+3",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "Convert this scanned contract to clean markdown.",
+      "prompt": "Use Extend to convert this scanned contract to clean markdown.",
       "files": [
         "contract.pdf"
       ],
@@ -166,12 +166,12 @@
       "id": "T+4",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "Look at this contract and tell me whether it's an MSA, SOW, or NDA.",
+      "prompt": "Use Extend to look at this contract and tell me whether it's an MSA, SOW, or NDA.",
       "files": [
         "contract.pdf"
       ],
       "expected_output": "Agent picks `classify`, discovers a classifier ID via list rather than fabricating one. The prompt deliberately omits the file path; the agent should glance at the working directory.",
-      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone — needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
+      "notes": "Known hard case: the description triggers semantically (Claude responds 'to classify' in 5/5 runs), but the agent's snap 'ask user for the file' decision fires before the Skill tool is invoked, so the body's cwd-discovery rule never loads. Cannot be fixed from the SKILL.md alone \u2014 needs either Claude Code agent-loop changes or unusually aggressive description prose. Honest expected pass rate is ~0% with current Claude Code; kept in roster as a measurement of this limitation.",
       "expectations": [
         {
           "type": "skill_activates",
@@ -218,7 +218,7 @@
       "id": "T+5",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "This combined PDF has 12 customer statements glued together. Split it into per-customer segments.",
+      "prompt": "This combined PDF has multiple customer statements glued together. Use Extend to split it into per-customer segments.",
       "files": [
         "combined.pdf"
       ],
@@ -269,7 +269,7 @@
       "id": "T+7",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "Run my invoice-processing workflow on these PDFs.",
+      "prompt": "Run my Extend invoice-processing workflow on these PDFs.",
       "files": [
         "invoice.pdf"
       ],
@@ -359,6 +359,30 @@
       ]
     },
     {
+      "id": "T-4",
+      "category": "trigger-negative",
+      "path": "A",
+      "prompt": "Look at contract.pdf in this directory and tell me whether it's an MSA, SOW, or NDA.",
+      "files": [
+        "contract.pdf"
+      ],
+      "expected_output": "Agent inspects contract.pdf locally without invoking `extend` (Extend is opt-in; do not upload local files when the user didn't ask for Extend) and answers MSA / Master Service Agreement.",
+      "expectations": [
+        {
+          "type": "extend_call",
+          "text": "agent did NOT invoke extend when Extend wasn't requested",
+          "count_under": {
+            "": 1
+          }
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer identifies the contract as an MSA",
+          "answer_pattern": "MSA|Master Service Agreement"
+        }
+      ]
+    },
+    {
       "id": "S-1",
       "category": "single-command",
       "path": "B",
@@ -402,7 +426,7 @@
       "id": "S-2",
       "category": "single-command",
       "path": "B",
-      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 — but don't block. Just give me the run ID so I can check on it later.",
+      "prompt": "Start the extract on invoice.pdf using ex_invoiceQ3 \u2014 but don't block. Just give me the run ID so I can check on it later.",
       "files": [
         "invoice.pdf"
       ],
@@ -495,7 +519,7 @@
       "id": "S-5",
       "category": "single-command",
       "path": "B",
-      "prompt": "Upload invoice.pdf and tell me the file ID it gets assigned.",
+      "prompt": "Upload invoice.pdf to Extend and tell me the file ID it gets assigned.",
       "files": [
         "invoice.pdf"
       ],
@@ -712,7 +736,7 @@
         "invoice2.pdf",
         "invoice3.pdf"
       ],
-      "expected_output": "Agent uses `extend extract batch` (NOT a shell loop, and NOT `extract --package`, whose single combined result can't say which file failed), then `runs list --batch ... --status FAILED` to identify failures.",
+      "expected_output": "Agent uses `extend extract batch` (NOT a shell loop, and NOT `extract --package`, whose single combined result can't say which file failed), then `extend extract runs list --batch <id>` (optionally `--status FAILED`) to identify that invoice3.pdf failed.",
       "expectations": [
         {
           "type": "extend_call",
@@ -748,15 +772,29 @@
           "must_not_contain": [
             {
               "argv_prefix": [
-                "extract",
-                "invoice.pdf"
-              ]
+                "extract"
+              ],
+              "not_argv_prefix": [
+                [
+                  "extract",
+                  "batch"
+                ],
+                [
+                  "extract",
+                  "batches"
+                ],
+                [
+                  "extract",
+                  "runs"
+                ]
+              ],
+              "must_not_have_flag": "help"
             }
           ]
         },
         {
           "type": "extend_call",
-          "text": "agent queried failures with extract runs list",
+          "text": "agent inspected the batch's runs with `extract runs list --batch`",
           "must_contain": [
             {
               "argv_prefix": [
@@ -764,25 +802,30 @@
                 "runs",
                 "list"
               ],
-              "args": [
-                "--status",
-                "FAILED"
-              ]
+              "flag": "batch"
             }
           ]
+        },
+        {
+          "type": "stable_answer",
+          "text": "answer identifies invoice3.pdf as the failed file",
+          "answer_pattern": "invoice3\\.pdf"
         }
-      ]
+      ],
+      "stub_config": {
+        "default_mode": "batch_has_failure"
+      }
     },
     {
       "id": "W-2",
       "category": "workflow",
       "path": "B",
-      "prompt": "Stand up a new extractor named 'Q3 invoices' from the config in extractor.json, then run it once on invoice.pdf.",
+      "prompt": "Stand up and publish a new Extend extractor named 'Q3 invoices' from the config in extractor.json, then run it once on invoice.pdf.",
       "files": [
         "invoice.pdf",
         "extractor.json"
       ],
-      "expected_output": "Agent issues create → versions create → extract in roughly that order.",
+      "expected_output": "Agent issues create \u2192 versions create \u2192 extract in roughly that order.",
       "expectations": [
         {
           "type": "extend_call",
@@ -872,7 +915,7 @@
       "files": [
         "items.json"
       ],
-      "expected_output": "Agent issues `evaluations create` then `evaluations items create`. Does NOT trigger an eval run — the prompt only asks to set up the set and add items, not to score a processor. (The guard is against over-running when unasked; `evaluations runs create` exists but isn't wanted here.)",
+      "expected_output": "Agent issues `evaluations create` then `evaluations items create`. Does NOT trigger an eval run \u2014 the prompt only asks to set up the set and add items, not to score a processor. (The guard is against over-running when unasked; `evaluations runs create` exists but isn't wanted here.)",
       "expectations": [
         {
           "type": "extend_call",
@@ -924,7 +967,7 @@
       "id": "W-5",
       "category": "workflow",
       "path": "B",
-      "prompt": "Fill the form fields in form1040.pdf using the values from w2.pdf. Save the filled PDF to ./filled.pdf.",
+      "prompt": "Use Extend to fill the form fields in form1040.pdf using the values from w2.pdf. Save the filled PDF to ./filled.pdf.",
       "files": [
         "w2.pdf",
         "form1040.pdf"
@@ -988,7 +1031,7 @@
       "id": "W-7",
       "category": "workflow",
       "path": "B",
-      "prompt": "Follow the CLI workflow lifecycle: create a workflow named 'Invoice workflow', update its draft with workflow-steps.json, deploy it as version v1, then run invoice.pdf through that deployed version.",
+      "prompt": "Follow the Extend CLI workflow lifecycle: create a workflow named 'Invoice workflow', update its draft with workflow-steps.json, deploy it as version v1, then run invoice.pdf through that deployed version.",
       "files": [
         "invoice.pdf",
         "workflow-steps.json"
@@ -1057,9 +1100,6 @@
                 "workflows",
                 "run"
               ],
-              "args": [
-                "invoice.pdf"
-              ],
               "flag": "using",
               "flag_value": {
                 "version": "v1"
@@ -1076,6 +1116,14 @@
                 "version": "latest"
               }
             }
+          ]
+        },
+        {
+          "type": "must_not_fabricate_ids",
+          "text": "agent did not fabricate workflow or file IDs",
+          "patterns": [
+            "workflow_[a-zA-Z0-9_-]+",
+            "file_[a-zA-Z0-9_-]+"
           ]
         }
       ]
@@ -1151,13 +1199,13 @@
         },
         {
           "type": "stable_answer",
-          "text": "answer summarizes cls_invoice classificationId routing",
-          "answer_pattern": "classificationId.{0,120}cls_invoice|cls_invoice.{0,120}classificationId"
+          "text": "answer summarizes cls_invoice routing to ex_invoiceQ3",
+          "answer_pattern": "cls_invoice.{0,120}ex_invoiceQ3|ex_invoiceQ3.{0,120}cls_invoice"
         },
         {
           "type": "stable_answer",
-          "text": "answer summarizes cls_receipt classificationId routing",
-          "answer_pattern": "classificationId.{0,120}cls_receipt|cls_receipt.{0,120}classificationId"
+          "text": "answer summarizes cls_receipt routing to ex_receiptsQ3",
+          "answer_pattern": "cls_receipt.{0,120}ex_receiptsQ3|ex_receiptsQ3.{0,120}cls_receipt"
         },
         {
           "type": "stable_answer",
@@ -1253,7 +1301,7 @@
         {
           "type": "stable_answer",
           "text": "answer mentions routing flagged documents to human review",
-          "answer_pattern": "human review|HUMAN_REVIEW|human_review"
+          "answer_pattern": "(?i)(?:human|manual)[\\s_-]review|person for review"
         },
         {
           "type": "stable_answer",
@@ -1273,7 +1321,7 @@
         {
           "type": "stable_answer",
           "text": "answer acknowledges edit runs cannot be cancelled",
-          "answer_pattern": "(edit|edr_).{0,40}(?:cannot|can't|can not|not).{0,20}(cancel|cancell)"
+          "answer_pattern": "(?i)(?:edit|edr_).{0,50}(?:cannot|can't|can not|not|doesn't|does not|no).{0,30}cancel|(?:cannot|can't|can not|doesn't|does not|no|not\\s+supported?).{0,40}(?:cancel\\w*.{0,25}(?:edit|edr_)|(?:edit|edr_).{0,25}cancel)"
         },
         {
           "type": "extend_call",
@@ -1290,7 +1338,7 @@
       "path": "B",
       "prompt": "Cancel parse run pr_demo_processed for me.",
       "files": [],
-      "expected_output": "Agent tries `extend parse runs cancel` (or checks the run first), sees the run already finished, and explains that only running parse runs can be cancelled — explains rather than retrying indefinitely.",
+      "expected_output": "Agent tries `extend parse runs cancel` (or checks the run first), sees the run already finished, and explains that only running parse runs can be cancelled \u2014 explains rather than retrying indefinitely.",
       "expectations": [
         {
           "type": "extend_call",
@@ -1323,7 +1371,7 @@
       "id": "Q-3",
       "category": "run-type-quirk",
       "path": "B",
-      "prompt": "Show me workflow batch wfb_xxx — I want to know what's in it.",
+      "prompt": "Show me workflow batch wfb_xxx \u2014 I want to know what's in it.",
       "files": [],
       "expected_output": "Agent uses `extend workflows runs list --batch wfb_xxx`. Does NOT use a typed `batches get` (workflow batches have no GET endpoint).",
       "expectations": [
@@ -1383,9 +1431,9 @@
       "id": "P-1",
       "category": "pagination",
       "path": "B",
-      "prompt": "Show me every FAILED extract run from the last 30 days. List them with their failure reason.",
+      "prompt": "Show me every FAILED Extend extract run from the last 30 days. List them with their failure reason.",
       "files": [],
-      "expected_output": "Agent uses `extend extract runs list --status FAILED` and iterates pages with --page-token (NOT --all).",
+      "expected_output": "Agent uses `extend extract runs list --status FAILED` with bounded pagination (--max or --page-token, NOT --all) and reports failure reasons from both pages (including TIMEOUT and INTERNAL_ERROR).",
       "stub_config": {
         "default_mode": "paginated",
         "pages": 2
@@ -1418,16 +1466,9 @@
           ]
         },
         {
-          "type": "extend_call",
-          "text": "agent paginated (2+ extract runs list calls)",
-          "count_at_least": {
-            "extract.runs.list": 2
-          }
-        },
-        {
           "type": "stable_answer",
-          "text": "agent's answer enumerates failure reasons",
-          "answer_pattern": "EXTRACTOR_ERROR|TIMEOUT|INTERNAL_ERROR"
+          "text": "agent's answer enumerates failure reasons from both pages (TIMEOUT and INTERNAL_ERROR)",
+          "answer_pattern": "(?s)TIMEOUT.*INTERNAL_ERROR|INTERNAL_ERROR.*TIMEOUT"
         }
       ]
     },
@@ -1435,9 +1476,9 @@
       "id": "P-2",
       "category": "pagination",
       "path": "B",
-      "prompt": "Iterate every extractor I have and print each one's name.",
+      "prompt": "Iterate every Extend extractor I have and print each one's name.",
       "files": [],
-      "expected_output": "Agent uses `extend extractors list` with --page-token to iterate through pages. Does NOT use --all.",
+      "expected_output": "Agent uses `extend extractors list` and fetches all pages (via --max, --page-token, or --all), printing both Q3 invoices (page 1) and Receipt totals (page 2).",
       "stub_config": {
         "default_mode": "paginated",
         "pages": 2
@@ -1456,13 +1497,9 @@
           ]
         },
         {
-          "type": "extend_call",
-          "text": "agent did NOT use --all",
-          "must_not_contain": [
-            {
-              "flag": "all"
-            }
-          ]
+          "type": "stable_answer",
+          "text": "answer lists extractors from both pages (Q3 invoices and Receipt totals)",
+          "answer_pattern": "(?s)Q3 invoices.*Receipt totals|Receipt totals.*Q3 invoices"
         }
       ]
     },
@@ -1470,14 +1507,20 @@
       "id": "AP-1",
       "category": "anti-pattern",
       "path": "B",
-      "prompt": "I have a folder full of invoice PDFs (about 500 of them). Run extractor ex_invoiceQ3 on every one and tell me when the whole batch is done.",
+      "prompt": "I have a bunch of invoice PDFs in this directory (and hundreds more coming in the next drop). Run extractor ex_invoiceQ3 on every PDF here and tell me when they're all done.",
       "files": [
-        "invoice_a.pdf",
-        "invoice_b.pdf",
-        "invoice_c.pdf",
-        "invoice_d.pdf"
+        "invoice_01.pdf",
+        "invoice_02.pdf",
+        "invoice_03.pdf",
+        "invoice_04.pdf",
+        "invoice_05.pdf",
+        "invoice_06.pdf",
+        "invoice_07.pdf",
+        "invoice_08.pdf",
+        "invoice_09.pdf",
+        "invoice_10.pdf"
       ],
-      "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop. Fixture stages 4 PDFs as a stand-in for the prompt's '500'; the agent should still reach for batch.",
+      "expected_output": "Agent uses `extend extract batch` (one call submits up to 1,000 inputs), NOT a per-file shell loop.",
       "expectations": [
         {
           "type": "extend_call",
@@ -1493,10 +1536,29 @@
         },
         {
           "type": "extend_call",
-          "text": "agent did NOT submit individual extracts in a loop (max 1 bare extract)",
-          "count_under": {
-            "extract": 2
-          }
+          "text": "agent did NOT submit individual extracts in a loop (no bare `extract` calls)",
+          "must_not_contain": [
+            {
+              "argv_prefix": [
+                "extract"
+              ],
+              "not_argv_prefix": [
+                [
+                  "extract",
+                  "batch"
+                ],
+                [
+                  "extract",
+                  "batches"
+                ],
+                [
+                  "extract",
+                  "runs"
+                ]
+              ],
+              "must_not_have_flag": "help"
+            }
+          ]
         }
       ]
     },
@@ -1504,15 +1566,15 @@
       "id": "D-1",
       "category": "disambiguation",
       "path": "A",
-      "prompt": "Get the text out of this PDF for me.",
+      "prompt": "Use Extend to get the text out of this PDF for me.",
       "files": [
         "contract.pdf"
       ],
-      "expected_output": "'Get the text out' is ambiguous: could be parse (raw text/markdown) or extract (specific text fields). Agent should ask, OR pick parse with explicit reasoning.",
+      "expected_output": "Agent uses `extend parse` to extract the PDF's text (NOT local pdftotext/Read), or asks the user to clarify between raw text (parse) and specific fields (extract).",
       "expectations": [
         {
           "type": "judge",
-          "criterion": "Either asked the user to clarify between raw text (parse) and specific fields (extract), OR picked parse with explicit reasoning that it's the broadest text-extraction option."
+          "criterion": "Used `extend parse` to extract the text of the PDF (not local pdftotext/pypdf/Read without Extend), OR asked the user to clarify between raw text (`parse`) and specific structured fields (`extract`)."
         }
       ]
     },
@@ -1520,9 +1582,9 @@
       "id": "D-2",
       "category": "disambiguation",
       "path": "A",
-      "prompt": "I need to process this form.",
+      "prompt": "I need to process this form with Extend.",
       "files": [
-        "invoice.pdf"
+        "form1040.pdf"
       ],
       "expected_output": "'Process this form' is ambiguous: could be edit (fill values) or extract (read fields). Agent should ask before assuming.",
       "expectations": [
@@ -1740,7 +1802,7 @@
       "id": "H-5",
       "category": "help-discovery",
       "path": "B",
-      "prompt": "I want a webhook to fire when a new version of an extractor is published. Which event type do I subscribe to?",
+      "prompt": "I want an Extend webhook to fire when a new version of an extractor is published. Which event type do I subscribe to?",
       "files": [],
       "expected_output": "Agent identifies the event type extractor.version.published (e.g. via `extend webhooks endpoints create --help`). Does not invent an event name.",
       "expectations": [
@@ -1757,17 +1819,8 @@
       "path": "B",
       "prompt": "I'm hand-editing the schema produced by `extend detect-form`. Which exact schema key do I set on a field to force a specific fill value instead of letting the model infer one? Show the exact key as it appears in the schema.",
       "files": [],
-      "expected_output": "Agent consults `extend detect-form --help` (or `extend edit --help`) and reports the exact key extend_edit:value. Does not answer with the bare key `value`, which is not the Extend schema annotation.",
+      "expected_output": "Agent reports the exact key extend_edit:value (from SKILL.md or `extend detect-form --help`). Does not answer with the bare key `value`, which is not the Extend schema annotation.",
       "expectations": [
-        {
-          "type": "extend_call",
-          "text": "agent consulted help rather than answering from memory",
-          "must_contain": [
-            {
-              "flag": "help"
-            }
-          ]
-        },
         {
           "type": "stable_answer",
           "text": "answer names the exact extend_edit:value schema key",
@@ -1938,7 +1991,7 @@
       "id": "S-11",
       "category": "single-command",
       "path": "B",
-      "prompt": "List my recent edit runs and tell me which ones failed.",
+      "prompt": "List my recent Extend edit runs and tell me which ones failed.",
       "files": [],
       "expected_output": "Agent runs `extend edit runs list` (optionally with --status FAILED) and names edr_demo_nda as the failed run. Does NOT claim edit runs can't be listed.",
       "expectations": [
@@ -2088,7 +2141,7 @@
       "id": "W-10",
       "category": "workflow",
       "path": "B",
-      "prompt": "Fill our saved 'W-9 (2024)' edit template for Acme Corp, TIN 12-3456789, and save the filled PDF to acme-w9.pdf. I don't have the template's ID handy.",
+      "prompt": "Fill our saved Extend 'W-9 (2024)' edit template for Acme Corp, TIN 12-3456789, and save the filled PDF to acme-w9.pdf. I don't have the template's ID handy.",
       "files": [],
       "expected_output": "Agent finds the template's ID with `extend edit templates list` (optionally --name-contains), then runs `extend edit --template edt_demo_w9` with the values in --instructions and --output-file acme-w9.pdf, without also passing an input file.",
       "expectations": [
@@ -2127,7 +2180,7 @@
         {
           "type": "judge",
           "text": "agent filled the template with the given values only",
-          "criterion": "The `extend edit --template` call supplies Acme Corp as the name and 12-3456789 as the TIN (in --instructions, or in a values or schema file the final message says it wrote), and the agent does not invent values for any other field."
+          "criterion": "The `extend edit --template` call supplies Acme Corp as the name and 12-3456789 as the TIN (in --instructions, or via a --schema file where the final message confirms Acme Corp and 12-3456789 were filled and any other field such as address was left blank), and the agent does not invent values for any other field."
         },
         {
           "type": "must_not_fabricate_ids",
@@ -2195,7 +2248,7 @@
       "id": "W-11",
       "category": "workflow",
       "path": "B",
-      "prompt": "Create an extractor named \"Acme invoices\" for invoices like invoice.pdf and invoice2.pdf. I don't have a schema for them. Then run it on invoice3.pdf and tell me the total.",
+      "prompt": "Create an Extend extractor named \"Acme invoices\" for invoices like invoice.pdf and invoice2.pdf. I don't have a schema for them. Then run it on invoice3.pdf and tell me the total.",
       "files": [
         "invoice.pdf",
         "invoice2.pdf",
@@ -2278,14 +2331,11 @@
       "expectations": [
         {
           "type": "extend_call",
-          "text": "agent ran extend verify on invoice.pdf",
+          "text": "agent ran extend verify on invoice.pdf (directly or via uploaded file ID)",
           "must_contain": [
             {
               "argv_prefix": [
                 "verify"
-              ],
-              "args": [
-                "invoice.pdf"
               ],
               "exit_code": 0
             }
@@ -2304,7 +2354,8 @@
           "type": "must_not_fabricate_ids",
           "text": "agent did not make up a verify run ID",
           "patterns": [
-            "vr_[a-zA-Z0-9_-]+"
+            "vr_[a-zA-Z0-9_-]+",
+            "file_[a-zA-Z0-9_-]+"
           ]
         }
       ]
@@ -2313,7 +2364,7 @@
       "id": "T+8",
       "category": "trigger-positive",
       "path": "A",
-      "prompt": "The bank statement in this folder looks off to me. Can you find out whether someone doctored it?",
+      "prompt": "The bank statement in this folder looks off to me. Use Extend to find out whether someone doctored it.",
       "files": [
         "statement.pdf"
       ],

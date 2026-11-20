@@ -329,10 +329,23 @@ func sampleExtractorConfig() any {
 	return map[string]any{
 		"name": "Q3 invoices",
 		"config": map[string]any{
-			"fields": []map[string]any{
-				{"name": "invoice_id", "type": "string"},
-				{"name": "total", "type": "number"},
-				{"name": "line_items", "type": "array"},
+			"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"invoice_id": map[string]any{"type": []string{"string", "null"}},
+					"total":      map[string]any{"type": []string{"number", "null"}},
+					"line_items": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"description": map[string]any{"type": []string{"string", "null"}},
+								"quantity":    map[string]any{"type": []string{"number", "null"}},
+								"amount":      map[string]any{"type": []string{"number", "null"}},
+							},
+						},
+					},
+				},
 			},
 		},
 	}

@@ -155,6 +155,9 @@ func describePredicate(p spec.ExtendCallPredicate) string {
 	if len(p.ArgvPrefix) > 0 {
 		parts = append(parts, "argv["+strings.Join(p.ArgvPrefix, " ")+"]")
 	}
+	for _, excl := range p.NotArgvPrefix {
+		parts = append(parts, "not_argv["+strings.Join(excl, " ")+"]")
+	}
 	if len(p.Args) > 0 {
 		parts = append(parts, "args["+strings.Join(p.Args, " ")+"]")
 	}
