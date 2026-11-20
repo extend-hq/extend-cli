@@ -13,8 +13,10 @@
 
 Integration tests are a separate module under `test/integration` (black-box:
 they build and exec the binary). They need `EXTEND_BASE_URL` and
-`EXTEND_API_KEY` and skip silently without them; run-creating ops that spend
-credits are gated behind `EXTEND_TEST_RUN_OPS=1`:
+`EXTEND_API_KEY` and skip silently without them; the workspaces tests also
+need `EXTEND_ORG_API_KEY`, an organization-level key from the same
+organization. Run-creating ops that spend credits are gated behind
+`EXTEND_TEST_RUN_OPS=1`:
 
     cd test/integration && go test ./...
 

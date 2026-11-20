@@ -3,7 +3,9 @@ name: integration
 # Integration tests cost real credits, so they only run on explicit
 # dispatch. The base URL and key flow in via repo secrets
 # (EXTEND_BASE_URL, EXTEND_API_KEY). If they are absent, the integration
-# tests skip themselves. The run_ops gate is a dispatch input so the
+# tests skip themselves. EXTEND_ORG_API_KEY is an organization-level key
+# from the same organization, for the tests that need one (workspaces);
+# they skip without it. The run_ops gate is a dispatch input so the
 # operator opts in per-run.
 on:
   workflow_dispatch:
@@ -21,6 +23,7 @@ jobs:
     env:
       EXTEND_BASE_URL: ${{ secrets.EXTEND_BASE_URL }}
       EXTEND_API_KEY: ${{ secrets.EXTEND_API_KEY }}
+      EXTEND_ORG_API_KEY: ${{ secrets.EXTEND_ORG_API_KEY }}
       EXTEND_TEST_RUN_OPS: ${{ inputs.run_ops && '1' || '' }}
     steps:
       - uses: actions/checkout@v6

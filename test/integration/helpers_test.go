@@ -205,6 +205,88 @@ func rememberCleanup(t *testing.T, env envSetup, op string, args ...string) {
 	})
 }
 
+// skipIfUnavailable skips the test when the CLI failed because the API
+// key's organization doesn't have a feature. marker is a fragment of the
+// API's (or CLI's) message for that case; any other failure is left for
+// the caller's requireOK to report.
+func skipIfUnavailable(t *testing.T, res extendResult, marker, feature string) {
+	t.Helper()
+	if res.ExitCode == 0 {
+		return
+	}
+	for _, line := range strings.Split(string(res.Stderr), "\n") {
+		if strings.Contains(line, marker) {
+			t.Skipf("%s is not available to this API key; skipping (%s)", feature, strings.TrimSpace(line))
+		}
+	}
+}
+
+// listItems decodes the items of a single-page `list -o json` response,
+// which is the API's {"data": [...]} envelope.
+func listItems(t *testing.T, res extendResult) []map[string]any {
+	t.Helper()
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(res.Stdout, &page); err != nil {
+		t.Fatalf("decode list: %v\nstdout: %s", err, res.Stdout)
+	}
+	return page.Data
+}
+
+// writeTempFile writes content to name in a per-test temp directory and
+// returns its path.
+func writeTempFile(t *testing.T, name string, content []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
+}
+
+// testPDF returns a valid one-page PDF whose text is lines.
+func testPDF(lines ...string) []byte {
+	esc := strings.NewReplacer(`\`, `\\`, "(", `\(`, ")", `\)`)
+	content := "BT /F1 12 Tf 16 TL 72 740 Td"
+	for _, l := range lines {
+		content += " (" + esc.Replace(l) + ") Tj T*"
+	}
+	content += " ET"
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content),
+	}
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objs))
+	for i, o := range objs {
+		offsets[i] = b.Len()
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, o)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objs)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objs)+1, xref)
+	return []byte(b.String())
+}
+
+// invoicePDF is a small invoice for tests that need a PDF with fields.
+func invoicePDF() []byte {
+	return testPDF(
+		"Acme Industries - Invoice INV-1024",
+		"Bill to: Wile E. Coyote",
+		"Date: 2026-04-15",
+		"2 x Widget at 19.99 = 39.98",
+		"Total due: 39.98 USD",
+	)
+}
+
 // once is exposed as a small convenience for any test that needs lazy init.
 // Currently unused; kept here so tests can reach for it without redefining
 // the same pattern repeatedly.

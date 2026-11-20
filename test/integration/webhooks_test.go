@@ -107,6 +107,32 @@ func TestWebhookEndpoint_CreateUpdateDelete(t *testing.T) {
 	}
 }
 
+// TestWebhookEndpoint_CreateWithoutGlobalEvents creates an endpoint with no
+// --events, the shape used for an endpoint that only receives
+// subscription events such as workflow_run.*.
+func TestWebhookEndpoint_CreateWithoutGlobalEvents(t *testing.T) {
+	env := requireEnv(t)
+
+	res := runExtend(t, env,
+		"webhooks", "endpoints", "create",
+		"--url", "https://example.com/hook",
+		"--name", itestName(t),
+		"-o", "json",
+	)
+	res.requireOK(t, "webhooks", "endpoints", "create")
+	var created struct {
+		ID            string   `json:"id"`
+		EnabledEvents []string `json:"enabledEvents"`
+	}
+	res.decodeJSON(t, &created)
+	rememberCleanup(t, env, "delete webhook endpoint",
+		"webhooks", "endpoints", "delete", created.ID, "-y")
+
+	if len(created.EnabledEvents) != 0 {
+		t.Errorf("enabledEvents = %v, want none", created.EnabledEvents)
+	}
+}
+
 // TestWebhookSubscription_CreateUpdateDelete verifies the full lifecycle and
 // the corrected wire shape (server requires `webhookEndpointId` and
 // `resourceType`; the CLI auto-infers resourceType from the resource ID
