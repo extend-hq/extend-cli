@@ -34,6 +34,7 @@ func (s runsGroupSpec) listDoc(app *App) *CommandDoc {
 		pageToken string
 		sortBy    string
 		sortDir   string
+		riskLevel string
 	)
 	batchExample := "bpr_xK9mLPq"
 	if s.kind == extendx.KindParse {
@@ -55,10 +56,16 @@ func (s runsGroupSpec) listDoc(app *App) *CommandDoc {
 			Cmd:   fmt.Sprintf("extend %s --using %s", s.path("runs list"), s.usingExample),
 		})
 	}
-	if s.sourceFilters {
+	if s.sourceFilters && s.listSources == "" {
 		examples = append(examples, Example{
 			Label: "Runs spawned by a workflow",
 			Cmd:   fmt.Sprintf("extend %s --source WORKFLOW_RUN --source-id workflow_run_x", s.path("runs list")),
+		})
+	}
+	if s.riskLevels {
+		examples = append(examples, Example{
+			Label: "High-risk results",
+			Cmd:   fmt.Sprintf("extend %s --risk-level HIGH", s.path("runs list")),
 		})
 	}
 	if s.sortable {
@@ -76,6 +83,9 @@ func (s runsGroupSpec) listDoc(app *App) *CommandDoc {
 	if s.noBatches {
 		triggers = append(triggers, fmt.Sprintf("find recent %s runs for a file", s.name()))
 		filters = "status, source, and file\nname"
+		if s.riskLevels {
+			filters = "status, risk level, source,\nand file name"
+		}
 	} else {
 		triggers = append(triggers, fmt.Sprintf("see %s runs in a batch", s.name()))
 	}
@@ -110,6 +120,7 @@ run-list endpoint.
 				pageToken: pageToken,
 				sortBy:    sortBy,
 				sortDir:   sortDir,
+				riskLevel: riskLevel,
 			})
 			if err != nil {
 				return err
@@ -118,7 +129,11 @@ run-list endpoint.
 			if column == "" {
 				column = "processor"
 			}
-			return renderListForCmd(cmd, app, pages, []string{"id", "status", column, "created"}, rows, "No runs.")
+			headers := []string{"id", "status", column, "created"}
+			if s.riskLevels {
+				headers = []string{"id", "status", "risk", column, "created"}
+			}
+			return renderListForCmd(cmd, app, pages, headers, rows, "No runs.")
 		},
 		Configure: func(cmd *cobra.Command) {
 			statusHelp := "Filter by status: PENDING|PROCESSING|PROCESSED|FAILED|CANCELLED"
@@ -138,12 +153,22 @@ run-list endpoint.
 				batchHelp := "Filter by batch run ID (" + batchExample[:strings.Index(batchExample, "_")+1] + "...)"
 				cmd.Flags().StringVar(&batchID, "batch", "", batchHelp)
 			}
-			switch {
-			case s.sourceFilters:
-				cmd.Flags().StringVar(&source, "source", "", "Filter by run source: API|STUDIO|WORKFLOW_RUN|ADMIN|...")
-				cmd.Flags().StringVar(&sourceID, "source-id", "", "Filter by source resource ID, e.g. workflow_run_xxx")
-			case s.listSources != "":
-				cmd.Flags().StringVar(&source, "source", "", "Filter by run source: "+s.listSources)
+			if s.sourceFilters || s.listSources != "" {
+				sources := s.listSources
+				if sources == "" {
+					sources = "API|STUDIO|WORKFLOW_RUN|ADMIN|..."
+				}
+				cmd.Flags().StringVar(&source, "source", "", "Filter by run source: "+sources)
+			}
+			if s.sourceFilters {
+				sourceIDHelp := "Filter by source resource ID, e.g. workflow_run_xxx"
+				if s.listSources != "" {
+					sourceIDHelp = "Filter by source ID: for API runs, the ID of the request that created the run"
+				}
+				cmd.Flags().StringVar(&sourceID, "source-id", "", sourceIDHelp)
+			}
+			if s.riskLevels {
+				cmd.Flags().StringVar(&riskLevel, "risk-level", "", "Filter to processed runs with this risk level: LOW|MEDIUM|HIGH")
 			}
 			cmd.Flags().StringVar(&fileName, "file-name", "", "Filter to runs whose file name contains this substring")
 			cmd.Flags().IntVar(&limit, "limit", 20, "Page size used in each API request (advanced)")
@@ -171,6 +196,7 @@ type runsListParams struct {
 	pageToken string
 	sortBy    string
 	sortDir   string
+	riskLevel string
 }
 
 func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.RunKind, p runsListParams) ([][]string, []any, error) {
@@ -197,6 +223,8 @@ func collectListRows(ctx context.Context, cli *sdkclient.Client, kind extendx.Ru
 			pageRows, page, nextToken, err = listWorkflowPage(ctx, cli, p, pageToken)
 		case extendx.KindEdit:
 			pageRows, page, nextToken, err = listEditPage(ctx, cli, p, pageToken)
+		case extendx.KindVerify:
+			pageRows, page, nextToken, err = listVerifyPage(ctx, cli, p, pageToken)
 		}
 		if err != nil {
 			return nil, nil, err
@@ -469,6 +497,49 @@ func listEditPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, 
 			name = r.File.Name
 		}
 		rows = append(rows, []string{r.ID, string(r.Status), name, relTime(r.CreatedAt)})
+	}
+	return rows, resp, deref(resp.NextPageToken), nil
+}
+
+func listVerifyPage(ctx context.Context, cli *sdkclient.Client, p runsListParams, pageToken string) ([][]string, any, string, error) {
+	common, err := parseRunsListCommon(p, pageToken)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	req := &extend.VerifyRunsListRequest{
+		FileNameContains: common.FileNameContains,
+		SortBy:           common.SortBy, SortDir: common.SortDir,
+		MaxPageSize: common.MaxPageSize, NextPageToken: common.NextPageToken,
+	}
+	if p.status != "" {
+		s := extend.VerifyRunStatus(p.status)
+		req.Status = &s
+	}
+	if p.source != "" {
+		s := extend.VerifyRunsListRequestSource(p.source)
+		req.Source = &s
+	}
+	if p.sourceID != "" {
+		req.SourceID = extend.String(p.sourceID)
+	}
+	if p.riskLevel != "" {
+		r := extend.VerifyRiskLevel(strings.ToUpper(p.riskLevel))
+		req.RiskLevel = &r
+	}
+	resp, err := cli.VerifyRuns.List(ctx, req)
+	if err != nil {
+		return nil, nil, "", verifyNotEnabled(err)
+	}
+	rows := make([][]string, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		risk, name := "", ""
+		if r.RiskLevel != nil {
+			risk = string(*r.RiskLevel)
+		}
+		if r.File != nil {
+			name = r.File.Name
+		}
+		rows = append(rows, []string{r.ID, string(r.Status), risk, name, relTime(r.CreatedAt)})
 	}
 	return rows, resp, deref(resp.NextPageToken), nil
 }

@@ -217,11 +217,11 @@ func renderOutputTopicBody(root *CommandDoc) string {
 func renderLifecycleTopicBody(root *CommandDoc) string {
 	var b strings.Builder
 	b.WriteString("Run lifecycle\n\n")
-	b.WriteString("Most action commands (extract, classify, split, parse, edit) wait by\n")
-	b.WriteString("default for the run to reach a terminal state, then print the result.\n")
-	b.WriteString("Pass --async to return the run ID immediately. Workflow runs (extend\n")
-	b.WriteString("workflows run) are different: they return immediately by default; pass\n")
-	b.WriteString("--wait to block.\n\n")
+	b.WriteString("Most action commands (extract, classify, split, parse, edit, verify)\n")
+	b.WriteString("wait by default for the run to reach a terminal state, then print the\n")
+	b.WriteString("result. Pass --wait=false to return the run immediately. Workflow runs\n")
+	b.WriteString("(extend workflows run) are different: they return immediately by\n")
+	b.WriteString("default; pass --wait to block.\n\n")
 	b.WriteString("Polling profiles:\n\n")
 	for _, spec := range extendx.WaitProfileSpecs() {
 		fmt.Fprintf(&b, "  %-6s  %v -> %v\n", spec.Profile, spec.Interval, spec.MaxInterval)
@@ -268,6 +268,9 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 	for _, r := range rows {
 		fmt.Fprintf(&b, "  %-*s  %-7s  %-7s  %s\n", pathLen, r.path, r.def, r.profile, r.fail)
 	}
+	b.WriteString("\n  A verify run that finishes exits 0 whatever its risk; with --fail-on\n")
+	b.WriteString("  medium|high, extend verify and verify runs watch also exit non-zero\n")
+	b.WriteString("  when the risk is at or above that level.\n")
 
 	b.WriteString("\nTerminal states:\n\n")
 	for _, s := range extendx.TerminalSuccessStates {
@@ -290,7 +293,7 @@ func renderLifecycleTopicBody(root *CommandDoc) string {
 
 	b.WriteString("\nWatching:\n\n")
 	b.WriteString("  Use the typed watch commands: `extend <verb> runs watch <id>` for a\n")
-	b.WriteString("  run (extract, parse, classify, split, edit, workflows) and\n")
+	b.WriteString("  run (extract, parse, classify, split, edit, verify, workflows) and\n")
 	b.WriteString("  `extend <verb> batches watch <id>` for a processor or parse batch.\n")
 	b.WriteString("  Both accept --exit-status, which propagates the terminal status to\n")
 	b.WriteString("  the exit code:\n\n")

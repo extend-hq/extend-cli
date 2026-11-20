@@ -120,6 +120,8 @@ func main() {
 		emitUnknown(args)
 	case match(args, "detect-form"):
 		emitDetectForm(args, mode)
+	case match(args, "verify"):
+		emitVerify(args, mode)
 	case match(args, "extract", "batch"):
 		emitExtractBatch(args, mode)
 	case match(args, "extract"):
@@ -203,7 +205,7 @@ func match(args []string, verbs ...string) bool {
 
 // runVerbGroups are the command groups that own a typed `runs`
 // subgroup; extract/parse/classify/split also own `batches`.
-var runVerbGroups = []string{"extract", "parse", "classify", "split", "edit", "detect-form", "workflows"}
+var runVerbGroups = []string{"extract", "parse", "classify", "split", "edit", "detect-form", "verify", "workflows"}
 
 // matchTypedRuns reports whether argv is `<verb> runs <action> ...` for
 // one of the typed run groups.

@@ -108,7 +108,7 @@ respective env vars.`,
 			case "run":
 				return errors.New(`unknown command "run" for "extend": workflow runs moved; use 'extend workflows run'`)
 			case "runs":
-				return errors.New(`unknown command "runs" for "extend": run inspection is typed per verb; use 'extend <extract|parse|classify|split|edit|workflows> runs ...'`)
+				return errors.New(`unknown command "runs" for "extend": run inspection is typed per verb; use 'extend <extract|parse|classify|split|edit|verify|workflows> runs ...'`)
 			case "batches":
 				return errors.New(`unknown command "batches" for "extend": batch status is typed per verb; use 'extend <extract|parse|classify|split> batches ...'`)
 			}
@@ -122,6 +122,7 @@ respective env vars.`,
 			newSplitDoc(app),
 			newEditDoc(app),
 			newDetectFormDoc(app),
+			newVerifyDoc(app),
 			// Inspection
 			newFilesDoc(app),
 			newDownloadDoc(app),

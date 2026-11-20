@@ -72,7 +72,11 @@ type runsGroupSpec struct {
 	watchFailures []extendx.RunStatus
 	// watchGotchas are appended to the generated watch gotchas to
 	// document type-specific semantics (review pauses, non-cancellability).
-	watchGotchas []string
+	watchGotchas  []string
+	deleteGotchas []string
+	// riskLevels: verify runs only: --risk-level and a risk column on
+	// list, --fail-on on watch.
+	riskLevels bool
 }
 
 func extractRunsSpec() runsGroupSpec {
@@ -169,6 +173,34 @@ func detectFormRunsSpec() runsGroupSpec {
 		watchGotchas: []string{
 			"Form detection runs cannot be cancelled; a watched run only ends in PROCESSED or FAILED.",
 		},
+	}
+}
+
+func verifyRunsSpec() runsGroupSpec {
+	return runsGroupSpec{
+		kind:          extendx.KindVerify,
+		exampleID:     "vr_xK9mLPq",
+		cancellable:   true,
+		listable:      true,
+		deletable:     true,
+		listColumn:    "file",
+		noBatches:     true,
+		listStatuses:  "PROCESSING|PROCESSED|FAILED|CANCELLED",
+		listSources:   "API|STUDIO",
+		sourceFilters: true,
+		sortable:      true,
+		riskLevels:    true,
+		listGotchas: []string{
+			"--file-name also takes a run ID (vr_...), matching that run, or a file ID (file_...), matching the runs on that file.",
+			"List items leave out the signals; use 'extend verify runs get <id>' for those.",
+		},
+		cancelGotchas: []string{
+			"Only PROCESSING verify runs can be cancelled; cancelling a finished run changes nothing.",
+		},
+		deleteGotchas: []string{
+			"A verify run that's still processing is cancelled first; its input file is kept.",
+		},
+		watchFailures: []extendx.RunStatus{extendx.StatusFailed, extendx.StatusCancelled},
 	}
 }
 
@@ -277,6 +309,10 @@ instead of the inline payload (useful for large documents).`
 		gotchas = append(gotchas,
 			"A zero data retention run (parse --zero-retention) returns its output once: the first get after it finishes, within 60 minutes; later gets show an empty output and dataRetention.status purged. --response-type url doesn't work on these runs.")
 	}
+	out := OutputSpec{TTY: OutputJSON, Pipe: OutputJSON}
+	if s.kind == extendx.KindVerify {
+		out = OutputSpec{TTY: OutputPretty, Pipe: OutputPretty}
+	}
 	return &CommandDoc{
 		Use:     "get <run-id>",
 		Summary: fmt.Sprintf("Fetch a single %s run by ID", s.name()),
@@ -293,7 +329,7 @@ run is currently in. To wait for a terminal state, use 'extend %s'.`,
 		Examples: examples,
 		Gotchas:  gotchas,
 		SeeAlso:  s.seeAlso("get"),
-		Output:   OutputSpec{TTY: OutputJSON, Pipe: OutputJSON},
+		Output:   out,
 		Args:     cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTypedRunsGet(cmd.Context(), app, s.kind, args[0], responseType)
@@ -310,21 +346,19 @@ func (s runsGroupSpec) watchDoc(app *App) *CommandDoc {
 	var (
 		timeout    time.Duration
 		exitStatus bool
+		failOn     string
 	)
 	gotchas := append([]string{
 		"Without --exit-status, the command exits 0 on any successful poll regardless of run status.",
 	}, s.watchGotchas...)
-	return &CommandDoc{
-		Use:     "watch <run-id>",
-		Summary: fmt.Sprintf("Poll %s %s run until it reaches a terminal state", articleFor(s.name()), s.name()),
-		Triggers: []string{
-			fmt.Sprintf("watch %s %s run until it finishes", articleFor(s.name()), s.name()),
-			fmt.Sprintf("poll %s %s run for terminal state", articleFor(s.name()), s.name()),
-			fmt.Sprintf("follow %s run progress live", s.name()),
-		},
-		WhenToUse: fmt.Sprintf(`Use to block until %s %s run reaches a terminal state. Combine with
---exit-status to gate downstream scripts on success.`, articleFor(s.name()), s.name()),
-		Details: fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
+	examples := []Example{
+		{Label: "Basic", Cmd: fmt.Sprintf("extend %s %s", s.path("runs watch"), s.exampleID)},
+		{Label: "Custom timeout", Cmd: fmt.Sprintf("extend %s %s --timeout 5m", s.path("runs watch"), s.exampleID)},
+		{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --exit-status && deploy.sh", s.path("runs watch"), s.exampleID)},
+	}
+	whenToUse := fmt.Sprintf(`Use to block until %s %s run reaches a terminal state. Combine with
+--exit-status to gate downstream scripts on success.`, articleFor(s.name()), s.name())
+	details := fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
 status transitions. The final result is rendered using the same format
 as the originating command.
 
@@ -333,24 +367,66 @@ the run terminates in %s, so:
 
     extend %s <id> --exit-status && downstream-script.sh
 
-works as expected.`, statusListProse(s.watchFailures), s.path("runs watch")),
-		Examples: []Example{
-			{Label: "Basic", Cmd: fmt.Sprintf("extend %s %s", s.path("runs watch"), s.exampleID)},
-			{Label: "Custom timeout", Cmd: fmt.Sprintf("extend %s %s --timeout 5m", s.path("runs watch"), s.exampleID)},
-			{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --exit-status && deploy.sh", s.path("runs watch"), s.exampleID)},
+works as expected.`, statusListProse(s.watchFailures), s.path("runs watch"))
+	if s.riskLevels {
+		// A finished run isn't a document that passed, so the gate that
+		// matters here is the risk, not the run status.
+		whenToUse = fmt.Sprintf(`Use to block until %s %s run reaches a terminal state and print its
+result. To gate a script on the result, pass --fail-on medium|high: a run
+that finishes exits 0 whatever risk it found.`, articleFor(s.name()), s.name())
+		details = fmt.Sprintf(`Block until the run reaches a terminal state, showing a spinner with
+status transitions. The final result is rendered using the same format
+as the originating command.
+
+Use --fail-on for shell composition: the command exits non-zero when the
+risk is at or above that level, or when the run has no result to check
+(it ended %s), so:
+
+    extend %s <id> --fail-on high && downstream-script.sh
+
+runs the script only for a document that passed. --exit-status alone
+doesn't look at the risk: a HIGH-risk result is a finished run, and
+passes it.`, statusListProse(s.watchFailures), s.path("runs watch"))
+		gotchas = append([]string{
+			"--exit-status doesn't look at the risk; a HIGH-risk result exits 0 with it. Use --fail-on to act on the risk.",
+			"Without --exit-status or --fail-on, the command exits 0 on any successful poll regardless of run status.",
+		}, s.watchGotchas...)
+		examples = []Example{
+			examples[0],
+			{Label: "Gate downstream script", Cmd: fmt.Sprintf("extend %s %s --fail-on high && deploy.sh", s.path("runs watch"), s.exampleID)},
+			examples[1],
+		}
+	}
+	return &CommandDoc{
+		Use:     "watch <run-id>",
+		Summary: fmt.Sprintf("Poll %s %s run until it reaches a terminal state", articleFor(s.name()), s.name()),
+		Triggers: []string{
+			fmt.Sprintf("watch %s %s run until it finishes", articleFor(s.name()), s.name()),
+			fmt.Sprintf("poll %s %s run for terminal state", articleFor(s.name()), s.name()),
+			fmt.Sprintf("follow %s run progress live", s.name()),
 		},
-		Gotchas:  gotchas,
-		SeeAlso:  s.seeAlso("watch"),
-		Output:   OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
-		Wait:     &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
-		Failures: s.watchFailures,
-		Args:     cobra.ExactArgs(1),
+		WhenToUse: whenToUse,
+		Details:   details,
+		Examples:  examples,
+		Gotchas:   gotchas,
+		SeeAlso:   s.seeAlso("watch"),
+		Output:    OutputSpec{TTY: OutputPretty, Pipe: OutputJSON},
+		Wait:      &WaitSpec{Profile: extendx.ProfileShort, DefaultsToWait: true},
+		Failures:  s.watchFailures,
+		Args:      cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTypedRunsWatch(cmd.Context(), app, s, args[0], timeout, exitStatus)
+			gate, err := parseFailOn(failOn)
+			if err != nil {
+				return err
+			}
+			return runTypedRunsWatch(cmd.Context(), app, s, args[0], timeout, exitStatus, gate)
 		},
 		Configure: func(cmd *cobra.Command) {
 			cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum total time to wait for the run to reach a terminal state (not a per-HTTP-request timeout; see --http-timeout)")
 			cmd.Flags().BoolVar(&exitStatus, "exit-status", false, "Exit non-zero when the run terminates in "+statusListProse(s.watchFailures))
+			if s.riskLevels {
+				cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit non-zero when the run's risk is at or above this level: medium or high")
+			}
 		},
 	}
 }
@@ -415,10 +491,10 @@ clean up runs from the workspace inventory; it does not affect billing.`,
 			{Label: "With prompt", Cmd: fmt.Sprintf("extend %s %s", s.path("runs delete"), s.exampleID)},
 			{Label: "Skip confirmation", Cmd: fmt.Sprintf("extend %s %s --yes", s.path("runs delete"), s.exampleID)},
 		},
-		Gotchas: []string{
+		Gotchas: append([]string{
 			"Deletion is permanent; the record cannot be recovered.",
 			"Deletion does not affect billing or already-emitted webhook events.",
-		},
+		}, s.deleteGotchas...),
 		SeeAlso: s.seeAlso("delete"),
 		Output:  OutputSpec{TTY: OutputNone, Pipe: OutputNone},
 		Args:    cobra.ExactArgs(1),
@@ -627,12 +703,20 @@ func runTypedRunsGet(ctx context.Context, app *App, kind extendx.RunKind, id, re
 			return err
 		}
 		return renderWithDefault(app, run, output.FormatJSON)
+	case extendx.KindVerify:
+		run, err := cli.VerifyRuns.Retrieve(ctx, id, &extend.VerifyRunsRetrieveRequest{})
+		if err != nil {
+			return verifyNotEnabled(err)
+		}
+		return renderVerifyResult(app, run)
 	default:
 		return fmt.Errorf("unsupported run kind %s", kind)
 	}
 }
 
-func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string, timeout time.Duration, exitStatus bool) error {
+// runTypedRunsWatch polls a run to a terminal state and renders it.
+// failOn applies to verify runs only ("" for the others).
+func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string, timeout time.Duration, exitStatus bool, failOn extend.VerifyRiskLevel) error {
 	if err := extendx.ValidateRunID(s.kind, id, "watch"); err != nil {
 		return err
 	}
@@ -649,7 +733,7 @@ func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string
 	watchCmd := "extend " + s.path("runs watch")
 
 	var status extendx.RunStatus
-	var renderErr error
+	var renderErr, gateErr error
 	switch s.kind {
 	case extendx.KindExtract:
 		final, err := waitForExtractRun(ctx, cli, id, opts, func(r *extend.ExtractRun) {
@@ -721,6 +805,17 @@ func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string
 		}
 		status = extendx.RunStatus(final.Status)
 		renderErr = renderWithDefault(app, final, output.FormatJSON)
+	case extendx.KindVerify:
+		final, err := waitForVerifyRun(ctx, cli, id, opts, func(r *extend.VerifyRun) {
+			sp.Update(fmt.Sprintf("Run %s: %s", r.ID, r.Status))
+		})
+		sp.Stop("")
+		if err != nil {
+			return formatWatchWaitError(verifyNotEnabled(err), id, watchCmd)
+		}
+		status = extendx.RunStatus(final.Status)
+		renderErr = renderVerifyResult(app, final)
+		gateErr = riskGate(final, failOn)
 	default:
 		sp.Stop("")
 		return fmt.Errorf("unsupported run kind %s", s.kind)
@@ -739,7 +834,7 @@ func runTypedRunsWatch(ctx context.Context, app *App, s runsGroupSpec, id string
 			return fmt.Errorf("run %s was rejected", id)
 		}
 	}
-	return nil
+	return gateErr
 }
 
 // relTime renders a timestamp as a human-readable relative duration
@@ -808,6 +903,9 @@ func deleteRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, i
 	case extendx.KindWorkflow:
 		_, err := c.WorkflowRuns.Delete(ctx, id, &extend.WorkflowRunsDeleteRequest{})
 		return err
+	case extendx.KindVerify:
+		_, err := c.VerifyRuns.Delete(ctx, id, &extend.VerifyRunsDeleteRequest{})
+		return verifyNotEnabled(err)
 	default:
 		return fmt.Errorf("unsupported run kind: %s", kind)
 	}
@@ -815,27 +913,32 @@ func deleteRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, i
 
 // cancelRun calls the per-kind cancel endpoint. Only kinds with a
 // cancel endpoint have a cancel command, so edit and detect-form never
-// reach this switch.
-func cancelRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) error {
+// reach this switch. finished is the run's status when it had already
+// finished, which verify reports instead of an error; "" otherwise.
+func cancelRun(ctx context.Context, c *sdkclient.Client, kind extendx.RunKind, id string) (finished extendx.RunStatus, err error) {
 	switch kind {
 	case extendx.KindExtract:
-		_, err := c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
-		return err
+		_, err = c.ExtractRuns.Cancel(ctx, id, &extend.ExtractRunsCancelRequest{})
 	case extendx.KindParse:
-		_, err := c.ParseRuns.Cancel(ctx, id, &extend.ParseRunsCancelRequest{})
-		return err
+		_, err = c.ParseRuns.Cancel(ctx, id, &extend.ParseRunsCancelRequest{})
 	case extendx.KindClassify:
-		_, err := c.ClassifyRuns.Cancel(ctx, id, &extend.ClassifyRunsCancelRequest{})
-		return err
+		_, err = c.ClassifyRuns.Cancel(ctx, id, &extend.ClassifyRunsCancelRequest{})
 	case extendx.KindSplit:
-		_, err := c.SplitRuns.Cancel(ctx, id, &extend.SplitRunsCancelRequest{})
-		return err
+		_, err = c.SplitRuns.Cancel(ctx, id, &extend.SplitRunsCancelRequest{})
 	case extendx.KindWorkflow:
-		_, err := c.WorkflowRuns.Cancel(ctx, id, &extend.WorkflowRunsCancelRequest{})
-		return err
+		_, err = c.WorkflowRuns.Cancel(ctx, id, &extend.WorkflowRunsCancelRequest{})
+	case extendx.KindVerify:
+		run, cerr := c.VerifyRuns.Cancel(ctx, id, &extend.VerifyRunsCancelRequest{})
+		if cerr != nil {
+			return "", verifyNotEnabled(cerr)
+		}
+		if st := extendx.RunStatus(run.Status); st == extendx.StatusProcessed || st == extendx.StatusFailed {
+			return st, nil
+		}
 	default:
-		return fmt.Errorf("unsupported run kind: %s", kind)
+		err = fmt.Errorf("unsupported run kind: %s", kind)
 	}
+	return "", err
 }
 
 func runTypedRunsCancel(ctx context.Context, app *App, kind extendx.RunKind, id string, yes bool) error {
@@ -861,9 +964,15 @@ func runTypedRunsCancel(ctx context.Context, app *App, kind extendx.RunKind, id 
 		}
 	}
 
-	if err := cancelRun(ctx, cli, kind, id); err != nil {
+	finished, err := cancelRun(ctx, cli, kind, id)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(app.IO.ErrOut, "%s Cancelled %s\n", paletteFor(app.IO).Green("✓"), id)
+	pal := paletteFor(app.IO)
+	if finished != "" {
+		fmt.Fprintf(app.IO.ErrOut, "%s %s had already finished (%s); nothing to cancel\n", pal.Dim("○"), id, finished)
+		return nil
+	}
+	fmt.Fprintf(app.IO.ErrOut, "%s Cancelled %s\n", pal.Green("✓"), id)
 	return nil
 }
